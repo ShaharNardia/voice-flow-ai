@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "908142505254",
+    "project_id": "voice-flow-a-i-h66sff",
+    "storage_bucket": "voice-flow-a-i-h66sff.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:908142505254:android:0a63e9ea9cd4543e4e25e7",
+        "android_client_info": {
+          "package_name": "com.sovanza.terracekitchen"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDnZl9f_0PHQsc2o2k0th6945o74D-iQAw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
