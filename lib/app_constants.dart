@@ -1,7 +1,25 @@
-import 'package:flutter/material.dart';
-import 'flutter_flow/flutter_flow_util.dart';
-
 abstract class FFAppConstants {
-  static const String helpLineLink =
-      'https://heliowicttor.app.n8n.cloud/webhook/9f03b4f3-7800-4b1b-84a4-8d52cc6bd1b8/call/';
+  static const String cloudFunctionsBaseUrl =
+      'https://us-central1-voice-flow-a-i-h66sff.cloudfunctions.net';
+
+  static const String assignAssistantEndpoint =
+      '$cloudFunctionsBaseUrl/assignAssistant';
+
+  static const String createReservationEndpoint =
+      '$cloudFunctionsBaseUrl/createReservation';
+
+  static const String endOfCallLogEndpoint =
+      '$cloudFunctionsBaseUrl/endOfCallLog';
+
+  static const String getLeadDetailsEndpoint =
+      '$cloudFunctionsBaseUrl/getLeadDetails';
+
+  static const String getPhoneNumberFromJobEndpoint =
+      '$cloudFunctionsBaseUrl/getPhoneNumberFromJob';
+
+  static const String outboundLeadTestEndpoint =
+      '$cloudFunctionsBaseUrl/outboundLeadTest';
+
+  static const String transferCallEndpoint =
+      '$cloudFunctionsBaseUrl/transferCall';
 }

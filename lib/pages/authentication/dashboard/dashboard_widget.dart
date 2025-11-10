@@ -299,18 +299,20 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                 FutureBuilder<
                                                                     int>(
                                                                   future:
-                                                                      queryCallRecordCount(
-                                                                    queryBuilder: (callRecord) =>
-                                                                        callRecord
-                                                                            .where(
-                                                                              'company',
-                                                                              isEqualTo: currentUserDocument?.company?.id,
+                                                                      currentUserDocument?.company != null
+                                                                          ? queryCallRecordCount(
+                                                                              queryBuilder: (callRecord) =>
+                                                                                  callRecord
+                                                                                      .where(
+                                                                                        'company',
+                                                                                        isEqualTo: currentUserDocument?.company?.id,
+                                                                                      )
+                                                                                      .where(
+                                                                                        'callType',
+                                                                                        isNotEqualTo: 'transfer',
+                                                                                      ),
                                                                             )
-                                                                            .where(
-                                                                              'callType',
-                                                                              isNotEqualTo: 'transfer',
-                                                                            ),
-                                                                  ),
+                                                                          : Future.value(0),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
@@ -437,22 +439,24 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                 FutureBuilder<
                                                                     int>(
                                                                   future:
-                                                                      queryCallRecordCount(
-                                                                    queryBuilder: (callRecord) =>
-                                                                        callRecord
-                                                                            .where(
-                                                                              'company',
-                                                                              isEqualTo: currentUserDocument?.company?.id,
+                                                                      currentUserDocument?.company != null
+                                                                          ? queryCallRecordCount(
+                                                                              queryBuilder: (callRecord) =>
+                                                                                  callRecord
+                                                                                      .where(
+                                                                                        'company',
+                                                                                        isEqualTo: currentUserDocument?.company?.id,
+                                                                                      )
+                                                                                      .where(
+                                                                                        'success',
+                                                                                        isEqualTo: true,
+                                                                                      )
+                                                                                      .where(
+                                                                                        'callType',
+                                                                                        isNotEqualTo: 'transfer',
+                                                                                      ),
                                                                             )
-                                                                            .where(
-                                                                              'success',
-                                                                              isEqualTo: true,
-                                                                            )
-                                                                            .where(
-                                                                              'callType',
-                                                                              isNotEqualTo: 'transfer',
-                                                                            ),
-                                                                  ),
+                                                                          : Future.value(0),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
@@ -579,22 +583,24 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                 FutureBuilder<
                                                                     int>(
                                                                   future:
-                                                                      queryCallRecordCount(
-                                                                    queryBuilder: (callRecord) =>
-                                                                        callRecord
-                                                                            .where(
-                                                                              'company',
-                                                                              isEqualTo: currentUserDocument?.company?.id,
+                                                                      currentUserDocument?.company != null
+                                                                          ? queryCallRecordCount(
+                                                                              queryBuilder: (callRecord) =>
+                                                                                  callRecord
+                                                                                      .where(
+                                                                                        'company',
+                                                                                        isEqualTo: currentUserDocument?.company?.id,
+                                                                                      )
+                                                                                      .where(
+                                                                                        'success',
+                                                                                        isEqualTo: false,
+                                                                                      )
+                                                                                      .where(
+                                                                                        'callType',
+                                                                                        isNotEqualTo: 'transfer',
+                                                                                      ),
                                                                             )
-                                                                            .where(
-                                                                              'success',
-                                                                              isEqualTo: false,
-                                                                            )
-                                                                            .where(
-                                                                              'callType',
-                                                                              isNotEqualTo: 'transfer',
-                                                                            ),
-                                                                  ),
+                                                                          : Future.value(0),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
@@ -657,27 +663,55 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                 Expanded(
                                                   child: StreamBuilder<
                                                       List<CallRecord>>(
-                                                    stream: queryCallRecord(
-                                                      queryBuilder:
-                                                          (callRecord) =>
-                                                              callRecord
-                                                                  .where(
-                                                                    'company',
-                                                                    isEqualTo:
-                                                                        currentUserDocument
-                                                                            ?.company
-                                                                            ?.id,
-                                                                  )
-                                                                  .orderBy(
-                                                                      'dateTime',
-                                                                      descending:
-                                                                          true),
-                                                      limit: 10,
-                                                    ),
+                                                    stream: currentUserDocument?.company != null
+                                                        ? queryCallRecord(
+                                                            queryBuilder:
+                                                                (callRecord) =>
+                                                                    callRecord
+                                                                        .where(
+                                                                          'company',
+                                                                          isEqualTo:
+                                                                              currentUserDocument
+                                                                                  ?.company
+                                                                                  ?.id,
+                                                                        )
+                                                                        .orderBy(
+                                                                            'dateTime',
+                                                                            descending:
+                                                                                true),
+                                                            limit: 10,
+                                                          )
+                                                        : const Stream.empty(),
                                                     builder:
                                                         (context, snapshot) {
                                                       // Customize what your widget looks like when it's loading.
-                                                      if (!snapshot.hasData) {
+                                                      if (snapshot.hasError) {
+                                                        return Center(
+                                                          child: Column(
+                                                            mainAxisAlignment: MainAxisAlignment.center,
+                                                            children: [
+                                                              Icon(
+                                                                Icons.error_outline,
+                                                                size: 50.0,
+                                                                color: FlutterFlowTheme.of(context).error,
+                                                              ),
+                                                              SizedBox(height: 16.0),
+                                                              Text(
+                                                                'Error loading call logs',
+                                                                style: FlutterFlowTheme.of(context).bodyMedium,
+                                                              ),
+                                                              SizedBox(height: 8.0),
+                                                              Text(
+                                                                snapshot.error.toString(),
+                                                                style: FlutterFlowTheme.of(context).bodySmall,
+                                                                textAlign: TextAlign.center,
+                                                              ),
+                                                            ],
+                                                          ),
+                                                        );
+                                                      }
+                                                      
+                                                      if (snapshot.connectionState == ConnectionState.waiting) {
                                                         return Center(
                                                           child: SizedBox(
                                                             width: 50.0,
@@ -692,6 +726,32 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                     .primary,
                                                               ),
                                                             ),
+                                                          ),
+                                                        );
+                                                      }
+                                                      
+                                                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                                                        return Center(
+                                                          child: Column(
+                                                            mainAxisAlignment: MainAxisAlignment.center,
+                                                            children: [
+                                                              Icon(
+                                                                Icons.phone_disabled,
+                                                                size: 50.0,
+                                                                color: FlutterFlowTheme.of(context).secondaryText,
+                                                              ),
+                                                              SizedBox(height: 16.0),
+                                                              Text(
+                                                                'No call logs available',
+                                                                style: FlutterFlowTheme.of(context).bodyMedium,
+                                                              ),
+                                                              SizedBox(height: 8.0),
+                                                              Text(
+                                                                'Start making calls to see your call history here',
+                                                                style: FlutterFlowTheme.of(context).bodySmall,
+                                                                textAlign: TextAlign.center,
+                                                              ),
+                                                            ],
                                                           ),
                                                         );
                                                       }

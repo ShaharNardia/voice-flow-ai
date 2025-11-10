@@ -42,15 +42,15 @@ class _NavbarWidgetState extends State<NavbarWidget> {
     _model = createModel(context, () => NavbarModel());
 
     _model.expandableExpandableController1 =
-        ExpandableController(initialExpanded: false);
+        ExpandableController(initialExpanded: true);
     _model.expandableExpandableController2 =
-        ExpandableController(initialExpanded: false);
+        ExpandableController(initialExpanded: true);
     _model.expandableExpandableController3 =
-        ExpandableController(initialExpanded: false);
+        ExpandableController(initialExpanded: true);
     _model.expandableExpandableController4 =
-        ExpandableController(initialExpanded: false);
+        ExpandableController(initialExpanded: true);
     _model.expandableExpandableController5 =
-        ExpandableController(initialExpanded: false);
+        ExpandableController(initialExpanded: true);
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
 
@@ -75,7 +75,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
         opaque: false,
         cursor: MouseCursor.defer ?? MouseCursor.defer,
         child: Container(
-          width: FFAppState().expand ? 250.0 : 80.0,
+          width: 250.0, // Always expanded
           decoration: BoxDecoration(
             color: FlutterFlowTheme.of(context).primaryBackground,
             borderRadius: BorderRadius.circular(12.0),
@@ -86,7 +86,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
               padding: EdgeInsetsDirectional.fromSTEB(10.0, 10.0, 10.0, 0.0),
               child: Builder(
                 builder: (context) {
-                  if (!FFAppState().expand) {
+                  if (false) { // Always show expanded content
                     return Column(
                       mainAxisSize: MainAxisSize.max,
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -354,7 +354,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               phone: false,
                               tablet: false,
                               tabletLandscape: false,
-                              desktop: false,
+                              desktop: true,
                             ))
                           AuthUserStreamWidget(
                             builder: (context) => Container(
@@ -401,7 +401,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               phone: false,
                               tablet: false,
                               tabletLandscape: false,
-                              desktop: false,
+                              desktop: true,
                             ))
                           AuthUserStreamWidget(
                             builder: (context) => Container(
@@ -448,7 +448,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               phone: false,
                               tablet: false,
                               tabletLandscape: false,
-                              desktop: false,
+                              desktop: true,
                             ))
                           AuthUserStreamWidget(
                             builder: (context) => Container(
@@ -495,7 +495,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                           phone: false,
                           tablet: false,
                           tabletLandscape: false,
-                          desktop: false,
+                          desktop: true,
                         ))
                           Container(
                             width: 40.0,
@@ -571,7 +571,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                           phone: false,
                           tablet: false,
                           tabletLandscape: false,
-                          desktop: false,
+                          desktop: true,
                         ))
                           Padding(
                             padding: EdgeInsetsDirectional.fromSTEB(
@@ -588,14 +588,20 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                 borderColor: Colors.transparent,
                                 borderRadius: 8.0,
                                 borderWidth: 1.0,
-                                buttonSize: 35.0,
+                                buttonSize: 45.0,
                                 icon: Icon(
                                   Icons.logout_outlined,
                                   color: Color(0xFF919191),
-                                  size: 20.0,
+                                  size: 24.0,
                                 ),
-                                onPressed: () {
-                                  print('IconButton pressed ...');
+                                onPressed: () async {
+                                  GoRouter.of(context).prepareAuthEvent();
+                                  await authManager.signOut();
+                                  GoRouter.of(context).clearRedirectLocation();
+
+                                  context.goNamedAuth(
+                                      LoginScreenWidget.routeName,
+                                      context.mounted);
                                 },
                               ),
                             ),
@@ -827,7 +833,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                               phone: false,
                                               tablet: false,
                                               tabletLandscape: false,
-                                              desktop: false,
+                                              desktop: true,
                                             ))
                                               Container(
                                                 width: double.infinity,
@@ -1190,7 +1196,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: false,
+                                                  desktop: true,
                                                 ))
                                               AuthUserStreamWidget(
                                                 builder: (context) => Container(
@@ -1327,7 +1333,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: false,
+                                                  desktop: true,
                                                 ))
                                               AuthUserStreamWidget(
                                                 builder: (context) => Container(
@@ -1551,7 +1557,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: false,
+                                                  desktop: true,
                                                 ))
                                               AuthUserStreamWidget(
                                                 builder: (context) => Container(
@@ -1897,7 +1903,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                               phone: false,
                                               tablet: false,
                                               tabletLandscape: false,
-                                              desktop: false,
+                                              desktop: true,
                                             ))
                                               Container(
                                                 width: double.infinity,
@@ -2363,7 +2369,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: false,
+                                                  desktop: true,
                                                 ))
                                                   Container(
                                                     width: double.infinity,
@@ -2600,7 +2606,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: false,
+                                                  desktop: true,
                                                 ))
                                                   Container(
                                                     width: double.infinity,
@@ -3133,7 +3139,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: false,
+                                                  desktop: true,
                                                 ))
                                                   Container(
                                                     width: double.infinity,
@@ -3302,7 +3308,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         phone: false,
                                         tablet: false,
                                         tabletLandscape: false,
-                                        desktop: false,
+                                        desktop: true,
                                       ))
                                     AuthUserStreamWidget(
                                       builder: (context) => FFButtonWidget(
@@ -3393,7 +3399,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         phone: false,
                                         tablet: false,
                                         tabletLandscape: false,
-                                        desktop: false,
+                                        desktop: true,
                                       ))
                                     AuthUserStreamWidget(
                                       builder: (context) => FFButtonWidget(
@@ -3484,7 +3490,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         phone: false,
                                         tablet: false,
                                         tabletLandscape: false,
-                                        desktop: false,
+                                        desktop: true,
                                       ))
                                     AuthUserStreamWidget(
                                       builder: (context) => FFButtonWidget(
@@ -3573,7 +3579,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                     phone: false,
                                     tablet: false,
                                     tabletLandscape: false,
-                                    desktop: false,
+                                    desktop: true,
                                   ))
                                     FFButtonWidget(
                                       onPressed: () async {
@@ -3844,27 +3850,35 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                           ),
                                         ].divide(SizedBox(width: 12.0)),
                                       ),
-                                      InkWell(
-                                        splashColor: Colors.transparent,
-                                        focusColor: Colors.transparent,
-                                        hoverColor: Colors.transparent,
-                                        highlightColor: Colors.transparent,
-                                        onTap: () async {
-                                          GoRouter.of(context)
-                                              .prepareAuthEvent();
-                                          await authManager.signOut();
-                                          GoRouter.of(context)
-                                              .clearRedirectLocation();
-
-                                          context.goNamedAuth(
-                                              LoginScreenWidget.routeName,
-                                              context.mounted);
-                                        },
-                                        child: Icon(
-                                          Icons.logout_outlined,
+                                      Container(
+                                        padding: EdgeInsets.all(8.0),
+                                        decoration: BoxDecoration(
                                           color: FlutterFlowTheme.of(context)
-                                              .primaryText,
-                                          size: 24.0,
+                                              .secondaryBackground,
+                                          borderRadius: BorderRadius.circular(8.0),
+                                        ),
+                                        child: InkWell(
+                                          splashColor: Colors.transparent,
+                                          focusColor: Colors.transparent,
+                                          hoverColor: Colors.transparent,
+                                          highlightColor: Colors.transparent,
+                                          onTap: () async {
+                                            GoRouter.of(context)
+                                                .prepareAuthEvent();
+                                            await authManager.signOut();
+                                            GoRouter.of(context)
+                                                .clearRedirectLocation();
+
+                                            context.goNamedAuth(
+                                                LoginScreenWidget.routeName,
+                                                context.mounted);
+                                          },
+                                          child: Icon(
+                                            Icons.logout_outlined,
+                                            color: FlutterFlowTheme.of(context)
+                                                .primaryText,
+                                            size: 24.0,
+                                          ),
                                         ),
                                       ),
                                     ].divide(SizedBox(width: 10.0)),
@@ -3883,14 +3897,10 @@ class _NavbarWidgetState extends State<NavbarWidget> {
           ),
         ),
         onEnter: ((event) async {
-          safeSetState(() => _model.mouseRegionHovered = true);
-          FFAppState().expand = true;
-          safeSetState(() {});
+          // Keep sidebar always expanded
         }),
         onExit: ((event) async {
-          safeSetState(() => _model.mouseRegionHovered = false);
-          FFAppState().expand = false;
-          safeSetState(() {});
+          // Keep sidebar always expanded
         }),
       ),
     );

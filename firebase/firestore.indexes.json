@@ -1,46 +1,6 @@
 {
   "indexes": [
     {
-      "collectionGroup": "Call",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "company",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "callType",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "Call",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "company",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "success",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "callType",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
       "collectionGroup": "Lead",
       "queryScope": "COLLECTION",
       "fields": [

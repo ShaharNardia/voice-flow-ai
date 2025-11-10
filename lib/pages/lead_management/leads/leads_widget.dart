@@ -1,5 +1,5 @@
 import '/auth/firebase_auth/auth_util.dart';
-import '/backend/api_requests/api_calls.dart';
+import '/backend/workflows/workflow_service.dart';
 import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_data_table.dart';
 import '/flutter_flow/flutter_flow_drop_down.dart';
@@ -1227,31 +1227,30 @@ class _LeadsWidgetState extends State<LeadsWidget> {
                                                         EdgeInsets.all(10.0),
                                                     child: Builder(
                                                       builder: (context) {
-                                                        final leads =
-                                                            containerLeadRecordList
-                                                                .where(
-                                                                    (e) => () {
-                                                                          if ((_model.dropDownValue1 != null && _model.dropDownValue1 != '') &&
-                                                                              (_model.searchTextController.text == null || _model.searchTextController.text == '') &&
-                                                                              (_model.dropDownValue2 == null || _model.dropDownValue2 == '')) {
-                                                                            return (_model.dropDownValue1 != 'All Status'
-                                                                                ? (e.status == functions.lowercaseString(_model.dropDownValue1!))
-                                                                                : true);
-                                                                          } else if ((_model.dropDownValue1 == null || _model.dropDownValue1 == '') && (_model.searchTextController.text == null || _model.searchTextController.text == '') && (_model.dropDownValue2 != null && _model.dropDownValue2 != '')) {
-                                                                            return (_model.dropDownValue2 != 'All Status'
-                                                                                ? (e.callStatus == functions.lowercaseString(_model.dropDownValue2!))
-                                                                                : true);
-                                                                          } else if ((_model.dropDownValue1 != null && _model.dropDownValue1 != '') && (_model.dropDownValue2 != null && _model.dropDownValue2 != '') && (_model.searchTextController.text == null || _model.searchTextController.text == '')) {
-                                                                            return ((_model.dropDownValue1 != 'All status') && (_model.dropDownValue2 != 'All Status')
-                                                                                ? ((e.status == functions.lowercaseString(_model.dropDownValue1!)) && (e.source == functions.lowercaseString(_model.dropDownValue2!)))
-                                                                                : true);
-                                                                          } else {
-                                                                            return (_model.searchTextController.text == null || _model.searchTextController.text == ''
-                                                                                ? true
-                                                                                : functions.jobFilter(_model.searchTextController.text, e.name, e.phoneNumber)!);
-                                                                          }
-                                                                        }())
-                                                                .toList();
+                                                        final leads = containerLeadRecordList.where((e) {
+                                                          // Apply search filter
+                                                          bool searchMatch = true;
+                                                          if (_model.searchTextController.text != null && _model.searchTextController.text!.isNotEmpty) {
+                                                            final searchText = _model.searchTextController.text!.toLowerCase();
+                                                            searchMatch = (e.name?.toLowerCase().contains(searchText) ?? false) ||
+                                                                          (e.phoneNumber?.toLowerCase().contains(searchText) ?? false) ||
+                                                                          (e.email?.toLowerCase().contains(searchText) ?? false);
+                                                          }
+
+                                                          // Apply status filter
+                                                          bool statusMatch = true;
+                                                          if (_model.dropDownValue1 != null && _model.dropDownValue1!.isNotEmpty && _model.dropDownValue1 != 'All Status') {
+                                                            statusMatch = e.status?.toLowerCase() == _model.dropDownValue1!.toLowerCase();
+                                                          }
+
+                                                          // Apply call status filter
+                                                          bool callStatusMatch = true;
+                                                          if (_model.dropDownValue2 != null && _model.dropDownValue2!.isNotEmpty && _model.dropDownValue2 != 'All Status') {
+                                                            callStatusMatch = e.callStatus?.toLowerCase() == _model.dropDownValue2!.toLowerCase();
+                                                          }
+
+                                                          return searchMatch && statusMatch && callStatusMatch;
+                                                        }).toList();
 
                                                         return FlutterFlowDataTable<
                                                             LeadRecord>(
@@ -1856,71 +1855,145 @@ class _LeadsWidgetState extends State<LeadsWidget> {
                                                                             true,
                                                                         onPressed:
                                                                             () async {
-                                                                          _model.assistant = await VapiGroup
-                                                                              .getAssistantCall
-                                                                              .call(
-                                                                            id: '42222d90-13ee-4f88-a300-9d58b74a636a',
-                                                                          );
-
-                                                                          if ((_model.assistant?.succeeded ??
-                                                                              true)) {
-                                                                            _model.company =
-                                                                                await CompanyRecord.getDocumentOnce(currentUserDocument!.company!);
-                                                                            if (_model.company?.reference !=
-                                                                                null) {
-                                                                              _model.callResponse = await VapiGroup.placeCallCall.call(
-                                                                                name: leadsItem.name,
-                                                                                number: (String var1) {
-                                                                                  return var1.replaceAll(RegExp(r'[^0-9+]'), '');
-                                                                                }(leadsItem.phoneNumber),
-                                                                                phoneNumberId: _model.company?.phoneNumberMap?.firstOrNull?.id,
-                                                                                assistantJson: functions.assistantBody((_model.assistant?.jsonBody ?? ''), _model.company, leadsItem.reference.id),
-                                                                                company: _model.company?.name,
-                                                                                industry: _model.company?.industry,
-                                                                                now: getCurrentTimestamp.toString(),
-                                                                                assistantName: _model.company?.assistantname,
+                                                                          try {
+                                                                            _model.assistant =
+                                                                                await WorkflowService.getAssistant('42222d90-13ee-4f88-a300-9d58b74a636a');
+                                                                            if (_model.assistant == null) {
+                                                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                                                SnackBar(
+                                                                                  content: Text(
+                                                                                    'Assistant not found. Please configure an assistant first.',
+                                                                                    style: TextStyle(
+                                                                                      color: FlutterFlowTheme.of(context).secondaryBackground,
+                                                                                    ),
+                                                                                  ),
+                                                                                  backgroundColor: FlutterFlowTheme.of(context).customColor10,
+                                                                                ),
                                                                               );
-
-                                                                              if ((_model.callResponse?.statusCode ?? 200) == 201) {
-                                                                                await leadsItem.reference.update(createLeadRecordData(
-                                                                                  callStatus: 'Contacting',
-                                                                                ));
-                                                                                await showDialog(
-                                                                                  context: context,
-                                                                                  builder: (dialogContext) {
-                                                                                    return Dialog(
-                                                                                      elevation: 0,
-                                                                                      insetPadding: EdgeInsets.zero,
-                                                                                      backgroundColor: Colors.transparent,
-                                                                                      alignment: AlignmentDirectional(0.0, 0.0).resolve(Directionality.of(context)),
-                                                                                      child: GestureDetector(
-                                                                                        onTap: () {
-                                                                                          FocusScope.of(dialogContext).unfocus();
-                                                                                          FocusManager.instance.primaryFocus?.unfocus();
-                                                                                        },
-                                                                                        child: CallPlacedSuccessWidget(),
-                                                                                      ),
-                                                                                    );
-                                                                                  },
-                                                                                );
-                                                                              } else {
-                                                                                await showDialog(
-                                                                                  context: context,
-                                                                                  builder: (alertDialogContext) {
-                                                                                    return AlertDialog(
-                                                                                      title: Text('Error'),
-                                                                                      content: Text((_model.callResponse?.bodyText ?? '')),
-                                                                                      actions: [
-                                                                                        TextButton(
-                                                                                          onPressed: () => Navigator.pop(alertDialogContext),
-                                                                                          child: Text('Ok'),
-                                                                                        ),
-                                                                                      ],
-                                                                                    );
-                                                                                  },
-                                                                                );
-                                                                              }
+                                                                              safeSetState(() {});
+                                                                              return;
                                                                             }
+                                                                            _model.company = await CompanyRecord.getDocumentOnce(currentUserDocument!.company!);
+                                                                            if (_model.company?.reference == null) {
+                                                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                                                SnackBar(
+                                                                                  content: Text(
+                                                                                    'Company information missing. Complete onboarding first.',
+                                                                                    style: TextStyle(
+                                                                                      color: FlutterFlowTheme.of(context).secondaryBackground,
+                                                                                    ),
+                                                                                  ),
+                                                                                  backgroundColor: FlutterFlowTheme.of(context).customColor10,
+                                                                                ),
+                                                                              );
+                                                                              safeSetState(() {});
+                                                                              return;
+                                                                            }
+
+                                                                            final cleanedNumber = (leadsItem.phoneNumber)
+                                                                                .replaceAll(RegExp(r'[^0-9+]'), '');
+                                                                            final companyPhone = _model.company?.phoneNumberMap?.firstOrNull?.phoneNumber ??
+                                                                                _model.company?.fallBackNumber ??
+                                                                                '';
+                                                                            if (companyPhone.isEmpty) {
+                                                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                                                SnackBar(
+                                                                                  content: Text(
+                                                                                    'No company phone number configured for outbound calls.',
+                                                                                    style: TextStyle(
+                                                                                      color: FlutterFlowTheme.of(context).secondaryBackground,
+                                                                                    ),
+                                                                                  ),
+                                                                                  backgroundColor: FlutterFlowTheme.of(context).customColor10,
+                                                                                ),
+                                                                              );
+                                                                              safeSetState(() {});
+                                                                              return;
+                                                                            }
+
+                                                                            final assistantPayload = functions.assistantBody(
+                                                                              _model.assistant?.definition ?? <String, dynamic>{},
+                                                                              _model.company,
+                                                                              leadsItem.reference.id,
+                                                                            );
+                                                                            final assistantMap =
+                                                                                (assistantPayload is Map<String, dynamic>)
+                                                                                    ? Map<String, dynamic>.from(assistantPayload)
+                                                                                    : <String, dynamic>{};
+
+                                                                            _model.callResponse = await WorkflowService.placeCall(
+                                                                              leadName: leadsItem.name,
+                                                                              leadPhone: cleanedNumber,
+                                                                              companyPhone: companyPhone,
+                                                                              assistantJson: assistantMap,
+                                                                              companyName: _model.company?.name,
+                                                                              industry: _model.company?.industry,
+                                                                              assistantName: _model.company?.assistantname,
+                                                                            );
+
+                                                                            if ((_model.callResponse?.status ?? '') == 'initiated') {
+                                                                              await leadsItem.reference.update(createLeadRecordData(
+                                                                                callStatus: 'Calling',
+                                                                              ));
+                                                                              await showDialog(
+                                                                                context: context,
+                                                                                builder: (dialogContext) {
+                                                                                  return Dialog(
+                                                                                    elevation: 0,
+                                                                                    insetPadding: EdgeInsets.zero,
+                                                                                    backgroundColor: Colors.transparent,
+                                                                                    alignment: AlignmentDirectional(0.0, 0.0).resolve(Directionality.of(context)),
+                                                                                    child: GestureDetector(
+                                                                                      onTap: () {
+                                                                                        FocusScope.of(dialogContext).unfocus();
+                                                                                        FocusManager.instance.primaryFocus?.unfocus();
+                                                                                      },
+                                                                                      child: CallPlacedSuccessWidget(),
+                                                                                    ),
+                                                                                  );
+                                                                                },
+                                                                              );
+                                                                            } else {
+                                                                              await showDialog(
+                                                                                context: context,
+                                                                                builder: (alertDialogContext) {
+                                                                                  return AlertDialog(
+                                                                                    title: Text('Call Failed'),
+                                                                                    content: Text(_model.callResponse?.raw?['message']?.toString() ?? 'Unable to initiate the call.'),
+                                                                                    actions: [
+                                                                                      TextButton(
+                                                                                        onPressed: () => Navigator.pop(alertDialogContext),
+                                                                                        child: Text('Ok'),
+                                                                                      ),
+                                                                                    ],
+                                                                                  );
+                                                                                },
+                                                                              );
+                                                                            }
+                                                                          } on WorkflowException catch (error) {
+                                                                            ScaffoldMessenger.of(context).showSnackBar(
+                                                                              SnackBar(
+                                                                                content: Text(
+                                                                                  error.message,
+                                                                                  style: TextStyle(
+                                                                                    color: FlutterFlowTheme.of(context).secondaryBackground,
+                                                                                  ),
+                                                                                ),
+                                                                                backgroundColor: FlutterFlowTheme.of(context).customColor10,
+                                                                              ),
+                                                                            );
+                                                                          } catch (error) {
+                                                                            ScaffoldMessenger.of(context).showSnackBar(
+                                                                              SnackBar(
+                                                                                content: Text(
+                                                                                  'Failed to place call. ${error.toString()}',
+                                                                                  style: TextStyle(
+                                                                                    color: FlutterFlowTheme.of(context).secondaryBackground,
+                                                                                  ),
+                                                                                ),
+                                                                                backgroundColor: FlutterFlowTheme.of(context).customColor10,
+                                                                              ),
+                                                                            );
                                                                           }
 
                                                                           safeSetState(

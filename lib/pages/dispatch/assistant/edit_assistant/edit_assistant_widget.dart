@@ -1,5 +1,5 @@
 import '/auth/firebase_auth/auth_util.dart';
-import '/backend/api_requests/api_calls.dart';
+import '/backend/workflows/workflow_service.dart';
 import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_drop_down.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -514,42 +514,66 @@ class _EditAssistantWidgetState extends State<EditAssistantWidget> {
                           _model.comapnay = await CompanyRecord.getDocumentOnce(
                               currentUserDocument!.company!);
                           if (_model.comapnay?.reference != null) {
-                            _model.apiResultlh7 =
-                                await VapiGroup.updateAssistantCall.call(
-                              id: getJsonField(
-                                widget!.assitant,
-                                r'''$.id''',
-                              ).toString(),
-                              firstMessage:
-                                  _model.firstmessageTextController.text,
-                              assistantName: _model.nameTextController.text,
-                              language: _model.dropDownValue,
-                            );
+                            final generatedPrompt =
+                                functions.promptForAssistant(
+                                      _model.comapnay?.name,
+                                      _model.comapnay?.industry,
+                                      _model.nameTextController.text,
+                                    ) ??
+                                    '';
+                            try {
+                              await WorkflowService.updateAssistant(
+                                assistantId: getJsonField(
+                                  widget!.assitant,
+                                  r'''$.id''',
+                                ).toString(),
+                                name: _model.nameTextController.text,
+                                firstMessage:
+                                    _model.firstmessageTextController.text,
+                                language: _model.dropDownValue ?? 'en',
+                                systemPrompt: generatedPrompt,
+                              );
 
-                            if ((_model.apiResultlh7?.succeeded ?? true)) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    'Assistant Created Successsfully',
+                                    'Assistant updated successfully',
                                     style: TextStyle(
                                       color: FlutterFlowTheme.of(context)
                                           .secondaryBackground,
                                     ),
                                   ),
-                                  duration: Duration(milliseconds: 4000),
-                                  backgroundColor: Color(0xFF45A671),
+                                  duration:
+                                      const Duration(milliseconds: 4000),
+                                  backgroundColor: const Color(0xFF45A671),
                                 ),
                               );
-                            } else {
+                            } on WorkflowException catch (error) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    'Error Coming from API is not return 200or 201',
-                                    style: TextStyle(
+                                    error.message,
+                                    style: const TextStyle(
                                       color: Colors.white,
                                     ),
                                   ),
-                                  duration: Duration(milliseconds: 4000),
+                                  duration:
+                                      const Duration(milliseconds: 4000),
+                                  backgroundColor: FlutterFlowTheme.of(context)
+                                      .customColor10,
+                                ),
+                              );
+                            } catch (error) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Failed to update assistant. ${error.toString()}',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  duration:
+                                      const Duration(milliseconds: 4000),
                                   backgroundColor: FlutterFlowTheme.of(context)
                                       .customColor10,
                                 ),

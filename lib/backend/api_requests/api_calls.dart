@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '/app_constants.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'api_manager.dart';
 
@@ -14,7 +15,6 @@ bool _isValidUuid(String? uuid) {
   return uuidRegex.hasMatch(uuid);
 }
 
-const _kPrivateApiFunctionName = 'ffPrivateApiCall';
 
 /// Start Vapi Group Code
 
@@ -43,6 +43,7 @@ class VapiGroup {
   static CreateToolCall createToolCall = CreateToolCall();
   static PlaceCallCall placeCallCall = PlaceCallCall();
   static GetAssistantCall getAssistantCall = GetAssistantCall();
+  static CreateJobCall createJobCall = CreateJobCall();
 }
 
 class CreateAssitantCall {
@@ -181,7 +182,7 @@ class CreatePhoneNumberCall {
   "twilioApiKey": "SK5125bb6643e45f4bd87038ca91139cc9",
   "twilioApiSecret": "otFG5qF5vuSjbP7wzikzc1bKcDUQI9NI",
   "twilioAuthToken": "a1b1388d1698fdd866e10dd22124844c",
-  "serverUrl":"https://n8n.sovanza.net/webhook/94b54353-1808-469a-8c8f-6cfadf32202c/voiceflow"
+  "serverUrl":"${FFAppConstants.assignAssistantEndpoint}"
 }''';
     return ApiManager.instance.makeApiCall(
       callName: 'Create Phone Number',
@@ -373,7 +374,7 @@ class UpdatePhoneNumberCall {
 
     final ffApiRequestBody = '''
 {
-"serverUrl":"https://heliowicttor.app.n8n.cloud/webhook-test/vapi-server-url"
+"serverUrl":"${FFAppConstants.assignAssistantEndpoint}"
 }''';
     return ApiManager.instance.makeApiCall(
       callName: 'updatePhoneNumber',
@@ -497,7 +498,7 @@ class GetAssistantCopyCall {
 
 class UpdateToolCall {
   Future<ApiCallResponse> call({
-    dynamic? bodyJson,
+    dynamic bodyJson,
     String? id = '',
   }) async {
     final baseUrl = VapiGroup.getBaseUrl();
@@ -646,7 +647,7 @@ class PlaceCallCall {
     String? number = '',
     String? phoneNumberId = '',
     String? companyPhoneNumber = '',
-    dynamic? assistantJson,
+    dynamic assistantJson,
     String? industry = '',
     String? company = '',
     String? now = '',
@@ -671,7 +672,8 @@ class PlaceCallCall {
     }
   },
   ${_isValidUuid(phoneNumberId) ? '"phoneNumberId": "${escapeStringForJson(phoneNumberId)}"' : '"phoneNumber": {"twilioPhoneNumber": "${escapeStringForJson(companyPhoneNumber)}", "twilioAccountSid": "ACcf36ee2a4549fb9077606737abb6242a"}'},
-  "assistant": ${assistant}
+  "assistant": ${assistant},
+  "serverUrl": "https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net/vapiWebhook"
 }''';
     return ApiManager.instance.makeApiCall(
       callName: 'Place Call',
@@ -718,6 +720,73 @@ class GetAssistantCall {
 }
 
 /// End Vapi Group Code
+
+/// Start Create Job Group Code
+
+class CreateJobGroup {
+  static CreateJobCall createJobCall = CreateJobCall();
+}
+
+class CreateJobCall {
+  Future<ApiCallResponse> call({
+    String? userName = '',
+    String? userEmail = '',
+    String? title = '',
+    String? jobDescription = '',
+    String? userPhoneNumber = '',
+    String? address = '',
+    String? requestedTime = '',
+    String? companyId = '',
+  }) async {
+    final ffApiRequestBody = '''
+{
+  "userName": "${escapeStringForJson(userName)}",
+  "userEmail": "${escapeStringForJson(userEmail)}",
+  "title": "${escapeStringForJson(title)}",
+  "jobDescription": "${escapeStringForJson(jobDescription)}",
+  "userPhoneNumber": "${escapeStringForJson(userPhoneNumber)}",
+  "address": "${escapeStringForJson(address)}",
+  "requestedTime": "${escapeStringForJson(requestedTime)}",
+  "companyId": "${escapeStringForJson(companyId)}"
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'Create Job',
+      apiUrl: 'https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net/createJob',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+
+  String? success(dynamic response) => getJsonField(
+        response,
+        r'''$.success''',
+      ).toString();
+  String? jobId(dynamic response) => getJsonField(
+        response,
+        r'''$.jobId''',
+      ).toString();
+  String? message(dynamic response) => getJsonField(
+        response,
+        r'''$.message''',
+      ).toString();
+  String? error(dynamic response) => getJsonField(
+        response,
+        r'''$.error''',
+      ).toString();
+}
+
+/// End Create Job Group Code
 
 /// Start Stripe Group Code
 
@@ -1123,7 +1192,7 @@ class BuyPhoneNumberCall {
       params: {
         'PhoneNumber': phonenNumber,
         'friendly_name': friendlyName,
-        'SmsUrl': "https://heliowicttor.app.n8n.cloud/webhook/receive-message ",
+        'SmsUrl': "${FFAppConstants.transferCallEndpoint}",
         'SmsMethod': "POST",
       },
       bodyType: BodyType.X_WWW_FORM_URL_ENCODED,

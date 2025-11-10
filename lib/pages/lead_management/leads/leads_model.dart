@@ -1,6 +1,6 @@
 import '/auth/firebase_auth/auth_util.dart';
-import '/backend/api_requests/api_calls.dart';
 import '/backend/backend.dart';
+import '/backend/workflows/workflow_service.dart';
 import '/flutter_flow/flutter_flow_data_table.dart';
 import '/flutter_flow/flutter_flow_drop_down.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
@@ -44,11 +44,11 @@ class LeadsModel extends FlutterFlowModel<LeadsWidget> {
   final paginatedDataTableController =
       FlutterFlowDataTableController<LeadRecord>();
   // Stores action output result for [Backend Call - API (getAssistant)] action in IconButton widget.
-  ApiCallResponse? assistant;
+  AssistantSummary? assistant;
   // Stores action output result for [Backend Call - Read Document] action in IconButton widget.
   CompanyRecord? company;
   // Stores action output result for [Backend Call - API (Place Call)] action in IconButton widget.
-  ApiCallResponse? callResponse;
+  CallInitiationResult? callResponse;
   // Model for Subscribe component.
   late SubscribeModel subscribeModel;
 

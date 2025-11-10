@@ -1,8 +1,6 @@
 import '/auth/firebase_auth/auth_util.dart';
-import '/backend/api_requests/api_calls.dart';
 import '/backend/backend.dart';
-import '/backend/schema/enums/enums.dart';
-import '/backend/schema/structs/index.dart';
+import '/backend/workflows/workflow_service.dart';
 import '/flutter_flow/flutter_flow_data_table.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -12,15 +10,8 @@ import '/pages/billing/subscribe/subscribe_widget.dart';
 import '/pages/calls/phone_number/edit_number/edit_number_widget.dart';
 import '/pages/components/header/header_widget.dart';
 import '/pages/components/navbar/navbar_widget.dart';
-import '/pages/extra_components/waiting_alert/waiting_alert_widget.dart';
-import 'dart:ui';
-import '/flutter_flow/custom_functions.dart' as functions;
-import '/index.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
 import 'phone_number_model.dart';
 export 'phone_number_model.dart';
 
@@ -43,14 +34,12 @@ class _PhoneNumberWidgetState extends State<PhoneNumberWidget> {
   void initState() {
     super.initState();
     _model = createModel(context, () => PhoneNumberModel());
-
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
 
   @override
   void dispose() {
     _model.dispose();
-
     super.dispose();
   }
 
@@ -67,11 +56,9 @@ class _PhoneNumberWidgetState extends State<PhoneNumberWidget> {
         body: SafeArea(
           top: true,
           child: Column(
-            mainAxisSize: MainAxisSize.max,
             children: [
               Expanded(
                 child: Row(
-                  mainAxisSize: MainAxisSize.max,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     wrapWithModel(
@@ -83,931 +70,88 @@ class _PhoneNumberWidgetState extends State<PhoneNumberWidget> {
                       ),
                     ),
                     Expanded(
-                      child: Container(
-                        width: double.infinity,
-                        height: double.infinity,
-                        decoration: BoxDecoration(),
-                        alignment: AlignmentDirectional(0.0, 0.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.max,
-                          children: [
-                            wrapWithModel(
-                              model: _model.headerModel,
-                              updateCallback: () => safeSetState(() {}),
-                              updateOnChange: true,
-                              child: HeaderWidget(
-                                heading: 'Phone Number',
-                                subHeading:
-                                    'Welcome! Here You will buy your own numbers',
-                              ),
+                      child: Column(
+                        children: [
+                          wrapWithModel(
+                            model: _model.headerModel,
+                            updateCallback: () => safeSetState(() {}),
+                            updateOnChange: true,
+                            child: HeaderWidget(
+                              heading: 'Phone Number',
+                              subHeading:
+                                  'Search, provision, and manage your company numbers',
                             ),
-                            Expanded(
-                              child: Align(
-                                alignment: AlignmentDirectional(0.0, -1.0),
-                                child: Builder(
-                                  builder: (context) {
-                                    if (valueOrDefault<bool>(
-                                            currentUserDocument?.subscribed,
-                                            false) ==
-                                        true) {
-                                      return Padding(
-                                        padding: EdgeInsets.all(20.0),
-                                        child: Container(
-                                          width: double.infinity,
-                                          decoration: BoxDecoration(
-                                            borderRadius:
-                                                BorderRadius.circular(15.0),
+                          ),
+                          Expanded(
+                            child: AuthUserStreamWidget(
+                              builder: (context) {
+                                final subscribed = valueOrDefault<bool>(
+                                  currentUserDocument?.subscribed,
+                                  false,
+                                );
+                                if (!subscribed) {
+                                  return wrapWithModel(
+                                    model: _model.subscribeModel,
+                                    updateCallback: () => safeSetState(() {}),
+                                    updateOnChange: true,
+                                    child: SubscribeWidget(),
+                                  );
+                                }
+
+                                final companyRef =
+                                    currentUserDocument?.company;
+                                if (companyRef == null) {
+                                  return Center(
+                                    child: Padding(
+                                      padding: const EdgeInsets.all(24.0),
+                                      child: Text(
+                                        'Assign this user to a company to manage phone numbers.',
+                                        textAlign: TextAlign.center,
+                                        style: FlutterFlowTheme.of(context)
+                                            .labelLarge
+                                            .override(
+                                              font: GoogleFonts.interTight(),
+                                              fontSize: 16.0,
+                                              letterSpacing: 0.0,
+                                            ),
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                return StreamBuilder<CompanyRecord>(
+                                  stream: CompanyRecord.getDocument(companyRef),
+                                  builder: (context, snapshot) {
+                                    if (!snapshot.hasData) {
+                                      return Center(
+                                        child: CircularProgressIndicator(
+                                          valueColor:
+                                              AlwaysStoppedAnimation<Color>(
+                                            FlutterFlowTheme.of(context)
+                                                .primary,
                                           ),
-                                          child: Column(
-                                            mainAxisSize: MainAxisSize.max,
-                                            children: [
-                                              if (responsiveVisibility(
-                                                context: context,
-                                                phone: false,
-                                                tablet: false,
-                                                tabletLandscape: false,
-                                                desktop: false,
-                                              ))
-                                                Align(
-                                                  alignment:
-                                                      AlignmentDirectional(
-                                                          1.0, 0.0),
-                                                  child: Builder(
-                                                    builder: (context) =>
-                                                        FFButtonWidget(
-                                                      onPressed: () async {
-                                                        showDialog(
-                                                          barrierDismissible:
-                                                              false,
-                                                          context: context,
-                                                          builder:
-                                                              (dialogContext) {
-                                                            return Dialog(
-                                                              elevation: 0,
-                                                              insetPadding:
-                                                                  EdgeInsets
-                                                                      .zero,
-                                                              backgroundColor:
-                                                                  Colors
-                                                                      .transparent,
-                                                              alignment: AlignmentDirectional(
-                                                                      0.0, 0.0)
-                                                                  .resolve(
-                                                                      Directionality.of(
-                                                                          context)),
-                                                              child:
-                                                                  GestureDetector(
-                                                                onTap: () {
-                                                                  FocusScope.of(
-                                                                          dialogContext)
-                                                                      .unfocus();
-                                                                  FocusManager
-                                                                      .instance
-                                                                      .primaryFocus
-                                                                      ?.unfocus();
-                                                                },
-                                                                child:
-                                                                    WaitingAlertWidget(),
-                                                              ),
-                                                            );
-                                                          },
-                                                        );
-
-                                                        _model.comapny =
-                                                            await CompanyRecord
-                                                                .getDocumentOnce(
-                                                                    currentUserDocument!
-                                                                        .company!);
-                                                        while (
-                                                            _model.codeCheck! <
-                                                                1) {
-                                                          _model.checkPhoneNumber =
-                                                              await TwillioGroup
-                                                                  .searchNumberCall
-                                                                  .call(
-                                                            areaCode: functions
-                                                                .returnRandomAreaCode(),
-                                                          );
-
-                                                          if ((_model.checkPhoneNumber
-                                                                      ?.statusCode ??
-                                                                  200) ==
-                                                              200) {
-                                                            if (TwillioGroup
-                                                                    .searchNumberCall
-                                                                    .phoneNumbers(
-                                                                      (_model.checkPhoneNumber
-                                                                              ?.jsonBody ??
-                                                                          ''),
-                                                                    )!
-                                                                    .length >
-                                                                0) {
-                                                              _model.buyvonagenumberresponse =
-                                                                  await TwillioGroup
-                                                                      .buyPhoneNumberCall
-                                                                      .call(
-                                                                phonenNumber:
-                                                                    getJsonField(
-                                                                  TwillioGroup
-                                                                      .searchNumberCall
-                                                                      .phoneNumbers(
-                                                                        (_model.checkPhoneNumber?.jsonBody ??
-                                                                            ''),
-                                                                      )
-                                                                      ?.firstOrNull,
-                                                                  r'''$.phone_number''',
-                                                                ).toString(),
-                                                                friendlyName:
-                                                                    _model
-                                                                        .comapny
-                                                                        ?.name,
-                                                              );
-
-                                                              if ((_model
-                                                                      .buyvonagenumberresponse
-                                                                      ?.succeeded ??
-                                                                  true)) {
-                                                                _model.vapiPhoneNumber =
-                                                                    await VapiGroup
-                                                                        .createPhoneNumberCall
-                                                                        .call(
-                                                                  number:
-                                                                      getJsonField(
-                                                                    TwillioGroup
-                                                                        .searchNumberCall
-                                                                        .phoneNumbers(
-                                                                          (_model.checkPhoneNumber?.jsonBody ??
-                                                                              ''),
-                                                                        )
-                                                                        ?.firstOrNull,
-                                                                    r'''$.phone_number''',
-                                                                  ).toString(),
-                                                                  name: _model
-                                                                      .comapny
-                                                                      ?.name,
-                                                                );
-
-                                                                if ((_model.vapiPhoneNumber
-                                                                            ?.statusCode ??
-                                                                        200) ==
-                                                                    201) {
-                                                                  await currentUserDocument!
-                                                                      .company!
-                                                                      .update({
-                                                                    ...mapToFirestore(
-                                                                      {
-                                                                        'companyPhoneNumbers':
-                                                                            FieldValue.arrayUnion([
-                                                                          VapiGroup
-                                                                              .createPhoneNumberCall
-                                                                              .number(
-                                                                            (_model.vapiPhoneNumber?.jsonBody ??
-                                                                                ''),
-                                                                          )
-                                                                        ]),
-                                                                        'phoneNumberMap':
-                                                                            FieldValue.arrayUnion([
-                                                                          getPhoneNumberFirestoreData(
-                                                                            updatePhoneNumberStruct(
-                                                                              PhoneNumberStruct(
-                                                                                id: VapiGroup.createPhoneNumberCall.id(
-                                                                                  (_model.vapiPhoneNumber?.jsonBody ?? ''),
-                                                                                ),
-                                                                                label: Labels.inbound_outbound,
-                                                                                phoneNumber: VapiGroup.createPhoneNumberCall.number(
-                                                                                  (_model.vapiPhoneNumber?.jsonBody ?? ''),
-                                                                                ),
-                                                                              ),
-                                                                              clearUnsetFields: false,
-                                                                            ),
-                                                                            true,
-                                                                          )
-                                                                        ]),
-                                                                      },
-                                                                    ),
-                                                                  });
-                                                                  _model.codeCheck =
-                                                                      _model.codeCheck! +
-                                                                          1;
-                                                                  safeSetState(
-                                                                      () {});
-                                                                }
-                                                              }
-                                                            }
-                                                          }
-                                                        }
-
-                                                        await currentUserReference!
-                                                            .update(
-                                                                createUserRecordData(
-                                                          profileCompleted:
-                                                              true,
-                                                        ));
-                                                        Navigator.pop(context);
-
-                                                        context.goNamed(
-                                                            Startup7Widget
-                                                                .routeName);
-
-                                                        safeSetState(() {});
-                                                      },
-                                                      text: 'Add New',
-                                                      options: FFButtonOptions(
-                                                        width: 118.0,
-                                                        height: 40.0,
-                                                        padding:
-                                                            EdgeInsetsDirectional
-                                                                .fromSTEB(
-                                                                    10.0,
-                                                                    0.0,
-                                                                    10.0,
-                                                                    0.0),
-                                                        iconPadding:
-                                                            EdgeInsetsDirectional
-                                                                .fromSTEB(
-                                                                    0.0,
-                                                                    0.0,
-                                                                    0.0,
-                                                                    0.0),
-                                                        color:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .primary,
-                                                        textStyle:
-                                                            FlutterFlowTheme.of(
-                                                                    context)
-                                                                .titleSmall
-                                                                .override(
-                                                                  font: GoogleFonts
-                                                                      .interTight(
-                                                                    fontWeight:
-                                                                        FontWeight
-                                                                            .w500,
-                                                                    fontStyle: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .titleSmall
-                                                                        .fontStyle,
-                                                                  ),
-                                                                  color: Colors
-                                                                      .white,
-                                                                  fontSize:
-                                                                      15.0,
-                                                                  letterSpacing:
-                                                                      0.0,
-                                                                  fontWeight:
-                                                                      FontWeight
-                                                                          .w500,
-                                                                  fontStyle: FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .titleSmall
-                                                                      .fontStyle,
-                                                                ),
-                                                        elevation: 2.0,
-                                                        borderSide: BorderSide(
-                                                          color: Colors
-                                                              .transparent,
-                                                          width: 1.0,
-                                                        ),
-                                                        borderRadius:
-                                                            BorderRadius
-                                                                .circular(12.0),
-                                                      ),
-                                                    ),
-                                                  ),
-                                                ),
-                                              Expanded(
-                                                child: Container(
-                                                  decoration: BoxDecoration(
-                                                    color: FlutterFlowTheme.of(
-                                                            context)
-                                                        .primaryBackground,
-                                                    borderRadius:
-                                                        BorderRadius.circular(
-                                                            15.0),
-                                                  ),
-                                                  alignment:
-                                                      AlignmentDirectional(
-                                                          0.0, 0.0),
-                                                  child: Padding(
-                                                    padding:
-                                                        EdgeInsets.all(10.0),
-                                                    child: StreamBuilder<
-                                                        CompanyRecord>(
-                                                      stream: CompanyRecord
-                                                          .getDocument(
-                                                              currentUserDocument!
-                                                                  .company!),
-                                                      builder:
-                                                          (context, snapshot) {
-                                                        // Customize what your widget looks like when it's loading.
-                                                        if (!snapshot.hasData) {
-                                                          return Center(
-                                                            child: SizedBox(
-                                                              width: 50.0,
-                                                              height: 50.0,
-                                                              child:
-                                                                  CircularProgressIndicator(
-                                                                valueColor:
-                                                                    AlwaysStoppedAnimation<
-                                                                        Color>(
-                                                                  FlutterFlowTheme.of(
-                                                                          context)
-                                                                      .primary,
-                                                                ),
-                                                              ),
-                                                            ),
-                                                          );
-                                                        }
-
-                                                        final conditionalBuilderCompanyRecord =
-                                                            snapshot.data!;
-
-                                                        return Builder(
-                                                          builder: (context) {
-                                                            if (conditionalBuilderCompanyRecord
-                                                                .phoneNumberMap
-                                                                .isNotEmpty) {
-                                                              return Builder(
-                                                                builder:
-                                                                    (context) {
-                                                                  final phone =
-                                                                      conditionalBuilderCompanyRecord
-                                                                          .phoneNumberMap
-                                                                          .toList();
-
-                                                                  return FlutterFlowDataTable<
-                                                                      PhoneNumberStruct>(
-                                                                    controller:
-                                                                        _model
-                                                                            .paginatedDataTableController,
-                                                                    data: phone,
-                                                                    columnsBuilder:
-                                                                        (onSortChanged) =>
-                                                                            [
-                                                                      DataColumn2(
-                                                                        label: DefaultTextStyle
-                                                                            .merge(
-                                                                          softWrap:
-                                                                              true,
-                                                                          child:
-                                                                              Text(
-                                                                            'Number',
-                                                                            style: FlutterFlowTheme.of(context).labelLarge.override(
-                                                                                  font: GoogleFonts.inter(
-                                                                                    fontWeight: FlutterFlowTheme.of(context).labelLarge.fontWeight,
-                                                                                    fontStyle: FlutterFlowTheme.of(context).labelLarge.fontStyle,
-                                                                                  ),
-                                                                                  fontSize: 12.0,
-                                                                                  letterSpacing: 0.0,
-                                                                                  fontWeight: FlutterFlowTheme.of(context).labelLarge.fontWeight,
-                                                                                  fontStyle: FlutterFlowTheme.of(context).labelLarge.fontStyle,
-                                                                                ),
-                                                                          ),
-                                                                        ),
-                                                                      ),
-                                                                      DataColumn2(
-                                                                        label: DefaultTextStyle
-                                                                            .merge(
-                                                                          softWrap:
-                                                                              true,
-                                                                          child:
-                                                                              Text(
-                                                                            'Forwarding Number',
-                                                                            style: FlutterFlowTheme.of(context).labelLarge.override(
-                                                                                  font: GoogleFonts.inter(
-                                                                                    fontWeight: FlutterFlowTheme.of(context).labelLarge.fontWeight,
-                                                                                    fontStyle: FlutterFlowTheme.of(context).labelLarge.fontStyle,
-                                                                                  ),
-                                                                                  fontSize: 12.0,
-                                                                                  letterSpacing: 0.0,
-                                                                                  fontWeight: FlutterFlowTheme.of(context).labelLarge.fontWeight,
-                                                                                  fontStyle: FlutterFlowTheme.of(context).labelLarge.fontStyle,
-                                                                                ),
-                                                                          ),
-                                                                        ),
-                                                                      ),
-                                                                      DataColumn2(
-                                                                        label: DefaultTextStyle
-                                                                            .merge(
-                                                                          softWrap:
-                                                                              true,
-                                                                          child:
-                                                                              Text(
-                                                                            'Actions',
-                                                                            style: FlutterFlowTheme.of(context).labelLarge.override(
-                                                                                  font: GoogleFonts.inter(
-                                                                                    fontWeight: FlutterFlowTheme.of(context).labelLarge.fontWeight,
-                                                                                    fontStyle: FlutterFlowTheme.of(context).labelLarge.fontStyle,
-                                                                                  ),
-                                                                                  fontSize: 12.0,
-                                                                                  letterSpacing: 0.0,
-                                                                                  fontWeight: FlutterFlowTheme.of(context).labelLarge.fontWeight,
-                                                                                  fontStyle: FlutterFlowTheme.of(context).labelLarge.fontStyle,
-                                                                                ),
-                                                                          ),
-                                                                        ),
-                                                                      ),
-                                                                    ],
-                                                                    dataRowBuilder: (phoneItem,
-                                                                            phoneIndex,
-                                                                            selected,
-                                                                            onSelectChanged) =>
-                                                                        DataRow(
-                                                                      color: MaterialStateProperty
-                                                                          .all(
-                                                                        phoneIndex % 2 ==
-                                                                                0
-                                                                            ? FlutterFlowTheme.of(context).secondaryBackground
-                                                                            : FlutterFlowTheme.of(context).secondaryBackground,
-                                                                      ),
-                                                                      cells: [
-                                                                        Text(
-                                                                          phoneItem
-                                                                              .phoneNumber,
-                                                                          style: FlutterFlowTheme.of(context)
-                                                                              .bodyMedium
-                                                                              .override(
-                                                                                font: GoogleFonts.inter(
-                                                                                  fontWeight: FlutterFlowTheme.of(context).bodyMedium.fontWeight,
-                                                                                  fontStyle: FlutterFlowTheme.of(context).bodyMedium.fontStyle,
-                                                                                ),
-                                                                                fontSize: 10.0,
-                                                                                letterSpacing: 0.0,
-                                                                                fontWeight: FlutterFlowTheme.of(context).bodyMedium.fontWeight,
-                                                                                fontStyle: FlutterFlowTheme.of(context).bodyMedium.fontStyle,
-                                                                              ),
-                                                                        ),
-                                                                        Text(
-                                                                          valueOrDefault<
-                                                                              String>(
-                                                                            phoneItem.forwardingNumber,
-                                                                            'Unset',
-                                                                          ),
-                                                                          style: FlutterFlowTheme.of(context)
-                                                                              .bodyMedium
-                                                                              .override(
-                                                                                font: GoogleFonts.inter(
-                                                                                  fontWeight: FlutterFlowTheme.of(context).bodyMedium.fontWeight,
-                                                                                  fontStyle: FlutterFlowTheme.of(context).bodyMedium.fontStyle,
-                                                                                ),
-                                                                                fontSize: 10.0,
-                                                                                letterSpacing: 0.0,
-                                                                                fontWeight: FlutterFlowTheme.of(context).bodyMedium.fontWeight,
-                                                                                fontStyle: FlutterFlowTheme.of(context).bodyMedium.fontStyle,
-                                                                              ),
-                                                                        ),
-                                                                        Row(
-                                                                          mainAxisSize:
-                                                                              MainAxisSize.min,
-                                                                          crossAxisAlignment:
-                                                                              CrossAxisAlignment.start,
-                                                                          children:
-                                                                              [
-                                                                            if (responsiveVisibility(
-                                                                              context: context,
-                                                                              phone: false,
-                                                                              tablet: false,
-                                                                              tabletLandscape: false,
-                                                                              desktop: false,
-                                                                            ))
-                                                                              Builder(
-                                                                                builder: (context) => FlutterFlowIconButton(
-                                                                                  borderColor: Colors.transparent,
-                                                                                  borderRadius: 15.0,
-                                                                                  borderWidth: 1.0,
-                                                                                  buttonSize: 40.0,
-                                                                                  icon: Icon(
-                                                                                    Icons.edit,
-                                                                                    color: FlutterFlowTheme.of(context).primaryText,
-                                                                                    size: 16.0,
-                                                                                  ),
-                                                                                  showLoadingIndicator: true,
-                                                                                  onPressed: () async {
-                                                                                    await showDialog(
-                                                                                      context: context,
-                                                                                      builder: (dialogContext) {
-                                                                                        return Dialog(
-                                                                                          elevation: 0,
-                                                                                          insetPadding: EdgeInsets.zero,
-                                                                                          backgroundColor: Colors.transparent,
-                                                                                          alignment: AlignmentDirectional(0.0, 0.0).resolve(Directionality.of(context)),
-                                                                                          child: GestureDetector(
-                                                                                            onTap: () {
-                                                                                              FocusScope.of(dialogContext).unfocus();
-                                                                                              FocusManager.instance.primaryFocus?.unfocus();
-                                                                                            },
-                                                                                            child: EditNumberWidget(
-                                                                                              phonenumber: phoneItem,
-                                                                                            ),
-                                                                                          ),
-                                                                                        );
-                                                                                      },
-                                                                                    );
-                                                                                  },
-                                                                                ),
-                                                                              ),
-                                                                            Builder(
-                                                                              builder: (context) => FlutterFlowIconButton(
-                                                                                borderColor: Colors.transparent,
-                                                                                borderRadius: 15.0,
-                                                                                borderWidth: 1.0,
-                                                                                buttonSize: 40.0,
-                                                                                icon: Icon(
-                                                                                  Icons.edit,
-                                                                                  color: FlutterFlowTheme.of(context).primaryText,
-                                                                                  size: 16.0,
-                                                                                ),
-                                                                                showLoadingIndicator: true,
-                                                                                onPressed: () async {
-                                                                                  await showDialog(
-                                                                                    context: context,
-                                                                                    builder: (dialogContext) {
-                                                                                      return Dialog(
-                                                                                        elevation: 0,
-                                                                                        insetPadding: EdgeInsets.zero,
-                                                                                        backgroundColor: Colors.transparent,
-                                                                                        alignment: AlignmentDirectional(0.0, 0.0).resolve(Directionality.of(context)),
-                                                                                        child: GestureDetector(
-                                                                                          onTap: () {
-                                                                                            FocusScope.of(dialogContext).unfocus();
-                                                                                            FocusManager.instance.primaryFocus?.unfocus();
-                                                                                          },
-                                                                                          child: EditNumberWidget(
-                                                                                            phonenumber: phoneItem,
-                                                                                          ),
-                                                                                        ),
-                                                                                      );
-                                                                                    },
-                                                                                  );
-                                                                                },
-                                                                              ),
-                                                                            ),
-                                                                            FlutterFlowIconButton(
-                                                                              borderColor: Colors.transparent,
-                                                                              borderRadius: 15.0,
-                                                                              borderWidth: 1.0,
-                                                                              buttonSize: 40.0,
-                                                                              icon: FaIcon(
-                                                                                FontAwesomeIcons.trashAlt,
-                                                                                color: FlutterFlowTheme.of(context).error,
-                                                                                size: 16.0,
-                                                                              ),
-                                                                              showLoadingIndicator: true,
-                                                                              onPressed: () async {
-                                                                                _model.apiResult7or = await VapiGroup.deletePhoneCall.call(
-                                                                                  id: phoneItem.id,
-                                                                                );
-
-                                                                                if ((_model.apiResult7or?.succeeded ?? true)) {
-                                                                                  await currentUserDocument!.company!.update({
-                                                                                    ...mapToFirestore(
-                                                                                      {
-                                                                                        'companyPhoneNumbers': FieldValue.arrayRemove([
-                                                                                          phoneItem.phoneNumber
-                                                                                        ]),
-                                                                                        'phoneNumberMap': FieldValue.arrayRemove([
-                                                                                          getPhoneNumberFirestoreData(
-                                                                                            updatePhoneNumberStruct(
-                                                                                              phoneItem,
-                                                                                              clearUnsetFields: false,
-                                                                                            ),
-                                                                                            true,
-                                                                                          )
-                                                                                        ]),
-                                                                                      },
-                                                                                    ),
-                                                                                  });
-                                                                                  ScaffoldMessenger.of(context).showSnackBar(
-                                                                                    SnackBar(
-                                                                                      content: Text(
-                                                                                        'Phone Number deleted successfully',
-                                                                                        style: TextStyle(
-                                                                                          color: FlutterFlowTheme.of(context).secondaryBackground,
-                                                                                        ),
-                                                                                      ),
-                                                                                      duration: Duration(milliseconds: 4000),
-                                                                                      backgroundColor: Color(0xFF45A671),
-                                                                                    ),
-                                                                                  );
-                                                                                } else {
-                                                                                  ScaffoldMessenger.of(context).showSnackBar(
-                                                                                    SnackBar(
-                                                                                      content: Text(
-                                                                                        'Oops SOme error eoccured',
-                                                                                        style: TextStyle(
-                                                                                          color: FlutterFlowTheme.of(context).secondaryBackground,
-                                                                                        ),
-                                                                                      ),
-                                                                                      duration: Duration(milliseconds: 4000),
-                                                                                      backgroundColor: Color(0xFFBB6E7B),
-                                                                                    ),
-                                                                                  );
-                                                                                }
-
-                                                                                safeSetState(() {});
-                                                                              },
-                                                                            ),
-                                                                          ].divide(SizedBox(width: 10.0)),
-                                                                        ),
-                                                                      ]
-                                                                          .map((c) =>
-                                                                              DataCell(c))
-                                                                          .toList(),
-                                                                    ),
-                                                                    paginated:
-                                                                        true,
-                                                                    selectable:
-                                                                        false,
-                                                                    hidePaginator:
-                                                                        false,
-                                                                    showFirstLastButtons:
-                                                                        false,
-                                                                    headingRowHeight:
-                                                                        56.0,
-                                                                    dataRowHeight:
-                                                                        60.0,
-                                                                    columnSpacing:
-                                                                        20.0,
-                                                                    headingRowColor:
-                                                                        FlutterFlowTheme.of(context)
-                                                                            .secondaryBackground,
-                                                                    borderRadius:
-                                                                        BorderRadius.circular(
-                                                                            8.0),
-                                                                    addHorizontalDivider:
-                                                                        true,
-                                                                    addTopAndBottomDivider:
-                                                                        true,
-                                                                    hideDefaultHorizontalDivider:
-                                                                        true,
-                                                                    horizontalDividerColor:
-                                                                        FlutterFlowTheme.of(context)
-                                                                            .alternate,
-                                                                    horizontalDividerThickness:
-                                                                        0.5,
-                                                                    addVerticalDivider:
-                                                                        false,
-                                                                  );
-                                                                },
-                                                              );
-                                                            } else {
-                                                              return Column(
-                                                                mainAxisSize:
-                                                                    MainAxisSize
-                                                                        .max,
-                                                                mainAxisAlignment:
-                                                                    MainAxisAlignment
-                                                                        .center,
-                                                                children: [
-                                                                  Text(
-                                                                    'No Phone Number\nAvailable',
-                                                                    textAlign:
-                                                                        TextAlign
-                                                                            .center,
-                                                                    style: FlutterFlowTheme.of(
-                                                                            context)
-                                                                        .headlineMedium
-                                                                        .override(
-                                                                          font:
-                                                                              GoogleFonts.interTight(
-                                                                            fontWeight:
-                                                                                FontWeight.w500,
-                                                                            fontStyle:
-                                                                                FlutterFlowTheme.of(context).headlineMedium.fontStyle,
-                                                                          ),
-                                                                          fontSize:
-                                                                              16.0,
-                                                                          letterSpacing:
-                                                                              0.0,
-                                                                          fontWeight:
-                                                                              FontWeight.w500,
-                                                                          fontStyle: FlutterFlowTheme.of(context)
-                                                                              .headlineMedium
-                                                                              .fontStyle,
-                                                                        ),
-                                                                  ),
-                                                                  SizedBox(height: 20.0),
-                                                                  FFButtonWidget(
-                                                                    onPressed: () async {
-                                                                      showDialog(
-                                                                        barrierDismissible:
-                                                                            false,
-                                                                        context: context,
-                                                                        builder:
-                                                                            (dialogContext) {
-                                                                          return Dialog(
-                                                                            elevation: 0,
-                                                                            insetPadding:
-                                                                                EdgeInsets
-                                                                                    .zero,
-                                                                            backgroundColor:
-                                                                                Colors
-                                                                                    .transparent,
-                                                                            alignment: AlignmentDirectional(
-                                                                                    0.0, 0.0)
-                                                                                .resolve(
-                                                                                    Directionality.of(
-                                                                                        context)),
-                                                                            child:
-                                                                                GestureDetector(
-                                                                              onTap: () {
-                                                                                FocusScope.of(
-                                                                                        dialogContext)
-                                                                                    .unfocus();
-                                                                                FocusManager
-                                                                                    .instance
-                                                                                    .primaryFocus
-                                                                                    ?.unfocus();
-                                                                              },
-                                                                              child:
-                                                                                  WaitingAlertWidget(),
-                                                                            ),
-                                                                          );
-                                                                        },
-                                                                      );
-
-                                                                      _model.comapny =
-                                                                          await CompanyRecord
-                                                                              .getDocumentOnce(
-                                                                                  currentUserDocument!
-                                                                                      .company!);
-                                                                      while (
-                                                                          _model.codeCheck! <
-                                                                              1) {
-                                                                        _model.checkPhoneNumber =
-                                                                            await TwillioGroup
-                                                                                .searchNumberCall
-                                                                                .call(
-                                                                          areaCode: functions
-                                                                              .returnRandomAreaCode(),
-                                                                        );
-
-                                                                        if ((_model.checkPhoneNumber
-                                                                                    ?.statusCode ??
-                                                                                200) ==
-                                                                            200) {
-                                                                          if (TwillioGroup
-                                                                                  .searchNumberCall
-                                                                                  .phoneNumbers(
-                                                                                    (_model.checkPhoneNumber
-                                                                                            ?.jsonBody ??
-                                                                                        ''),
-                                                                                  )!
-                                                                                  .length >
-                                                                              0) {
-                                                                            _model.buyvonagenumberresponse =
-                                                                                await TwillioGroup
-                                                                                    .buyPhoneNumberCall
-                                                                                    .call(
-                                                                              phonenNumber:
-                                                                                  getJsonField(
-                                                                                TwillioGroup
-                                                                                    .searchNumberCall
-                                                                                    .phoneNumbers(
-                                                                                      (_model.checkPhoneNumber?.jsonBody ??
-                                                                                          ''),
-                                                                                    )
-                                                                                    ?.firstOrNull,
-                                                                                r'''$.phone_number''',
-                                                                              ).toString(),
-                                                                              friendlyName:
-                                                                                  _model
-                                                                                      .comapny
-                                                                                      ?.name,
-                                                                            );
-
-                                                                            if ((_model
-                                                                                    .buyvonagenumberresponse
-                                                                                    ?.succeeded ??
-                                                                                true)) {
-                                                                              _model.vapiPhoneNumber =
-                                                                                  await VapiGroup
-                                                                                      .createPhoneNumberCall
-                                                                                      .call(
-                                                                                number:
-                                                                                    getJsonField(
-                                                                                  TwillioGroup
-                                                                                      .searchNumberCall
-                                                                                      .phoneNumbers(
-                                                                                        (_model.checkPhoneNumber?.jsonBody ??
-                                                                                            ''),
-                                                                                      )
-                                                                                      ?.firstOrNull,
-                                                                                  r'''$.phone_number''',
-                                                                                ).toString(),
-                                                                                name: _model
-                                                                                    .comapny
-                                                                                    ?.name,
-                                                                              );
-
-                                                                              if ((_model.vapiPhoneNumber?.succeeded ?? true)) {
-                                                                                await currentUserDocument!.company!.update({
-                                                                                  ...mapToFirestore(
-                                                                                    {
-                                                                                      'companyPhoneNumbers': FieldValue.arrayUnion([
-                                                                                        VapiGroup.createPhoneNumberCall.number(
-                                                                                          (_model.vapiPhoneNumber?.jsonBody ?? ''),
-                                                                                        )
-                                                                                      ]),
-                                                                                      'phoneNumberMap': FieldValue.arrayUnion([
-                                                                                        getPhoneNumberFirestoreData(
-                                                                                          updatePhoneNumberStruct(
-                                                                                            PhoneNumberStruct(
-                                                                                              id: VapiGroup.createPhoneNumberCall
-                                                                                                  .id(
-                                                                                                (_model.vapiPhoneNumber?.jsonBody ?? ''),
-                                                                                              ),
-                                                                                              phoneNumber: VapiGroup.createPhoneNumberCall
-                                                                                                  .number(
-                                                                                                (_model.vapiPhoneNumber?.jsonBody ?? ''),
-                                                                                              ),
-                                                                                              assistant: '',
-                                                                                              forwardingNumber: '',
-                                                                                              label: Labels.inbound_outbound,
-                                                                                              primary: true,
-                                                                                            ),
-                                                                                          ),
-                                                                                        ),
-                                                                                      ]),
-                                                                                    },
-                                                                                  ),
-                                                                                });
-
-                                                                                Navigator.pop(context);
-                                                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                                                  SnackBar(
-                                                                                    content: Text(
-                                                                                      'Phone number purchased successfully!',
-                                                                                    ),
-                                                                                    duration: Duration(milliseconds: 4000),
-                                                                                    backgroundColor: Color(0xFF4CAF50),
-                                                                                  ),
-                                                                                );
-                                                                              }
-                                                                            }
-                                                                          }
-                                                                        }
-
-                                                                        _model.codeCheck = _model.codeCheck! + 1;
-                                                                      }
-
-                                                                      _model.codeCheck = 0;
-                                                                      safeSetState(() {});
-                                                                    },
-                                                                    text: 'Buy Phone Number',
-                                                                    options: FFButtonOptions(
-                                                                      width: 200.0,
-                                                                      height: 50.0,
-                                                                      padding: EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 0.0),
-                                                                      iconPadding: EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 0.0),
-                                                                      color: Color(0xFF4CAF50),
-                                                                      textStyle: FlutterFlowTheme.of(context).titleSmall.override(
-                                                                            fontFamily: 'Inter Tight',
-                                                                            color: Colors.white,
-                                                                            fontSize: 16.0,
-                                                                            letterSpacing: 0.0,
-                                                                            fontWeight: FontWeight.w600,
-                                                                          ),
-                                                                      elevation: 3.0,
-                                                                      borderSide: BorderSide(
-                                                                        color: Colors.transparent,
-                                                                        width: 1.0,
-                                                                      ),
-                                                                      borderRadius: BorderRadius.circular(12.0),
-                                                                    ),
-                                                                  ),
-                                                                ],
-                                                              );
-                                                            }
-                                                          },
-                                                        );
-                                                      },
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                            ].divide(SizedBox(height: 15.0)),
-                                          ),
-                                        ),
-                                      );
-                                    } else {
-                                      return Align(
-                                        alignment:
-                                            AlignmentDirectional(0.0, 0.0),
-                                        child: wrapWithModel(
-                                          model: _model.subscribeModel,
-                                          updateCallback: () =>
-                                              safeSetState(() {}),
-                                          child: SubscribeWidget(),
                                         ),
                                       );
                                     }
+                                    final company = snapshot.data!;
+                                    return SingleChildScrollView(
+                                      padding: const EdgeInsets.all(20.0),
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          _buildSearchSection(context, company),
+                                          const SizedBox(height: 24.0),
+                                          _buildNumbersTable(context, company),
+                                        ],
+                                      ),
+                                    );
                                   },
-                                ),
-                              ),
+                                );
+                              },
                             ),
-                          ],
-                        ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -1019,4 +163,604 @@ class _PhoneNumberWidgetState extends State<PhoneNumberWidget> {
       ),
     );
   }
+
+  Widget _buildSearchSection(
+    BuildContext context,
+    CompanyRecord companyRecord,
+  ) {
+    _model.areaCodeController ??=
+        TextEditingController(text: _model.selectedAreaCode ?? '');
+    _model.areaCodeFocusNode ??= FocusNode();
+
+    final theme = FlutterFlowTheme.of(context);
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        color: theme.primaryBackground,
+        borderRadius: BorderRadius.circular(16.0),
+      ),
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Search available numbers',
+            style: theme.titleMedium.override(
+              font: GoogleFonts.interTight(),
+              letterSpacing: 0.0,
+            ),
+          ),
+          const SizedBox(height: 12.0),
+          Row(
+            children: [
+              Expanded(
+                child: TextFormField(
+                  controller: _model.areaCodeController,
+                  focusNode: _model.areaCodeFocusNode,
+                  decoration: InputDecoration(
+                    labelText: 'Area code (optional)',
+                    labelStyle: theme.labelMedium,
+                    enabledBorder: OutlineInputBorder(
+                      borderSide: BorderSide(
+                        color: theme.alternate,
+                        width: 1.0,
+                      ),
+                      borderRadius: BorderRadius.circular(12.0),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderSide: BorderSide(
+                        color: theme.primary,
+                        width: 1.5,
+                      ),
+                      borderRadius: BorderRadius.circular(12.0),
+                    ),
+                  ),
+                  keyboardType: TextInputType.number,
+                  onChanged: (value) => _model.selectedAreaCode = value,
+                ),
+              ),
+              const SizedBox(width: 12.0),
+              FFButtonWidget(
+                onPressed: _model.isSearching
+                    ? null
+                    : () async {
+                        await _searchNumbers(companyRecord);
+                      },
+                text: _model.isSearching ? 'Searching…' : 'Search',
+                options: FFButtonOptions(
+                  height: 44.0,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 24.0, vertical: 0),
+                  color: theme.primary,
+                  textStyle: theme.titleSmall.override(
+                    font: GoogleFonts.interTight(),
+                    color: Colors.white,
+                    letterSpacing: 0.0,
+                  ),
+                  elevation: 2.0,
+                  borderRadius: BorderRadius.circular(12.0),
+                ),
+              ),
+            ],
+          ),
+          if (_model.searchError != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12.0),
+              child: Text(
+                _model.searchError!,
+                style: theme.labelMedium.override(
+                  font: GoogleFonts.inter(),
+                  color: theme.error,
+                  letterSpacing: 0.0,
+                ),
+              ),
+            ),
+          if (_model.isSearching)
+            Padding(
+              padding: const EdgeInsets.only(top: 16.0),
+              child: Row(
+                children: [
+                  CircularProgressIndicator(
+                    valueColor: AlwaysStoppedAnimation<Color>(theme.primary),
+                  ),
+                  const SizedBox(width: 12.0),
+                  Text(
+                    'Contacting Twilio…',
+                    style: theme.bodyMedium.override(
+                      font: GoogleFonts.inter(),
+                      letterSpacing: 0.0,
+                    ),
+                  ),
+                ],
+              ),
+            )
+          else ...[
+            if (_model.searchResults.isEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 16.0),
+                child: Text(
+                  'Enter an area code and tap search to view available numbers.',
+                  style: theme.bodyMedium.override(
+                    font: GoogleFonts.inter(),
+                    letterSpacing: 0.0,
+                  ),
+                ),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.only(top: 16.0),
+                child: Column(
+                  children: _model.searchResults
+                      .map(
+                        (number) => _buildSearchResultCard(
+                          context,
+                          number,
+                          companyRecord,
+                        ),
+                      )
+                      .toList(),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSearchResultCard(
+    BuildContext context,
+    AvailablePhoneNumber number,
+    CompanyRecord company,
+  ) {
+    final isProcessing = _model.processingPhone == number.phoneNumber;
+    final theme = FlutterFlowTheme.of(context);
+
+    final locationParts = <String>[
+      if (number.friendlyName != null && number.friendlyName!.isNotEmpty)
+        number.friendlyName!,
+      if (number.locality != null && number.locality!.isNotEmpty)
+        number.locality!,
+      if (number.region != null && number.region!.isNotEmpty) number.region!,
+      if (number.isoCountry != null && number.isoCountry!.isNotEmpty)
+        number.isoCountry!,
+    ];
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.only(bottom: 12.0),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(12.0),
+        color: theme.secondaryBackground,
+        border: Border.all(
+          color: theme.alternate,
+        ),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 16.0, vertical: 12.0),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  number.phoneNumber,
+                  style: theme.titleSmall.override(
+                    font: GoogleFonts.interTight(),
+                    letterSpacing: 0.0,
+                  ),
+                ),
+                if (locationParts.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 4.0),
+                    child: Text(
+                      locationParts.join(' • '),
+                      style: theme.bodySmall.override(
+                        font: GoogleFonts.inter(),
+                        letterSpacing: 0.0,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          FFButtonWidget(
+            onPressed: isProcessing
+                ? null
+                : () async {
+                    await _purchaseNumber(company, number);
+                  },
+            text: isProcessing ? 'Purchasing…' : 'Purchase',
+            options: FFButtonOptions(
+              height: 38.0,
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 20.0, vertical: 0.0),
+              color: theme.primary,
+              textStyle: theme.titleSmall.override(
+                font: GoogleFonts.interTight(),
+                color: Colors.white,
+                letterSpacing: 0.0,
+              ),
+              borderRadius: BorderRadius.circular(10.0),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildNumbersTable(
+    BuildContext context,
+    CompanyRecord company,
+  ) {
+    final numbers = company.phoneNumberMap;
+    final theme = FlutterFlowTheme.of(context);
+
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16.0),
+        color: theme.primaryBackground,
+      ),
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Configured numbers',
+            style: theme.titleMedium.override(
+              font: GoogleFonts.interTight(),
+              letterSpacing: 0.0,
+            ),
+          ),
+          const SizedBox(height: 12.0),
+          if (numbers.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24.0),
+              child: Center(
+                child: Text(
+                  'No phone numbers configured yet.',
+                  style: theme.bodyMedium.override(
+                    font: GoogleFonts.inter(),
+                    letterSpacing: 0.0,
+                  ),
+                ),
+              ),
+            )
+          else
+            FlutterFlowDataTable<PhoneNumberStruct>(
+              controller: _model.paginatedDataTableController,
+              data: numbers,
+              columnsBuilder: (_) => [
+                DataColumn2(
+                  label: Text(
+                    'Number',
+                    style: theme.labelLarge.override(
+                      font: GoogleFonts.inter(),
+                      letterSpacing: 0.0,
+                    ),
+                  ),
+                ),
+                DataColumn2(
+                  label: Text(
+                    'Forwarding',
+                    style: theme.labelLarge.override(
+                      font: GoogleFonts.inter(),
+                      letterSpacing: 0.0,
+                    ),
+                  ),
+                ),
+                DataColumn2(
+                  label: Text(
+                    'Actions',
+                    style: theme.labelLarge.override(
+                      font: GoogleFonts.inter(),
+                      letterSpacing: 0.0,
+                    ),
+                  ),
+                ),
+              ],
+              dataRowBuilder: (phoneItem, index, __, ___) {
+                final isProcessing =
+                    _model.processingPhone == phoneItem.phoneNumber;
+                return DataRow(cells: [
+                  DataCell(
+                    Text(
+                      phoneItem.phoneNumber,
+                      style: theme.bodyMedium.override(
+                        font: GoogleFonts.inter(),
+                        letterSpacing: 0.0,
+                      ),
+                    ),
+                  ),
+                  DataCell(
+                    Text(
+                      valueOrDefault<String>(
+                        phoneItem.forwardingNumber,
+                        'Unset',
+                      ),
+                      style: theme.bodyMedium.override(
+                        font: GoogleFonts.inter(),
+                        letterSpacing: 0.0,
+                      ),
+                    ),
+                  ),
+                  DataCell(
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        FlutterFlowIconButton(
+                          borderColor: Colors.transparent,
+                          borderRadius: 12.0,
+                          borderWidth: 1.0,
+                          buttonSize: 40.0,
+                          icon: Icon(
+                            Icons.settings,
+                            color: theme.primaryText,
+                            size: 18.0,
+                          ),
+                          onPressed: () async {
+                            await _configureNumber(
+                              phoneItem.phoneNumber,
+                              company.name,
+                            );
+                          },
+                        ),
+                        FlutterFlowIconButton(
+                          borderColor: Colors.transparent,
+                          borderRadius: 12.0,
+                          borderWidth: 1.0,
+                          buttonSize: 40.0,
+                          icon: Icon(
+                            Icons.delete_outline,
+                            color: theme.error,
+                            size: 18.0,
+                          ),
+                          onPressed: isProcessing
+                              ? null
+                              : () async {
+                                  await _releaseNumber(company, phoneItem);
+                                },
+                        ),
+                        FlutterFlowIconButton(
+                          borderColor: Colors.transparent,
+                          borderRadius: 12.0,
+                          borderWidth: 1.0,
+                          buttonSize: 40.0,
+                          icon: Icon(
+                            Icons.edit,
+                            color: theme.primaryText,
+                            size: 18.0,
+                          ),
+                          onPressed: () async {
+                            await showDialog(
+                              context: context,
+                              builder: (dialogContext) {
+                                return Dialog(
+                                  elevation: 0,
+                                  insetPadding: EdgeInsets.zero,
+                                  backgroundColor: Colors.transparent,
+                                  child: GestureDetector(
+                                    onTap: () {
+                                      FocusScope.of(dialogContext).unfocus();
+                                      FocusManager.instance.primaryFocus
+                                          ?.unfocus();
+                                    },
+                                    child: EditNumberWidget(
+                                      phonenumber: phoneItem,
+                                    ),
+                                  ),
+                                );
+                              },
+                            );
+                            safeSetState(() {});
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ]);
+              },
+              paginated: false,
+              hidePaginator: true,
+              selectable: false,
+              minWidth: 700.0,
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _searchNumbers(CompanyRecord company) async {
+    final areaCode = _model.areaCodeController?.text.trim();
+    setState(() {
+      _model.isSearching = true;
+      _model.searchError = null;
+      _model.processingPhone = null;
+    });
+
+    try {
+      final results = await WorkflowService.searchPhoneNumbers(
+        areaCode: areaCode?.isEmpty ?? true ? null : areaCode,
+        country: 'US',
+        limit: 10,
+      );
+      setState(() {
+        _model.searchResults = results;
+      });
+    } catch (error) {
+      setState(() {
+        _model.searchResults = const [];
+        _model.searchError = error.toString();
+      });
+    } finally {
+      setState(() {
+        _model.isSearching = false;
+      });
+    }
+  }
+
+  Future<void> _purchaseNumber(
+    CompanyRecord company,
+    AvailablePhoneNumber number,
+  ) async {
+    final companyId = company.reference.id;
+    setState(() {
+      _model.processingPhone = number.phoneNumber;
+      _model.searchError = null;
+    });
+
+    try {
+      await WorkflowService.purchasePhoneNumber(
+        phoneNumber: number.phoneNumber,
+        friendlyName: company.name,
+        companyId: companyId,
+      );
+      await WorkflowService.configurePhoneNumber(
+        number: number.phoneNumber,
+        friendlyName: company.name,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Phone number ${number.phoneNumber} purchased successfully.',
+            style: TextStyle(
+              color: FlutterFlowTheme.of(context).primaryBackground,
+            ),
+          ),
+          backgroundColor: FlutterFlowTheme.of(context).primary,
+        ),
+      );
+      setState(() {
+        _model.searchResults = _model.searchResults
+            .where((element) => element.phoneNumber != number.phoneNumber)
+            .toList();
+      });
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Failed to purchase number: $error',
+            style: TextStyle(
+              color: FlutterFlowTheme.of(context).primaryBackground,
+            ),
+          ),
+          backgroundColor: FlutterFlowTheme.of(context).error,
+        ),
+      );
+    } finally {
+      setState(() {
+        _model.processingPhone = null;
+      });
+    }
+  }
+
+  Future<void> _configureNumber(
+    String phoneNumber,
+    String? friendlyName,
+  ) async {
+    setState(() {
+      _model.processingPhone = phoneNumber;
+    });
+    try {
+      await WorkflowService.configurePhoneNumber(
+        number: phoneNumber,
+        friendlyName: friendlyName,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Configuration sent to Twilio for $phoneNumber.',
+            style: TextStyle(
+              color: FlutterFlowTheme.of(context).primaryBackground,
+            ),
+          ),
+          backgroundColor: FlutterFlowTheme.of(context).primary,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Failed to configure number: $error',
+            style: TextStyle(
+              color: FlutterFlowTheme.of(context).primaryBackground,
+            ),
+          ),
+          backgroundColor: FlutterFlowTheme.of(context).error,
+        ),
+      );
+    } finally {
+      setState(() {
+        _model.processingPhone = null;
+      });
+    }
+  }
+
+  Future<void> _releaseNumber(
+    CompanyRecord company,
+    PhoneNumberStruct phone,
+  ) async {
+    if (phone.id.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Cannot release this number because the Twilio SID is missing.',
+            style: TextStyle(
+              color: FlutterFlowTheme.of(context).primaryBackground,
+            ),
+          ),
+          backgroundColor: FlutterFlowTheme.of(context).error,
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _model.processingPhone = phone.phoneNumber;
+    });
+
+    try {
+      await WorkflowService.releasePhoneNumber(
+        sid: phone.id,
+        phoneNumber: phone.phoneNumber,
+        companyId: company.reference.id,
+        friendlyName: company.name,
+      );
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Phone number ${phone.phoneNumber} released.',
+            style: TextStyle(
+              color: FlutterFlowTheme.of(context).primaryBackground,
+            ),
+          ),
+          backgroundColor: FlutterFlowTheme.of(context).primary,
+        ),
+      );
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Failed to release number: $error',
+            style: TextStyle(
+              color: FlutterFlowTheme.of(context).primaryBackground,
+            ),
+          ),
+          backgroundColor: FlutterFlowTheme.of(context).error,
+        ),
+      );
+    } finally {
+      setState(() {
+        _model.processingPhone = null;
+      });
+    }
+  }
 }
+

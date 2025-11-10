@@ -588,39 +588,53 @@ class _BillingWidgetState extends State<BillingWidget>
                                                               ),
                                                               FutureBuilder<
                                                                   ApiCallResponse>(
-                                                                future: StripeGroup
-                                                                    .getSubscriptionUsageDetailsCall
-                                                                    .call(
-                                                                  coustmer: valueOrDefault(
-                                                                      currentUserDocument
-                                                                          ?.stripeCustomerId,
-                                                                      ''),
-                                                                ),
+                                                                future: (currentUserDocument?.stripeCustomerId != null && currentUserDocument!.stripeCustomerId.isNotEmpty)
+                                                                    ? StripeGroup
+                                                                        .getSubscriptionUsageDetailsCall
+                                                                        .call(
+                                                                      coustmer: currentUserDocument!.stripeCustomerId,
+                                                                    )
+                                                                    : Future.error('No Stripe customer ID found. Please subscribe to view billing details.'),
                                                                 builder: (context,
                                                                     snapshot) {
                                                                   // Customize what your widget looks like when it's loading.
-                                                                  if (!snapshot
-                                                                      .hasData) {
+                                                                  if (snapshot.hasError) {
                                                                     return Center(
-                                                                      child:
-                                                                          SizedBox(
-                                                                        width:
-                                                                            50.0,
-                                                                        height:
-                                                                            50.0,
-                                                                        child:
-                                                                            CircularProgressIndicator(
-                                                                          valueColor:
-                                                                              AlwaysStoppedAnimation<Color>(
-                                                                            FlutterFlowTheme.of(context).primary,
+                                                                      child: Column(
+                                                                        mainAxisAlignment: MainAxisAlignment.center,
+                                                                        children: [
+                                                                          Icon(
+                                                                            Icons.payment_outlined,
+                                                                            size: 50.0,
+                                                                            color: FlutterFlowTheme.of(context).secondaryText,
                                                                           ),
+                                                                          SizedBox(height: 16.0),
+                                                                          Text(
+                                                                            'No billing information available',
+                                                                            style: FlutterFlowTheme.of(context).bodyMedium,
+                                                                          ),
+                                                                          SizedBox(height: 8.0),
+                                                                          Text(
+                                                                            'Subscribe to view your billing details and usage',
+                                                                            style: FlutterFlowTheme.of(context).bodySmall,
+                                                                            textAlign: TextAlign.center,
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                    );
+                                                                  }
+                                                                  
+                                                                  if (!snapshot.hasData) {
+                                                                    return Center(
+                                                                      child: CircularProgressIndicator(
+                                                                        valueColor: AlwaysStoppedAnimation<Color>(
+                                                                          FlutterFlowTheme.of(context).primary,
                                                                         ),
                                                                       ),
                                                                     );
                                                                   }
                                                                   final containerGetSubscriptionUsageDetailsResponse =
-                                                                      snapshot
-                                                                          .data!;
+                                                                      snapshot.data!;
 
                                                                   return Container(
                                                                     width:
@@ -938,19 +952,27 @@ class _BillingWidgetState extends State<BillingWidget>
                                                                   Expanded(
                                                                     child: FutureBuilder<
                                                                         ApiCallResponse>(
-                                                                      future: StripeGroup
-                                                                          .getPaymentMethodsCall
-                                                                          .call(
-                                                                        customer: valueOrDefault(
-                                                                            currentUserDocument?.stripeCustomerId,
-                                                                            ''),
-                                                                      ),
+                                                                      future: (currentUserDocument?.stripeCustomerId != null && currentUserDocument!.stripeCustomerId.isNotEmpty)
+                                                                          ? StripeGroup
+                                                                              .getPaymentMethodsCall
+                                                                              .call(
+                                                                            customer: currentUserDocument!.stripeCustomerId,
+                                                                          )
+                                                                          : Future.error('No Stripe customer ID'),
                                                                       builder:
                                                                           (context,
                                                                               snapshot) {
                                                                         // Customize what your widget looks like when it's loading.
                                                                         if (!snapshot
                                                                             .hasData) {
+                                                                          if (snapshot.hasError) {
+                                                                            return Center(
+                                                                              child: Text(
+                                                                                'No payment methods available. Please subscribe to a plan.',
+                                                                                style: FlutterFlowTheme.of(context).bodyMedium,
+                                                                              ),
+                                                                            );
+                                                                          }
                                                                           return Center(
                                                                             child:
                                                                                 SizedBox(
@@ -1320,19 +1342,26 @@ class _BillingWidgetState extends State<BillingWidget>
                                                               Expanded(
                                                                 child: FutureBuilder<
                                                                     ApiCallResponse>(
-                                                                  future: StripeGroup
-                                                                      .getInvoicesCall
-                                                                      .call(
-                                                                    customer: valueOrDefault(
-                                                                        currentUserDocument
-                                                                            ?.stripeCustomerId,
-                                                                        ''),
-                                                                  ),
+                                                                  future: (currentUserDocument?.stripeCustomerId != null && currentUserDocument!.stripeCustomerId.isNotEmpty)
+                                                                      ? StripeGroup
+                                                                          .getInvoicesCall
+                                                                          .call(
+                                                                        customer: currentUserDocument!.stripeCustomerId,
+                                                                      )
+                                                                      : Future.error('No Stripe customer ID'),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
                                                                     if (!snapshot
                                                                         .hasData) {
+                                                                      if (snapshot.hasError) {
+                                                                        return Center(
+                                                                          child: Text(
+                                                                            'No billing history available. Please subscribe to a plan.',
+                                                                            style: FlutterFlowTheme.of(context).bodyMedium,
+                                                                          ),
+                                                                        );
+                                                                      }
                                                                       return Center(
                                                                         child:
                                                                             SizedBox(

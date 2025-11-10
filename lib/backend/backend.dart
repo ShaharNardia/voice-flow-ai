@@ -19,6 +19,7 @@ export 'package:firebase_core/firebase_core.dart';
 export 'schema/index.dart';
 export 'schema/util/firestore_util.dart';
 export 'schema/util/schema_util.dart';
+export 'workflows/workflow_service.dart';
 
 export 'schema/user_record.dart';
 export 'schema/jobs_record.dart';
@@ -291,16 +292,19 @@ Future<int> queryCollectionCount(
   Query collection, {
   Query Function(Query)? queryBuilder,
   int limit = -1,
-}) {
+}) async {
   final builder = queryBuilder ?? (q) => q;
   var query = builder(collection);
   if (limit > 0) {
     query = query.limit(limit);
   }
-
-  return query.count().get().catchError((err) {
+  try {
+    final snapshot = await query.count().get();
+    return snapshot.count ?? 0;
+  } catch (err) {
     print('Error querying $collection: $err');
-  }).then((value) => value.count!);
+    return 0;
+  }
 }
 
 Stream<List<T>> queryCollection<T>(

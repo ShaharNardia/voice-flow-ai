@@ -1,52 +1,53 @@
-const {onCall} = require("firebase-functions/v2/https");
-const {getAuth} = require("firebase-admin/auth");
-const {getFirestore} = require("firebase-admin/firestore");
-nodemailer = require("nodemailer");
+const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {logger} = require("firebase-functions");
+const sgMail = require("@sendgrid/mail");
+
+if (process.env.SENDGRID_API_KEY) {
+  sgMail.setApiKey(process.env.SENDGRID_API_KEY);
+}
 
 exports.sendMailToCustomer = onCall(async (request) => {
   if (!request.auth?.uid) {
-    return;
+    throw new HttpsError("unauthenticated", "Authentication required.");
   }
-  const data = request.data;
-  const email = data.email;
+
+  if (!process.env.SENDGRID_API_KEY) {
+    logger.error("SENDGRID_API_KEY is not configured.");
+    throw new HttpsError("failed-precondition", "Email service not configured.");
+  }
+
+  const data = request.data || {};
+  const to = data.email;
   const subject = data.subject;
   const body = data.body;
-  const userName = data.userName;
-  const password = data.password;
-  const host = data.host;
-  const port = data.port;
-  // Write your code below!
+  const fromAddress = data.fromEmail || process.env.SENDGRID_FROM_EMAIL;
 
-  const transporter = nodemailer.createTransport({
-    host: host, // "server353.web-hosting.com",
-    port: port, //465, // SMTP SSL Port
-    secure: port === 465 ? true : false, // true for 465, false for other ports
-    auth: {
-      user: userName,
-      pass: password,
-    },
-  });
-
-  const mailOptions = {
-    from: userName, // Sender address
-    to: email, // Recipient address
-    subject: subject,
-    html: body,
-  };
-
-  try {
-    // Send email using Nodemailer
-    const info = await transporter.sendMail(mailOptions);
-    console.log("Email sent successfully: " + info.response);
-
-    // Return a JSON response with success message
-    return "Success";
-  } catch (error) {
-    console.error("Error sending email:", error);
-
-    // Return a JSON response with error message
-    return "Error";
+  if (!to || !subject || !body) {
+    throw new HttpsError("invalid-argument", "Email, subject, and body are required.");
   }
 
-  // Write your code above!
+  if (!fromAddress) {
+    logger.error("sendMailToCustomer missing from address.");
+    throw new HttpsError(
+      "failed-precondition",
+      "Default sender email is not configured.",
+    );
+  }
+
+  try {
+    await sgMail.send({
+      to,
+      from: fromAddress,
+      subject,
+      html: body,
+    });
+
+    return {status: "success"};
+  } catch (error) {
+    logger.error("Error sending email via SendGrid", error);
+    throw new HttpsError(
+      "internal",
+      error?.message || "Error sending email.",
+    );
+  }
 });

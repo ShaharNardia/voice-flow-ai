@@ -1,5 +1,5 @@
 import '/auth/firebase_auth/auth_util.dart';
-import '/backend/api_requests/api_calls.dart';
+import '/backend/workflows/workflow_service.dart';
 import '/flutter_flow/flutter_flow_data_table.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -475,9 +475,10 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                         ),
                                       ),
                                       Expanded(
-                                        child: FutureBuilder<ApiCallResponse>(
-                                          future: VapiGroup.getAllAssistantsCall
-                                              .call(),
+                                        child: FutureBuilder<
+                                            List<AssistantSummary>>(
+                                          future:
+                                              WorkflowService.listAssistants(),
                                           builder: (context, snapshot) {
                                             // Customize what your widget looks like when it's loading.
                                             if (!snapshot.hasData) {
@@ -498,8 +499,7 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                 ),
                                               );
                                             }
-                                            final containerGetAllAssistantsResponse =
-                                                snapshot.data!;
+                                            final assistants = snapshot.data!;
 
                                             return Container(
                                               decoration: BoxDecoration(
@@ -511,33 +511,54 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                 padding: EdgeInsets.all(10.0),
                                                 child: Builder(
                                                   builder: (context) {
-                                                    final agents = VapiGroup
-                                                            .getAllAssistantsCall
-                                                            .assistants(
-                                                              containerGetAllAssistantsResponse
-                                                                  .jsonBody,
-                                                            )
-                                                            ?.where((e) => _model
-                                                                            .textController
-                                                                            .text ==
-                                                                        null ||
-                                                                    _model.textController
-                                                                            .text ==
-                                                                        ''
-                                                                ? functions.getUserAssistants(
-                                                                    e,
-                                                                    currentUserReference
-                                                                        ?.id)!
-                                                                : functions.filterAssistant(
-                                                                    e,
-                                                                    currentUserReference
-                                                                        ?.id,
-                                                                    _model
+                                                    final agents = assistants
+                                                        .map((assistant) => {
+                                                              'id':
+                                                                  assistant.id,
+                                                              'name': assistant
+                                                                  .name,
+                                                              'firstMessage':
+                                                                  assistant
+                                                                      .firstMessage,
+                                                              'language':
+                                                                  assistant
+                                                                      .language,
+                                                              'assistant':
+                                                                  assistant
+                                                                      .definition,
+                                                              'metadata': {
+                                                                'userId':
+                                                                    assistant
+                                                                        .ownerId,
+                                                                'companyId':
+                                                                    assistant
+                                                                        .companyId,
+                                                              },
+                                                            })
+                                                        .where((assistant) =>
+                                                            _model
                                                                         .textController
-                                                                        .text)!)
-                                                            .toList()
-                                                            ?.toList() ??
-                                                        [];
+                                                                        .text ==
+                                                                    null ||
+                                                            _model
+                                                                .textController
+                                                                .text!
+                                                                .isEmpty
+                                                                ? (functions.getUserAssistants(
+                                                                    assistant,
+                                                                    currentUserReference
+                                                                        ?.id) ??
+                                                                    false)
+                                                                : (functions.filterAssistant(
+                                                                      assistant,
+                                                                      currentUserReference
+                                                                          ?.id,
+                                                                      _model
+                                                                          .textController
+                                                                          .text,
+                                                                    ) ??
+                                                                    false))
+                                                        .toList();
 
                                                     return FlutterFlowDataTable<
                                                         dynamic>(
@@ -902,27 +923,21 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                                     true,
                                                                 onPressed:
                                                                     () async {
-                                                                  _model.apiResultscs =
-                                                                      await VapiGroup
-                                                                          .deleteAssistantCall
-                                                                          .call(
-                                                                    id: getJsonField(
-                                                                      agentsItem,
-                                                                      r'''$.id''',
-                                                                    ).toString(),
-                                                                  );
-
-                                                                  if ((_model.apiResultscs
-                                                                              ?.succeeded ??
-                                                                          true) ==
-                                                                      true) {
+                                                                  final assistantId = getJsonField(
+                                                                    agentsItem,
+                                                                    r'''$.id''',
+                                                                  ).toString();
+                                                                  try {
+                                                                    await WorkflowService.deleteAssistant(
+                                                                      assistantId,
+                                                                    );
                                                                     ScaffoldMessenger.of(
                                                                             context)
                                                                         .showSnackBar(
                                                                       SnackBar(
                                                                         content:
-                                                                            Text(
-                                                                          'Assistant deled successfully',
+                                                                            const Text(
+                                                                          'Assistant deleted successfully',
                                                                           style:
                                                                               TextStyle(
                                                                             color:
@@ -930,15 +945,54 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                                           ),
                                                                         ),
                                                                         duration:
-                                                                            Duration(milliseconds: 4000),
+                                                                            const Duration(milliseconds: 4000),
                                                                         backgroundColor:
                                                                             FlutterFlowTheme.of(context).secondary,
                                                                       ),
                                                                     );
+                                                                  } on WorkflowException catch (error) {
+                                                                    ScaffoldMessenger.of(
+                                                                            context)
+                                                                        .showSnackBar(
+                                                                      SnackBar(
+                                                                        content:
+                                                                            Text(
+                                                                          error.message,
+                                                                          style:
+                                                                              const TextStyle(
+                                                                            color:
+                                                                                Colors.white,
+                                                                          ),
+                                                                        ),
+                                                                        duration:
+                                                                            const Duration(milliseconds: 4000),
+                                                                        backgroundColor:
+                                                                            FlutterFlowTheme.of(context).customColor10,
+                                                                      ),
+                                                                    );
+                                                                  } catch (error) {
+                                                                    ScaffoldMessenger.of(
+                                                                            context)
+                                                                        .showSnackBar(
+                                                                      SnackBar(
+                                                                        content:
+                                                                            Text(
+                                                                          'Failed to delete assistant. ${error.toString()}',
+                                                                          style:
+                                                                              const TextStyle(
+                                                                            color:
+                                                                                Colors.white,
+                                                                          ),
+                                                                        ),
+                                                                        duration:
+                                                                            const Duration(milliseconds: 4000),
+                                                                        backgroundColor:
+                                                                            FlutterFlowTheme.of(context).customColor10,
+                                                                      ),
+                                                                    );
                                                                   }
 
-                                                                  safeSetState(
-                                                                      () {});
+                                                                  safeSetState(() {});
                                                                 },
                                                               ),
                                                             ].divide(SizedBox(
