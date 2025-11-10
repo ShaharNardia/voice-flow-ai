@@ -105,7 +105,7 @@ class _LeadsWidgetState extends State<LeadsWidget> {
                                 if (valueOrDefault<bool>(
                                         currentUserDocument?.subscribed,
                                         false) ==
-                                    true) {
+                                    true || currentUserDocument?.role == Role.admin) {
                                   return Container(
                                     height: 1000.0,
                                     decoration: BoxDecoration(),

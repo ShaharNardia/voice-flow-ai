@@ -103,7 +103,7 @@ class _AgentWidgetState extends State<AgentWidget> {
                                   if (valueOrDefault<bool>(
                                           currentUserDocument?.subscribed,
                                           false) ==
-                                      true) {
+                                      true || currentUserDocument?.role == Role.admin) {
                                     return Padding(
                                       padding: EdgeInsets.all(20.0),
                                       child: Container(

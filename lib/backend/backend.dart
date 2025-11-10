@@ -19,6 +19,7 @@ export 'package:firebase_core/firebase_core.dart';
 export 'schema/index.dart';
 export 'schema/util/firestore_util.dart';
 export 'schema/util/schema_util.dart';
+export 'schema/enums/enums.dart';
 export 'workflows/workflow_service.dart';
 
 export 'schema/user_record.dart';

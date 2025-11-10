@@ -99,7 +99,7 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                 if (valueOrDefault<bool>(
                                         currentUserDocument?.subscribed,
                                         false) ==
-                                    true) {
+                                    true || currentUserDocument?.role == Role.admin) {
                                   return Padding(
                                     padding: EdgeInsets.all(15.0),
                                     child: Column(

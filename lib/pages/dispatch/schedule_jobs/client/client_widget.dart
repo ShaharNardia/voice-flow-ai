@@ -110,7 +110,7 @@ class _ClientWidgetState extends State<ClientWidget>
                         builder: (context) {
                           if (valueOrDefault<bool>(
                                   currentUserDocument?.subscribed, false) ==
-                              true) {
+                              true || currentUserDocument?.role == Role.admin) {
                             return Padding(
                               padding: EdgeInsets.all(10.0),
                               child: Container(

@@ -103,7 +103,7 @@ class _BillingWidgetState extends State<BillingWidget>
                           builder: (context) {
                             if (valueOrDefault<bool>(
                                     currentUserDocument?.subscribed, false) ==
-                                true) {
+                                true || currentUserDocument?.role == Role.admin) {
                               return StreamBuilder<CompanyRecord>(
                                 stream: CompanyRecord.getDocument(
                                     currentUserDocument!.company!),
