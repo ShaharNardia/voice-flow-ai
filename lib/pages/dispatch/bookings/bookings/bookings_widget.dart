@@ -54,6 +54,29 @@ class _BookingsWidgetState extends State<BookingsWidget> {
     super.dispose();
   }
 
+  Future<int> _countActiveJobs() async {
+    final companyId = currentUserDocument?.company?.id;
+    if (companyId == null) {
+      return 0;
+    }
+
+    final total = await queryJobsRecordCount(
+      queryBuilder: (jobsRecord) => jobsRecord.where(
+        'company',
+        isEqualTo: companyId,
+      ),
+    );
+
+    final completed = await queryJobsRecordCount(
+      queryBuilder: (jobsRecord) => jobsRecord
+          .where('company', isEqualTo: companyId)
+          .where('status', isEqualTo: JobStatus.Completed.serialize()),
+    );
+
+    final result = total - completed;
+    return result < 0 ? 0 : result;
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -182,18 +205,7 @@ class _BookingsWidgetState extends State<BookingsWidget> {
                                                           ),
                                                           FutureBuilder<int>(
                                                             future:
-                                                                queryJobsRecordCount(
-                                                              queryBuilder:
-                                                                  (jobsRecord) =>
-                                                                      jobsRecord
-                                                                          .where(
-                                                                'company',
-                                                                isEqualTo:
-                                                                    currentUserDocument
-                                                                        ?.company
-                                                                        ?.id,
-                                                              ),
-                                                            ),
+                                                                _countActiveJobs(),
                                                             builder: (context,
                                                                 snapshot) {
                                                               // Customize what your widget looks like when it's loading.
@@ -324,21 +336,7 @@ class _BookingsWidgetState extends State<BookingsWidget> {
                                                           ),
                                                           FutureBuilder<int>(
                                                             future:
-                                                                queryJobsRecordCount(
-                                                              queryBuilder:
-                                                                  (jobsRecord) =>
-                                                                      jobsRecord
-                                                                          .where(
-                                                                            'company',
-                                                                            isEqualTo:
-                                                                                currentUserDocument?.company?.id,
-                                                                          )
-                                                                          .where(
-                                                                            'status',
-                                                                            isNotEqualTo:
-                                                                                JobStatus.Completed.serialize(),
-                                                                          ),
-                                                            ),
+                                                                _countActiveJobs(),
                                                             builder: (context,
                                                                 snapshot) {
                                                               // Customize what your widget looks like when it's loading.
@@ -469,21 +467,7 @@ class _BookingsWidgetState extends State<BookingsWidget> {
                                                           ),
                                                           FutureBuilder<int>(
                                                             future:
-                                                                queryJobsRecordCount(
-                                                              queryBuilder:
-                                                                  (jobsRecord) =>
-                                                                      jobsRecord
-                                                                          .where(
-                                                                            'status',
-                                                                            isEqualTo:
-                                                                                JobStatus.Completed.serialize(),
-                                                                          )
-                                                                          .where(
-                                                                            'company',
-                                                                            isEqualTo:
-                                                                                currentUserDocument?.company?.id,
-                                                                          ),
-                                                            ),
+                                                                _countActiveJobs(),
                                                             builder: (context,
                                                                 snapshot) {
                                                               // Customize what your widget looks like when it's loading.

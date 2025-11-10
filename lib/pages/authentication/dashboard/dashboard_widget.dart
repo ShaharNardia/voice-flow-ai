@@ -52,6 +52,41 @@ class _DashboardWidgetState extends State<DashboardWidget> {
     super.dispose();
   }
 
+  Future<int> _countCompanyCalls({bool? success}) async {
+    final companyId = currentUserDocument?.company?.id;
+    if (companyId == null) {
+      return 0;
+    }
+
+    final total = await queryCallRecordCount(
+      queryBuilder: (callRecord) {
+        var query = callRecord.where(
+          'company',
+          isEqualTo: companyId,
+        );
+        if (success != null) {
+          query = query.where('success', isEqualTo: success);
+        }
+        return query;
+      },
+    );
+
+    final transfer = await queryCallRecordCount(
+      queryBuilder: (callRecord) {
+        var query = callRecord
+            .where('company', isEqualTo: companyId)
+            .where('callType', isEqualTo: 'transfer');
+        if (success != null) {
+          query = query.where('success', isEqualTo: success);
+        }
+        return query;
+      },
+    );
+
+    final result = total - transfer;
+    return result < 0 ? 0 : result;
+  }
+
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -299,20 +334,7 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                 FutureBuilder<
                                                                     int>(
                                                                   future:
-                                                                      currentUserDocument?.company != null
-                                                                          ? queryCallRecordCount(
-                                                                              queryBuilder: (callRecord) =>
-                                                                                  callRecord
-                                                                                      .where(
-                                                                                        'company',
-                                                                                        isEqualTo: currentUserDocument?.company?.id,
-                                                                                      )
-                                                                                      .where(
-                                                                                        'callType',
-                                                                                        isNotEqualTo: 'transfer',
-                                                                                      ),
-                                                                            )
-                                                                          : Future.value(0),
+                                                                    _countCompanyCalls(),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
@@ -439,24 +461,7 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                 FutureBuilder<
                                                                     int>(
                                                                   future:
-                                                                      currentUserDocument?.company != null
-                                                                          ? queryCallRecordCount(
-                                                                              queryBuilder: (callRecord) =>
-                                                                                  callRecord
-                                                                                      .where(
-                                                                                        'company',
-                                                                                        isEqualTo: currentUserDocument?.company?.id,
-                                                                                      )
-                                                                                      .where(
-                                                                                        'success',
-                                                                                        isEqualTo: true,
-                                                                                      )
-                                                                                      .where(
-                                                                                        'callType',
-                                                                                        isNotEqualTo: 'transfer',
-                                                                                      ),
-                                                                            )
-                                                                          : Future.value(0),
+                                                                      _countCompanyCalls(success: true),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
@@ -583,24 +588,7 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                 FutureBuilder<
                                                                     int>(
                                                                   future:
-                                                                      currentUserDocument?.company != null
-                                                                          ? queryCallRecordCount(
-                                                                              queryBuilder: (callRecord) =>
-                                                                                  callRecord
-                                                                                      .where(
-                                                                                        'company',
-                                                                                        isEqualTo: currentUserDocument?.company?.id,
-                                                                                      )
-                                                                                      .where(
-                                                                                        'success',
-                                                                                        isEqualTo: false,
-                                                                                      )
-                                                                                      .where(
-                                                                                        'callType',
-                                                                                        isNotEqualTo: 'transfer',
-                                                                                      ),
-                                                                            )
-                                                                          : Future.value(0),
+                                                                      _countCompanyCalls(success: false),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
