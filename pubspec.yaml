@@ -72,6 +72,7 @@ dependencies:
   flutter_plugin_android_lifecycle: 2.0.28
   flutter_rating_bar: 4.0.1
   flutter_svg: 2.1.0
+  showcaseview: ^2.0.3
   flutterflow_colorpicker: 
     git:
       url: https://github.com/FlutterFlow/flutterflow_colorpicker.git
@@ -151,6 +152,8 @@ dependency_overrides:
 dev_dependencies:
   flutter_launcher_icons: 0.13.1
   flutter_lints: 4.0.0
+  integration_test:
+    sdk: flutter
   image: 4.2.0
   lints: 4.0.0
   flutter_test:

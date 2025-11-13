@@ -1,0 +1,12 @@
+Requirement ID,Module,Flow,Test Case ID,Priority,Automation Status,Last Reviewed
+PRD-Auth-01,Authentication,Signup,AUTH-01,Smoke,Manual,Draft
+PRD-Auth-01,Authentication,Login,AUTH-02,Smoke,Manual,Draft
+PRD-Auth-01,Authentication,Forgot Password,AUTH-03,Core,Manual,Draft
+PRD-Core-02,Dashboard,Load KPIs,DASH-01,Smoke,Planned,Draft
+PRD-Jobs-10,Bookings,Create Job,JOB-01,Smoke,Planned,Draft
+PRD-Jobs-10,Bookings,Assign Technician,JOB-02,Core,Planned,Draft
+PRD-Dispatch-05,Dispatch,Technician Availability,DISP-01,Core,Manual,Draft
+PRD-Leads-07,Leads,Capture Lead,LEAD-01,Smoke,Manual,Draft
+PRD-Billing-03,Billing,View Invoices,BILL-01,Smoke,Planned,Draft
+PRD-Settings-06,Settings,Manage Roles,SET-01,Core,Planned,Draft
+

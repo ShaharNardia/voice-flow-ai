@@ -339,12 +339,12 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                     context: context,
                     builder: (alertDialogContext) {
                       return AlertDialog(
-                        title: Text('Error'),
-                        content: Text('Company information not found. Please contact support.'),
+                        title: const LocalizedText('Error'),
+                        content: const LocalizedText('Company information not found. Please contact support.'),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(alertDialogContext),
-                            child: Text('OK'),
+                            child: const LocalizedText('OK'),
                           ),
                         ],
                       );
@@ -361,12 +361,12 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                     context: context,
                     builder: (alertDialogContext) {
                       return AlertDialog(
-                        title: Text('Error'),
-                        content: Text('No company phone number found. Please add a phone number first.'),
+                        title: const LocalizedText('Error'),
+                        content: const LocalizedText('No company phone number found. Please add a phone number first.'),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(alertDialogContext),
-                            child: Text('OK'),
+                            child: const LocalizedText('OK'),
                           ),
                         ],
                       );
@@ -391,11 +391,11 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                     context: context,
                     builder: (alertDialogContext) {
                       return AlertDialog(
-                        title: Text('Call Successfull'),
+                        title: const LocalizedText('Call Successfull'),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(alertDialogContext),
-                            child: Text('Ok'),
+                            child: const LocalizedText('Ok'),
                           ),
                         ],
                       );

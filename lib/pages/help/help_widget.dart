@@ -25,6 +25,135 @@ class _HelpWidgetState extends State<HelpWidget> {
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
 
+  void _openLiveGuide(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(
+          top: Radius.circular(20.0),
+        ),
+      ),
+      builder: (context) {
+        final theme = FlutterFlowTheme.of(context);
+        final steps = [
+          {
+            'title': 'Welcome & Orientation',
+            'duration': '2 min',
+            'details':
+                'סקירה מהירה של הדשבורד, התפריט הצדדי וכפתור העזרה הזמין בכל מסך.'
+          },
+          {
+            'title': 'זרימת עבודה מרכזית',
+            'duration': '10 min',
+            'details':
+                'יצירת הזמנה חדשה, שיבוץ טכנאי, שינוי סטטוס להושלמה וצפייה בסטטוס בדיספאץ\'.'
+          },
+          {
+            'title': 'המרת ליד לעבודה',
+            'duration': '4 min',
+            'details':
+                'קליטת ליד, המרתו להזמנה והמשך המעקב בלוח המשימות.'
+          },
+          {
+            'title': 'חיוב ודוחות',
+            'duration': '3 min',
+            'details':
+                'סקירת חשבוניות, שדרוג מנוי והורדת קבלות לתיעוד.'
+          },
+          {
+            'title': 'הגדרות והרשאות',
+            'duration': '4 min',
+            'details':
+                'הזמנת משתמשי צוות חדשים, עדכון הרשאות ופרטי חברה.'
+          },
+          {
+            'title': 'תמיכה והמשך',
+            'duration': '2 min',
+            'details':
+                'גישה לצ’אט חי, מדריכים כתובים וטופס הצעות לשיפור.'
+          },
+        ];
+        return DraggableScrollableSheet(
+          expand: false,
+          initialChildSize: 0.7,
+          minChildSize: 0.5,
+          maxChildSize: 0.95,
+          builder: (_, controller) => Padding(
+            padding: EdgeInsets.symmetric(horizontal: 20.0, vertical: 12.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40.0,
+                    height: 4.0,
+                    decoration: BoxDecoration(
+                      color: theme.alternate,
+                      borderRadius: BorderRadius.circular(12.0),
+                    ),
+                  ),
+                ),
+                SizedBox(height: 16.0),
+                Text(
+                  'מדריך חי',
+                  style: theme.headlineSmall.override(
+                    font: GoogleFonts.inter(
+                      fontWeight: FontWeight.w600,
+                      fontStyle: theme.headlineSmall.fontStyle,
+                    ),
+                    fontSize: 20.0,
+                    letterSpacing: 0.0,
+                    fontWeight: FontWeight.w600,
+                    fontStyle: theme.headlineSmall.fontStyle,
+                  ),
+                ),
+                Text(
+                  'הדרכה מודרכת לצוותים חדשים. ניתן להציג במסך משותף במהלך השקת המערכת.',
+                  style: theme.labelMedium,
+                ),
+                SizedBox(height: 20.0),
+                Expanded(
+                  child: ListView.separated(
+                    controller: controller,
+                    itemCount: steps.length,
+                    separatorBuilder: (_, __) => Divider(
+                      color: theme.alternate,
+                    ),
+                    itemBuilder: (context, index) {
+                      final step = steps[index];
+                      return ListTile(
+                        contentPadding: EdgeInsets.zero,
+                        title: Text(
+                          '${index + 1}. ${step['title']} (${step['duration']})',
+                          style: theme.bodyLarge.override(
+                            font: GoogleFonts.inter(
+                              fontWeight: FontWeight.w600,
+                              fontStyle: theme.bodyLarge.fontStyle,
+                            ),
+                            fontSize: 14.0,
+                            letterSpacing: 0.0,
+                            fontWeight: FontWeight.w600,
+                            fontStyle: theme.bodyLarge.fontStyle,
+                          ),
+                        ),
+                        subtitle: Text(
+                          step['details'] as String,
+                          style: theme.bodyMedium,
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   void initState() {
     super.initState();
@@ -553,6 +682,56 @@ class _HelpWidgetState extends State<HelpWidget> {
                                                       ].divide(SizedBox(
                                                           width: 10.0)),
                                                     ),
+                                                  ),
+                                                ),
+                                                FFButtonWidget(
+                                                  onPressed: () =>
+                                                      _openLiveGuide(context),
+                                                  text: 'הפעל מדריך חי',
+                                                  icon: Icon(
+                                                    Icons.play_circle_fill,
+                                                    size: 18.0,
+                                                  ),
+                                                  options: FFButtonOptions(
+                                                    height: 44.0,
+                                                    color:
+                                                        FlutterFlowTheme.of(
+                                                                context)
+                                                            .primary,
+                                                    textStyle:
+                                                        FlutterFlowTheme.of(
+                                                                context)
+                                                            .titleSmall
+                                                            .override(
+                                                              font:
+                                                                  GoogleFonts
+                                                                      .inter(
+                                                                fontWeight:
+                                                                    FontWeight
+                                                                        .w600,
+                                                                fontStyle:
+                                                                    FlutterFlowTheme.of(
+                                                                            context)
+                                                                        .titleSmall
+                                                                        .fontStyle,
+                                                              ),
+                                                              color: Colors
+                                                                  .white,
+                                                              fontSize: 14.0,
+                                                              letterSpacing:
+                                                                  0.0,
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .w600,
+                                                              fontStyle:
+                                                                  FlutterFlowTheme.of(
+                                                                          context)
+                                                                      .titleSmall
+                                                                      .fontStyle,
+                                                            ),
+                                                    borderRadius:
+                                                        BorderRadius.circular(
+                                                            12.0),
                                                   ),
                                                 ),
                                               ],

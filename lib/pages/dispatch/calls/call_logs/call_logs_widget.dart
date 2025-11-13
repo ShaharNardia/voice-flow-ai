@@ -94,10 +94,14 @@ class _CallLogsWidgetState extends State<CallLogsWidget> {
                           Expanded(
                             child: Builder(
                               builder: (context) {
-                                if (valueOrDefault<bool>(
-                                        currentUserDocument?.subscribed,
-                                        false) ==
-                                    true || currentUserDocument?.role == Role.admin) {
+                                final hasSubscriptionAccess =
+                                    valueOrDefault<bool>(
+                                          currentUserDocument?.subscribed,
+                                          false,
+                                        ) ||
+                                        (currentUserDocument?.role?.name ==
+                                            'admin');
+                                if (hasSubscriptionAccess) {
                                   return Padding(
                                     padding: EdgeInsets.all(20.0),
                                     child: Column(

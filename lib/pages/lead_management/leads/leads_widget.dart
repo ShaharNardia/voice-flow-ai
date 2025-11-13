@@ -1958,12 +1958,14 @@ class _LeadsWidgetState extends State<LeadsWidget> {
                                                                                 context: context,
                                                                                 builder: (alertDialogContext) {
                                                                                   return AlertDialog(
-                                                                                    title: Text('Call Failed'),
-                                                                                    content: Text(_model.callResponse?.raw?['message']?.toString() ?? 'Unable to initiate the call.'),
+                                                                                    title: const LocalizedText('Call Failed'),
+                                                                                    content: LocalizedText(
+                                                                                      _model.callResponse?.raw?['message']?.toString() ?? 'Unable to initiate the call.',
+                                                                                    ),
                                                                                     actions: [
                                                                                       TextButton(
                                                                                         onPressed: () => Navigator.pop(alertDialogContext),
-                                                                                        child: Text('Ok'),
+                                                                                        child: const LocalizedText('Ok'),
                                                                                       ),
                                                                                     ],
                                                                                   );
@@ -1973,7 +1975,7 @@ class _LeadsWidgetState extends State<LeadsWidget> {
                                                                           } on WorkflowException catch (error) {
                                                                             ScaffoldMessenger.of(context).showSnackBar(
                                                                               SnackBar(
-                                                                                content: Text(
+                                                                                content: LocalizedText(
                                                                                   error.message,
                                                                                   style: TextStyle(
                                                                                     color: FlutterFlowTheme.of(context).secondaryBackground,
@@ -1985,8 +1987,9 @@ class _LeadsWidgetState extends State<LeadsWidget> {
                                                                           } catch (error) {
                                                                             ScaffoldMessenger.of(context).showSnackBar(
                                                                               SnackBar(
-                                                                                content: Text(
-                                                                                  'Failed to place call. ${error.toString()}',
+                                                                                content: LocalizedText(
+                                                                                  'Failed to place call. {details}',
+                                                                                  params: {'details': error.toString()},
                                                                                   style: TextStyle(
                                                                                     color: FlutterFlowTheme.of(context).secondaryBackground,
                                                                                   ),

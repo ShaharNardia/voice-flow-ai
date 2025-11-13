@@ -564,8 +564,9 @@ class _CreateAssistantcompWidgetState extends State<CreateAssistantcompWidget> {
                             } catch (error) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(
-                                    'Failed to create assistant. ${error.toString()}',
+                                  content: LocalizedText(
+                                    'Failed to create assistant. {details}',
+                                    params: {'details': error.toString()},
                                     style: const TextStyle(
                                       color: Colors.white,
                                     ),
@@ -583,14 +584,14 @@ class _CreateAssistantcompWidgetState extends State<CreateAssistantcompWidget> {
                               context: context,
                               builder: (alertDialogContext) {
                                 return AlertDialog(
-                                  title: Text('Invalid Action'),
-                                  content: Text(
-                                      'Sorry no compnay information exists'),
+                                  title: const LocalizedText('Invalid Action'),
+                                  content: const LocalizedText(
+                                      'Sorry no company information exists'),
                                   actions: [
                                     TextButton(
                                       onPressed: () =>
                                           Navigator.pop(alertDialogContext),
-                                      child: Text('Ok'),
+                                      child: const LocalizedText('Ok'),
                                     ),
                                   ],
                                 );
@@ -602,14 +603,14 @@ class _CreateAssistantcompWidgetState extends State<CreateAssistantcompWidget> {
                             context: context,
                             builder: (alertDialogContext) {
                               return AlertDialog(
-                                title: Text('Invalid Action'),
+                                title: const LocalizedText('Invalid Action'),
                                 content:
-                                    Text('Sorry no compnay information exists'),
+                                    const LocalizedText('Sorry no company information exists'),
                                 actions: [
                                   TextButton(
                                     onPressed: () =>
                                         Navigator.pop(alertDialogContext),
-                                    child: Text('Ok'),
+                                    child: const LocalizedText('Ok'),
                                   ),
                                 ],
                               );

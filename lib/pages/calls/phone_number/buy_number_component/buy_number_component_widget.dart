@@ -446,7 +446,7 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: Text(
+                                content: LocalizedText(
                                   getJsonField(
                                     (_model.apiResult73a?.jsonBody ?? ''),
                                     r'''$.message''',
@@ -468,14 +468,14 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                             context: context,
                             builder: (alertDialogContext) {
                               return AlertDialog(
-                                title: Text('Invalid Action'),
-                                content: Text(
-                                    'Sorry Compnay information doesn\'t exists'),
+                                title: const LocalizedText('Invalid Action'),
+                                content: const LocalizedText(
+                                    'Sorry company information doesn\'t exist'),
                                 actions: [
                                   TextButton(
                                     onPressed: () =>
                                         Navigator.pop(alertDialogContext),
-                                    child: Text('Ok'),
+                                    child: const LocalizedText('Ok'),
                                   ),
                                 ],
                               );

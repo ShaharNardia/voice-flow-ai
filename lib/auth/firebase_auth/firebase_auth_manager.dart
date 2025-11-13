@@ -100,8 +100,10 @@ class FirebaseAuthManager extends AuthManager
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-              content: Text(
-                  'Too long since most recent sign in. Sign in again before updating your email.')),
+            content: const LocalizedText(
+              'Too long since most recent sign in. Sign in again before updating your email.',
+            ),
+          ),
         );
       }
     }
@@ -122,7 +124,12 @@ class FirebaseAuthManager extends AuthManager
       if (e.code == 'requires-recent-login') {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: ${e.message!}')),
+          SnackBar(
+            content: LocalizedText(
+              'Error: {message}',
+              params: {'message': e.message ?? ''},
+            ),
+          ),
         );
       }
     }
@@ -138,12 +145,19 @@ class FirebaseAuthManager extends AuthManager
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: ${e.message!}')),
+        SnackBar(
+          content: LocalizedText(
+            'Error: {message}',
+            params: {'message': e.message ?? ''},
+          ),
+        ),
       );
       return null;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Password reset email sent')),
+      const SnackBar(
+        content: LocalizedText('Password reset email sent'),
+      ),
     );
   }
 
@@ -209,7 +223,10 @@ class FirebaseAuthManager extends AuthManager
       } else if (phoneAuthManager.phoneAuthError != null) {
         final e = phoneAuthManager.phoneAuthError!;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: Text('Error: ${e.message!}'),
+          content: LocalizedText(
+            'Error: {message}',
+            params: {'message': e.message ?? ''},
+          ),
         ));
         phoneAuthManager.update(() => phoneAuthManager.phoneAuthError = null);
       }

@@ -391,7 +391,7 @@ class _CustomCalenderState extends State<CustomCalender> {
           }
           final technicians = techSnapshot.data!;
           if (technicians.isEmpty) {
-            return const Center(child: Text('No technicians found.'));
+            return const Center(child: LocalizedText('No technicians found.'));
           }
 
           return StreamBuilder<List<JobsRecord>>(
@@ -1091,7 +1091,7 @@ class _CustomCalenderState extends State<CustomCalender> {
           }
           final technicians = techSnapshot.data!;
           if (technicians.isEmpty) {
-            return const Center(child: Text('No technicians found.'));
+            return const Center(child: LocalizedText('No technicians found.'));
           }
 
           return StreamBuilder<List<JobsRecord>>(
@@ -1621,7 +1621,7 @@ class _CustomCalenderState extends State<CustomCalender> {
           }
           final technicians = techSnapshot.data!;
           if (technicians.isEmpty) {
-            return const Center(child: Text('No technicians found.'));
+            return const Center(child: LocalizedText('No technicians found.'));
           }
 
           return StreamBuilder<List<JobsRecord>>(

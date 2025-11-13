@@ -936,7 +936,7 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                                         .showSnackBar(
                                                                       SnackBar(
                                                                         content:
-                                                                            const Text(
+                                                                            const LocalizedText(
                                                                           'Assistant deleted successfully',
                                                                           style:
                                                                               TextStyle(
@@ -956,7 +956,7 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                                         .showSnackBar(
                                                                       SnackBar(
                                                                         content:
-                                                                            Text(
+                                                                            LocalizedText(
                                                                           error.message,
                                                                           style:
                                                                               const TextStyle(
@@ -976,8 +976,11 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                                         .showSnackBar(
                                                                       SnackBar(
                                                                         content:
-                                                                            Text(
-                                                                          'Failed to delete assistant. ${error.toString()}',
+                                                                            LocalizedText(
+                                                                          'Failed to delete assistant. {details}',
+                                                                          params: {
+                                                                            'details': error.toString(),
+                                                                          },
                                                                           style:
                                                                               const TextStyle(
                                                                             color:

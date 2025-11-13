@@ -195,31 +195,27 @@ You are $agentName, an AI-powered customer service representative for $name base
 - Display confidence when discussing industry-specific topics, and be patient and attentive with a hint of wit to create a friendly atmosphere.
 
 [Response Guidelines]  
-- Use “first,” “second,” “third,” etc., when presenting multiple options.  
-- Let the caller respond fully before moving on, and prompt if there's a pause longer than 5 seconds, asking, “Are you still there?”  
+- Use "first," "second," "third," etc., when presenting multiple options.  
+- Let the caller respond fully before moving on, and prompt if there's a pause longer than 5 seconds, asking, "Are you still there?"  
 - Immediately disconnect spam or advertisement calls.  
 - Verify email addresses by spelling them out and confirming correct spelling.
 
 [Task & Goals]  
-1. Answer incoming calls with: “Thank you for calling $name based on the knowledge base provided. This is $agentName, your AI dispatcher. How may I help you today?”  
-2. Understand the issue or service request: “Could you please tell me what service you need or the issue you're facing?”  
+1. Answer incoming calls with: "Thank you for calling $name based on the knowledge base provided. This is $agentName, your AI dispatcher. How may I help you today?"  
+2. Understand the issue or service request: "Could you please tell me what service you need or the issue you're facing?"  
    < wait for user response >    
-3. Respond confidently based on the specific service: “That’s something we can absolutely help with. Thanks for explaining! It sounds like a $industry-specific service. We’ll ensure the right professional is scheduled for you.”  
-4. Ask for the preferred service time: “When would you like the service to be done? You can specify a date or say ‘tomorrow,’ ‘this weekend,’ or ‘as soon as possible.’”  
-   - Convert relative times to exact datetime using the current time as reference, formatted in RFC 3339.  
-5. Collect user details: Ask for full name, email address, and job address, confirming the email by spelling it back.  
-6. Confirm the appointment details: “Thank you! Just to confirm, we have you scheduled for a [jobTitle] on [datetime] at [address]. A confirmation will be sent to [email] shortly.”
+3. Respond confidently based on the specific service: "That's something we can absolutely help with. Thanks for explaining! It sounds like a [industry-specific service]. We'll collect all the necessary details for you."  
+4. Ask for the preferred service time: "When would you like the service to be done?" Convert relative times to exact datetime using the {{now}} as reference, formatted in RFC 3339.
+5. Collect user details one by one: Ask for full name, then email address, then job address. Confirm the email by spelling it back.
+6. Confirm the appointment details: "Thank you! Just to confirm, we have collected your details for a [jobTitle] on [datetime] at [address]. I am booking your appointment."
+7. Call the "createJob" function only once with [userName], [userEmail], [title] (generate this title yourself from the {{summary}} analysis), [jobDescription], [userPhoneNumber] (the phone number of the user calling {{customer.number}}), [address] (user address where the job needs to be done), [requestedTime] (the time when user needs the job to be done). Once the information is stored and server returns successful message, politely end the conversation by saying "Your appointment has been scheduled successfully at [requestedTime]. Goodbye (end the call).
 
 [Error Handling / Fallback]  
-- If the input is unclear, request clarification politely.  
-- Should you encounter any issues, inform the customer and ask to repeat.  
-- For off-topic inquiries, gently redirect to industry-related topics.  
-- Use humor to maintain a light atmosphere if necessary: “Well, I’m a super-smart AI focusing on $industry! For anything else, I might have to take a robot nap!”
+If the input is unclear, request clarification politely. Should you encounter any issues, inform the customer and ask them to repeat. For off-topic inquiries, gently redirect to industry-related topics. Use humor to maintain a light atmosphere if necessary: "Well, I'm a super-smart AI focusing on $industry! For anything else, I might have to take a robot nap!"
+If any time in the call user want to talk to human call "transfer_call_tool" with $fallbackNumber
 
 [Call Closing]  
-- If the customer says goodbye, reciprocate and hang up.  
-- Offer additional assistance: “Is there anything else I can help you with today?”  
-- Thank the customer: “Thank you for choosing $name. Have a fantastic day!”
+If the customer says goodbye, reciprocate and hang up. Offer additional assistance: "Is there anything else I can help you with today?" Thank the customer: "Thank you for choosing $name. Have a fantastic day!"
 ''';
 }
 
@@ -644,7 +640,7 @@ Use "first," "second," "third," etc., when presenting multiple options. Allow th
 7. Call the "createJob" function only once with [userName], [userEmail], [title] (generate this title yourself from the {{summary}} analysis), [jobDescription], [userPhoneNumber] (the phone number of the user calling {{customer.number}}), [address] (user address where the job needs to be done), [requestedTime] (the time when user needs the job to be done). Once the information is stored and server returns successful message, politely end the conversation by saying "Your appointment has been scheduled successfully at [requestedTime]. Goodbye (end the call).
 
 [Error Handling / Fallback]  
-If the input is unclear, request clarification politely. Should you encounter any issues, inform the customer and ask them to repeat. For off-topic inquiries, gently redirect to industry-related topics. Use humor to maintain a light atmosphere if necessary: “Well, I'm a super-smart AI focusing on $industry! For anything else, I might have to take a robot nap!”
+If the input is unclear, request clarification politely. Should you encounter any issues, inform the customer and ask them to repeat. For off-topic inquiries, gently redirect to industry-related topics. Use humor to maintain a light atmosphere if necessary: "Well, I'm a super-smart AI focusing on $industry! For anything else, I might have to take a robot nap!"
 If any time in the call user want to talk to human call "transfer_call_tool" with $fallbackNumber
 
 [Call Closing]  
@@ -833,7 +829,7 @@ Use "first," "second," "third," etc., when presenting multiple options. Allow th
 7. Call the "createJob" function only once with [userName], [userEmail], [title] (generate this title yourself from the {{summary}} analysis), [jobDescription], [userPhoneNumber] (the phone number of the user calling {{customer.number}}), [address] (user address where the job needs to be done), [requestedTime] (the time when user needs the job to be done). Once the information is stored and server returns successful message, politely end the conversation by saying "Your appointment has been scheduled successfully at [requestedTime]. Goodby (end the call).
 
 [Error Handling / Fallback]  
-If the input is unclear, request clarification politely. Should you encounter any issues, inform the customer and ask them to repeat. For off-topic inquiries, gently redirect to industry-related topics. Use humor to maintain a light atmosphere if necessary: “Well, I’m a super-smart AI focusing on [specific industry]! For anything else, I might have to take a robot nap!”
+If the input is unclear, request clarification politely. Should you encounter any issues, inform the customer and ask them to repeat. For off-topic inquiries, gently redirect to industry-related topics. Use humor to maintain a light atmosphere if necessary: "Well, I'm a super-smart AI focusing on [specific industry]! For anything else, I might have to take a robot nap!"
 
 [Call Closing]  
 If the customer says goodbye, reciprocate and hang up. Offer additional assistance: "Is there anything else I can help you with today?" Thank the customer: "Thank you for choosing AI Dispatch. Have a fantastic day!"
@@ -1228,7 +1224,8 @@ dynamic assistantBody(
   updatedJson['voice']['provider'] = company.agent;
   if (company.agent != "vapi" &&
       company.agent != "lmnt" &&
-      company.agent != "azure") {
+      company.agent != "azure" &&
+      company.agent != "google") {
     updatedJson['voice']['model'] = company.modelvoice;
   }
   if (company.provider != "assembly-ai" && company.provider != "azure") {
@@ -3499,6 +3496,128 @@ List<String> voiceforlabel(String provider) {
     ];
   } else if (provider == "hume") {
     voice = [];
+  } else if (provider == "cartesia") {
+    voice = [];
+  } else if (provider == "11labs") {
+    voice = [
+      "burt",
+      "marissa",
+      "andrea",
+      "sarah",
+      "phillip",
+      "steve",
+      "joseph",
+      "myra",
+      "paula",
+      "ryan",
+      "drew",
+      "paul",
+      "mrb",
+      "matilda",
+      "mark",
+    ];
+  } else if (provider == "google") {
+    voice = [
+      "he-IL-Wavenet-A",
+      "he-IL-Wavenet-B",
+      "he-IL-Wavenet-C",
+      "he-IL-Wavenet-D",
+      "he-IL-Standard-A",
+    ];
+  } else if (provider == "rime-ai") {
+    voice = [
+      "abbie",
+      "allison",
+      "ally",
+      "alona",
+      "amber",
+      "ana",
+      "antoine",
+      "armon",
+      "brenda",
+      "brittany",
+      "carol",
+      "colin",
+      "courtney",
+      "elena",
+      "elliot",
+      "eva",
+      "geoff",
+      "gerald",
+      "hank",
+      "helen",
+      "hera",
+      "jen",
+      "joe",
+      "joy",
+      "juan",
+      "kendra",
+      "kendrick",
+      "kenneth",
+      "kevin",
+      "kris",
+      "linda",
+      "madison",
+      "marge",
+      "marina",
+      "marissa",
+      "marta",
+      "maya",
+      "nicholas",
+      "nyles",
+      "phil",
+      "reba",
+      "rex",
+      "rick",
+      "ritu",
+      "rob",
+      "rodney",
+      "rohan",
+      "rosco",
+      "samantha",
+      "sandy",
+      "selena",
+      "seth",
+      "sharon",
+      "stan",
+      "tamra",
+      "tanya",
+      "tibur",
+      "tj",
+      "tyler",
+      "viv",
+      "yadira",
+      "marsh",
+      "bayou",
+      "creek",
+      "brook",
+      "flower",
+      "spore",
+      "glacier",
+      "gulch",
+      "alpine",
+      "cove",
+      "lagoon",
+      "tundra",
+      "steppe",
+      "mesa",
+      "grove",
+      "rainforest",
+      "moraine",
+      "wildflower",
+      "peak",
+      "boulder",
+      "gypsum",
+      "zest",
+      "luna",
+      "celeste",
+      "orion",
+      "ursa",
+      "astra",
+      "esther",
+      "estelle",
+      "andromeda"
+    ];
   }
 
   return voice;
@@ -3780,6 +3899,64 @@ List<String> voiceforlabelvalue(String provider) {
     ];
   } else if (provider == "hume") {
     voice = [];
+  } else if (provider == "cartesia") {
+    voice = [];
+  } else if (provider == "11labs") {
+    voice = [
+      "burt",
+      "marissa",
+      "andrea",
+      "sarah",
+      "phillip",
+      "steve",
+      "joseph",
+      "myra",
+      "paula",
+      "ryan",
+      "drew",
+      "paul",
+      "mrb",
+      "matilda",
+      "mark",
+    ];
+  } else if (provider == "google") {
+    voice = [
+      "he-IL-Wavenet-A",
+      "he-IL-Wavenet-B",
+      "he-IL-Wavenet-C",
+      "he-IL-Wavenet-D",
+      "he-IL-Standard-A",
+    ];
+  } else if (provider == "neuphonic") {
+    voice = [];
+  } else if (provider == "smallest-ai") {
+    voice = [
+      "emily",
+      "jasmine",
+      "arman",
+      "james",
+      "mithali",
+      "aravind",
+      "raj",
+      "diya",
+      "raman",
+      "ananya",
+      "isha",
+      "william",
+      "aarav",
+      "monika",
+      "niharika",
+      "deepika",
+      "raghav",
+      "kajal",
+      "radhika",
+      "mansi",
+      "nisha",
+      "saurabh",
+      "pooja",
+      "saina",
+      "sanya"
+    ];
   }
 
   return voice;

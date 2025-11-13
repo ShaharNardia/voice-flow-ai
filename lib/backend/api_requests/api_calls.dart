@@ -1307,6 +1307,90 @@ class SendASMSCall {
       ) as List?;
 }
 
+class TtsServiceGroup {
+  static ListTtsVoicesCall listTtsVoicesCall = ListTtsVoicesCall();
+  static SynthesizeTtsCall synthesizeTtsCall = SynthesizeTtsCall();
+}
+
+class ListTtsVoicesCall {
+  Future<ApiCallResponse> call({required String provider}) async {
+    return ApiManager.instance.makeApiCall(
+      callName: 'List TTS Voices',
+      apiUrl: '${FFAppConstants.cloudFunctionsBaseUrl}/listTtsVoices',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: '''{"provider":"${escapeStringForJson(provider)}"}''',
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+
+  List<dynamic>? voices(dynamic response) => getJsonField(
+        response,
+        r'''$.voices''',
+        true,
+      ) as List<dynamic>?;
+}
+
+class SynthesizeTtsCall {
+  Future<ApiCallResponse> call({
+    required String provider,
+    required String voiceId,
+    String? text,
+    Map<String, dynamic>? options,
+  }) async {
+    final bodyMap = {
+      'provider': provider,
+      'voiceId': voiceId,
+      if (text != null) 'text': text,
+      if (options != null) 'options': options,
+    };
+    final body = jsonEncode(bodyMap);
+    return ApiManager.instance.makeApiCall(
+      callName: 'Synthesize TTS',
+      apiUrl: '${FFAppConstants.cloudFunctionsBaseUrl}/synthesizeTts',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: body,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+
+  String? audioContent(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.audioContent''',
+      ));
+  String? audioEncoding(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.audioEncoding''',
+      ));
+  int? sampleRateHertz(dynamic response) => castToType<int>(getJsonField(
+        response,
+        r'''$.sampleRateHertz''',
+      ));
+  double? latencyMs(dynamic response) => castToType<double>(getJsonField(
+        response,
+        r'''$.latencyMs''',
+      ));
+}
+
 class ApiPagingParams {
   int nextPageNumber = 0;
   int numItems = 0;

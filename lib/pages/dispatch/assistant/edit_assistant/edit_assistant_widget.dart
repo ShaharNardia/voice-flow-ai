@@ -566,8 +566,9 @@ class _EditAssistantWidgetState extends State<EditAssistantWidget> {
                             } catch (error) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
-                                  content: Text(
-                                    'Failed to update assistant. ${error.toString()}',
+                                  content: LocalizedText(
+                                    'Failed to update assistant. {details}',
+                                    params: {'details': error.toString()},
                                     style: const TextStyle(
                                       color: Colors.white,
                                     ),
@@ -586,14 +587,14 @@ class _EditAssistantWidgetState extends State<EditAssistantWidget> {
                               context: context,
                               builder: (alertDialogContext) {
                                 return AlertDialog(
-                                  title: Text('Invalid Action'),
-                                  content: Text(
-                                      'Sorry your company information doesn\'t exists please set your company information'),
+                                  title: const LocalizedText('Invalid Action'),
+                                  content: const LocalizedText(
+                                      'Sorry, your company information doesn\'t exist. Please set your company information.'),
                                   actions: [
                                     TextButton(
                                       onPressed: () =>
                                           Navigator.pop(alertDialogContext),
-                                      child: Text('Ok'),
+                                      child: const LocalizedText('Ok'),
                                     ),
                                   ],
                                 );
@@ -605,14 +606,14 @@ class _EditAssistantWidgetState extends State<EditAssistantWidget> {
                             context: context,
                             builder: (alertDialogContext) {
                               return AlertDialog(
-                                title: Text('Invalid Action'),
-                                content: Text(
-                                    'Sorry your company information doesn\'t exists please set your company information'),
+                                title: const LocalizedText('Invalid Action'),
+                                content: const LocalizedText(
+                                    'Sorry, your company information doesn\'t exist. Please set your company information.'),
                                 actions: [
                                   TextButton(
                                     onPressed: () =>
                                         Navigator.pop(alertDialogContext),
-                                    child: Text('Ok'),
+                                    child: const LocalizedText('Ok'),
                                   ),
                                 ],
                               );

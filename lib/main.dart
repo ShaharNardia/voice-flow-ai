@@ -13,6 +13,7 @@ import '/flutter_flow/flutter_flow_theme.dart';
 import 'flutter_flow/flutter_flow_util.dart';
 import 'flutter_flow/nav/nav.dart';
 import 'index.dart';
+import 'localization/app_localizations.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -99,16 +100,24 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
+    final locale = Locale(context.watch<FFAppState>().languageCode);
+
     return MaterialApp.router(
       debugShowCheckedModeBanner: false,
       title: 'VoiceFlow Ai',
       scrollBehavior: MyAppScrollBehavior(),
+      locale: locale,
       localizationsDelegates: [
+        const AppLocalizationsDelegate(),
         GlobalMaterialLocalizations.delegate,
         GlobalWidgetsLocalizations.delegate,
         GlobalCupertinoLocalizations.delegate,
       ],
-      supportedLocales: const [Locale('en', '')],
+      supportedLocales: AppLocalizations.supportedLocales,
+      builder: (context, child) => Directionality(
+        textDirection: AppLocalizations.effectiveTextDirection(locale),
+        child: child ?? const SizedBox.shrink(),
+      ),
       theme: ThemeData(
         brightness: Brightness.light,
         useMaterial3: false,

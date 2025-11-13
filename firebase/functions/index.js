@@ -42,3 +42,6 @@ exports.transferCall = transferCall.transferCall;
 const setUserSubscription = require("./set_user_subscription.js");
 exports.setUserSubscription = setUserSubscription.setUserSubscription;
 exports.bootstrapAdminUser = setUserSubscription.bootstrapAdminUser;
+const ttsService = require("./tts_service.js");
+exports.listTtsVoices = ttsService.listTtsVoices;
+exports.synthesizeTts = ttsService.synthesizeTts;

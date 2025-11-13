@@ -365,28 +365,41 @@ Future<List<T>> queryCollectionOnce<T>(
       .toList());
 }
 
-Filter filterIn(String field, List? list) => (list?.isEmpty ?? true)
-    ? Filter(field, whereIn: null)
-    : Filter(field, whereIn: list);
+Filter filterIn(String field, List? list) {
+  if (list == null || list.isEmpty) {
+    return Filter(field);
+  }
+  return Filter(field, whereIn: list);
+}
 
-Filter filterArrayContainsAny(String field, List? list) =>
-    (list?.isEmpty ?? true)
-        ? Filter(field, arrayContainsAny: null)
-        : Filter(field, arrayContainsAny: list);
+Filter filterArrayContainsAny(String field, List? list) {
+  if (list == null || list.isEmpty) {
+    return Filter(field);
+  }
+  return Filter(field, arrayContainsAny: list);
+}
 
 extension QueryExtension on Query {
-  Query whereIn(String field, List? list) => (list?.isEmpty ?? true)
-      ? where(field, whereIn: null)
-      : where(field, whereIn: list);
+  Query whereIn(String field, List? list) {
+    if (list == null || list.isEmpty) {
+      return this;
+    }
+    return where(field, whereIn: list);
+  }
 
-  Query whereNotIn(String field, List? list) => (list?.isEmpty ?? true)
-      ? where(field, whereNotIn: null)
-      : where(field, whereNotIn: list);
+  Query whereNotIn(String field, List? list) {
+    if (list == null || list.isEmpty) {
+      return this;
+    }
+    return where(field, whereNotIn: list);
+  }
 
-  Query whereArrayContainsAny(String field, List? list) =>
-      (list?.isEmpty ?? true)
-          ? where(field, arrayContainsAny: null)
-          : where(field, arrayContainsAny: list);
+  Query whereArrayContainsAny(String field, List? list) {
+    if (list == null || list.isEmpty) {
+      return this;
+    }
+    return where(field, arrayContainsAny: list);
+  }
 }
 
 class FFFirestorePage<T> {

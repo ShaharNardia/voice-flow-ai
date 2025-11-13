@@ -51,6 +51,93 @@ function requireTwilio(res) {
   return true;
 }
 
+function collectPhoneNumbers(raw) {
+  const numbers = new Set();
+  const visit = (value) => {
+    if (!value) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value === "string") {
+      const trimmed = value.trim();
+      if (trimmed) {
+        numbers.add(trimmed);
+      }
+    }
+  };
+  visit(raw);
+  return numbers;
+}
+
+function flattenPhoneEntries(raw) {
+  const entries = [];
+  const visit = (value) => {
+    if (!value) {
+      return;
+    }
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (typeof value === "object" && !Array.isArray(value)) {
+      entries.push(value);
+    }
+  };
+  visit(raw);
+  return entries;
+}
+
+function buildEntryKey(entry) {
+  if (!entry || typeof entry !== "object") {
+    return null;
+  }
+  if (entry.id) {
+    return `id:${entry.id}`;
+  }
+  if (entry.phoneNumber) {
+    return `phone:${entry.phoneNumber}`;
+  }
+  return null;
+}
+
+function normalizePhoneEntries(rawEntries) {
+  const map = new Map();
+  const existing = flattenPhoneEntries(rawEntries);
+  existing.forEach((entry) => {
+    const key = buildEntryKey(entry);
+    if (!key) {
+      return;
+    }
+    const current = map.get(key) || {};
+    map.set(key, {...current, ...entry});
+  });
+  return map;
+}
+
+function upsertPhoneEntry(rawEntries, incomingEntry) {
+  const map = normalizePhoneEntries(rawEntries);
+  const key = buildEntryKey(incomingEntry);
+  if (key) {
+    const current = map.get(key) || {};
+    map.set(key, {...current, ...incomingEntry});
+  }
+  return Array.from(map.values());
+}
+
+function removePhoneEntry(rawEntries, {sid, phoneNumber}) {
+  const map = normalizePhoneEntries(rawEntries);
+  if (sid) {
+    map.delete(`id:${sid}`);
+  }
+  if (phoneNumber) {
+    map.delete(`phone:${phoneNumber}`);
+  }
+  return Array.from(map.values());
+}
+
 exports.searchPhoneNumbers = onRequest(async (req, res) => {
   if (req.method !== "POST") {
     res.set("Allow", "POST");
@@ -151,22 +238,32 @@ exports.purchasePhoneNumber = onRequest(async (req, res) => {
       const db = getFirestore();
       const companyRef = db.collection("Company").doc(String(companyId));
       try {
-        await companyRef.set(
-          {
-            companyPhoneNumbers: FieldValue.arrayUnion([
-              purchased.phoneNumber,
-            ]),
-            phoneNumberMap: FieldValue.arrayUnion([
-              {
-                id: purchased.sid,
-                label: "inbound_outbound",
-                phoneNumber: purchased.phoneNumber,
-                friendlyName,
-              },
-            ]),
-          },
-          {merge: true},
-        );
+        await db.runTransaction(async (trx) => {
+          const snapshot = await trx.get(companyRef);
+          const data = snapshot.exists ? snapshot.data() : {};
+          const currentNumbers = collectPhoneNumbers(data?.companyPhoneNumbers);
+          currentNumbers.add(purchased.phoneNumber);
+
+          const phoneEntry = {
+            id: purchased.sid,
+            label: "inbound_outbound",
+            phoneNumber: purchased.phoneNumber,
+          };
+          if (friendlyName) {
+            phoneEntry.friendlyName = friendlyName;
+          }
+
+          const nextEntries = upsertPhoneEntry(data?.phoneNumberMap, phoneEntry);
+
+          trx.set(
+            companyRef,
+            {
+              companyPhoneNumbers: Array.from(currentNumbers),
+              phoneNumberMap: nextEntries,
+            },
+            {merge: true},
+          );
+        });
       } catch (updateError) {
         logger.error(
           `Failed to update company phone numbers for company ${companyId}`,
@@ -542,22 +639,57 @@ exports.releasePhoneNumber = onRequest(async (req, res) => {
     const companyId = payload.companyId;
     const phoneNumber = payload.phoneNumber;
     const friendlyName = payload.friendlyName || null;
-    if (companyId && phoneNumber) {
+    if (companyId) {
       const db = getFirestore();
       const companyRef = db.collection("Company").doc(String(companyId));
       try {
-        const phoneEntry = {
-          id: sid,
-          label: "inbound_outbound",
-          phoneNumber,
-        };
-        if (friendlyName) {
-          phoneEntry.friendlyName = friendlyName;
-        }
+        await db.runTransaction(async (trx) => {
+          const snapshot = await trx.get(companyRef);
+          if (!snapshot.exists) {
+            return;
+          }
+          const data = snapshot.data() || {};
+          const currentNumbers = collectPhoneNumbers(data.companyPhoneNumbers);
+          let resolvedNumber = typeof phoneNumber === "string" ? phoneNumber.trim() : null;
 
-        await companyRef.update({
-          companyPhoneNumbers: FieldValue.arrayRemove([phoneNumber]),
-          phoneNumberMap: FieldValue.arrayRemove([phoneEntry]),
+          if (!resolvedNumber) {
+            const entries = normalizePhoneEntries(data.phoneNumberMap);
+            const byId = entries.get(`id:${sid}`);
+            if (byId && byId.phoneNumber) {
+              resolvedNumber = byId.phoneNumber;
+            }
+          }
+
+          if (resolvedNumber) {
+            currentNumbers.delete(resolvedNumber);
+          }
+
+          const nextEntries = removePhoneEntry(data.phoneNumberMap, {
+            sid,
+            phoneNumber: resolvedNumber,
+          }).map((entry) => {
+            if (!entry) {
+              return entry;
+            }
+            if (entry.id === sid && friendlyName === null) {
+              const cloned = {...entry};
+              delete cloned.friendlyName;
+              return cloned;
+            }
+            if (entry.id === sid && friendlyName) {
+              return {...entry, friendlyName};
+            }
+            return entry;
+          });
+
+          trx.set(
+            companyRef,
+            {
+              companyPhoneNumbers: Array.from(currentNumbers),
+              phoneNumberMap: nextEntries,
+            },
+            {merge: true},
+          );
         });
       } catch (updateError) {
         logger.error(

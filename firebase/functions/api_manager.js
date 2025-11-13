@@ -48,10 +48,14 @@ async function makeApiRequest({
       };
     })
     .catch(function (error) {
+      const response = error.response || null;
+      const statusCode = response?.status ?? (error.request ? 503 : 500);
+      const headers = response?.headers ?? {};
+      const responseBody = response?.data ?? { error: error.message };
       return {
-        statusCode: error.response.status,
-        headers: error.response.headers,
-        ...(returnBody && { body: error.response.data }),
+        statusCode,
+        headers,
+        ...(returnBody ? { body: responseBody } : {}),
         error: error.message,
       };
     });

@@ -1,0 +1,27 @@
+{
+  "info": {
+    "name": "VoiceFlow AI Staging",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Auth - Get ID Token",
+      "request": {
+        "method": "POST",
+        "header": [],
+        "url": {
+          "raw": "{{identity_base}}/accounts:signInWithPassword?key={{firebase_api_key}}",
+          "host": ["{{identity_base}}"],
+          "path": ["accounts:signInWithPassword"],
+          "query": [{ "key": "key", "value": "{{firebase_api_key}}" }]
+        },
+        "body": {
+          "mode": "raw",
+          "raw": "{ \"email\": \"{{qa_email}}\", \"password\": \"{{qa_password}}\", \"returnSecureToken\": true }"
+        }
+      },
+      "response": []
+    }
+  ]
+}
+

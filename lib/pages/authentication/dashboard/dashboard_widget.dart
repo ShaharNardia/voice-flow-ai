@@ -1,4 +1,5 @@
 import '/auth/firebase_auth/auth_util.dart';
+import '/app_state.dart';
 import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_data_table.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
@@ -19,6 +20,7 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:showcaseview/showcaseview.dart';
 import 'dashboard_model.dart';
 export 'dashboard_model.dart';
 
@@ -36,13 +38,25 @@ class _DashboardWidgetState extends State<DashboardWidget> {
   late DashboardModel _model;
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
+  final GlobalKey<ShowCaseWidgetState> _showCaseKey =
+      GlobalKey<ShowCaseWidgetState>();
+  final GlobalKey _navigationKey = GlobalKey();
+  final GlobalKey _metricsKey = GlobalKey();
+  final GlobalKey _recentCallsKey = GlobalKey();
+  bool _autoShowcaseScheduled = false;
+
+  List<GlobalKey> get _walkthroughSteps =>
+      [_navigationKey, _metricsKey, _recentCallsKey];
 
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => DashboardModel());
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      safeSetState(() {});
+      _scheduleAutoShowcase();
+    });
   }
 
   @override
@@ -87,17 +101,75 @@ class _DashboardWidgetState extends State<DashboardWidget> {
     return result < 0 ? 0 : result;
   }
 
+  void _scheduleAutoShowcase() {
+    if (_autoShowcaseScheduled) {
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    final appState = context.read<FFAppState>();
+    if (appState.hasCompletedDashboardWalkthrough) {
+      return;
+    }
+    _autoShowcaseScheduled = true;
+    Future.delayed(const Duration(milliseconds: 700), () {
+      if (!mounted) {
+        return;
+      }
+      final showCaseState = _showCaseKey.currentState;
+      if (showCaseState != null) {
+        showCaseState.startShowCase(_walkthroughSteps);
+        appState.hasCompletedDashboardWalkthrough = true;
+      } else {
+        _autoShowcaseScheduled = false;
+        Future.delayed(
+          const Duration(milliseconds: 500),
+          _scheduleAutoShowcase,
+        );
+      }
+    });
+  }
+
+  void _startWalkthrough() {
+    final showCaseState = _showCaseKey.currentState;
+    if (showCaseState == null) {
+      return;
+    }
+    context.read<FFAppState>().hasCompletedDashboardWalkthrough = true;
+    showCaseState.startShowCase(_walkthroughSteps);
+  }
+
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        FocusScope.of(context).unfocus();
-        FocusManager.instance.primaryFocus?.unfocus();
-      },
-      child: Scaffold(
-        key: scaffoldKey,
-        backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
-        body: SafeArea(
+    return ShowCaseWidget(
+      key: _showCaseKey,
+      builder: Builder(
+        builder: (context) => GestureDetector(
+          onTap: () {
+            FocusScope.of(context).unfocus();
+            FocusManager.instance.primaryFocus?.unfocus();
+          },
+          child: Scaffold(
+            key: scaffoldKey,
+            backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+            floatingActionButton: FloatingActionButton.extended(
+              heroTag: 'dashboard_walkthrough_fab',
+              onPressed: _startWalkthrough,
+              icon: const Icon(Icons.play_circle_outline),
+              label: Text(
+                'הדרכה',
+                style: FlutterFlowTheme.of(context).bodyMedium.override(
+                      font: GoogleFonts.inter(
+                        fontWeight: FontWeight.w600,
+                        fontStyle:
+                            FlutterFlowTheme.of(context).bodyMedium.fontStyle,
+                      ),
+                      fontWeight: FontWeight.w600,
+                    ),
+              ),
+            ),
+            body: SafeArea(
           top: true,
           child: Column(
             mainAxisSize: MainAxisSize.max,
@@ -107,12 +179,18 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                 child: Row(
                   mainAxisSize: MainAxisSize.max,
                   children: [
-                    wrapWithModel(
-                      model: _model.navbarModel,
-                      updateCallback: () => safeSetState(() {}),
-                      updateOnChange: true,
-                      child: NavbarWidget(
-                        pageNum: 0.0,
+                    Showcase(
+                      key: _navigationKey,
+                      title: 'תפריט ניווט',
+                      description:
+                          'כאן תמצא את כל המסכים העיקריים. לחץ על אחד הפריטים כדי לעבור במהירות בין אזורי העבודה.',
+                      child: wrapWithModel(
+                        model: _model.navbarModel,
+                        updateCallback: () => safeSetState(() {}),
+                        updateOnChange: true,
+                        child: NavbarWidget(
+                          pageNum: 0.0,
+                        ),
                       ),
                     ),
                     Expanded(
@@ -131,20 +209,29 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                           Expanded(
                             child: Builder(
                               builder: (context) {
-                                if (valueOrDefault<bool>(
-                                        currentUserDocument?.subscribed,
-                                        false) ==
-                                    true || currentUserDocument?.role == Role.admin) {
+                                final hasSubscriptionAccess =
+                                    valueOrDefault<bool>(
+                                          currentUserDocument?.subscribed,
+                                          false,
+                                        ) ||
+                                        (currentUserDocument?.role?.name ==
+                                            'admin');
+                                if (hasSubscriptionAccess) {
                                   return Padding(
                                     padding: EdgeInsets.all(15.0),
                                     child: Column(
                                       mainAxisSize: MainAxisSize.max,
                                       children: [
-                                        Row(
-                                          mainAxisSize: MainAxisSize.max,
-                                          mainAxisAlignment:
-                                              MainAxisAlignment.spaceBetween,
-                                          children: [
+                                        Showcase(
+                                          key: _metricsKey,
+                                          title: 'תובנות מהירות',
+                                          description:
+                                              'מדדי ביצוע חיים: כמה שיחות בוצעו, הושלמו והועברו.',
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.max,
+                                            mainAxisAlignment:
+                                                MainAxisAlignment.spaceBetween,
+                                            children: [
                                             Column(
                                               mainAxisSize: MainAxisSize.max,
                                               crossAxisAlignment:
@@ -252,10 +339,15 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                           ],
                                         ),
                                         Expanded(
-                                          child: Container(
-                                            height: 200.0,
-                                            decoration: BoxDecoration(),
-                                            child: Column(
+                                          child: Showcase(
+                                            key: _recentCallsKey,
+                                            title: 'שיחות אחרונות',
+                                            description:
+                                                'רשימת 10 השיחות האחרונות שלך. לחץ על שורה כדי לפתוח פירוט והקלטות.',
+                                            child: Container(
+                                              height: 200.0,
+                                              decoration: BoxDecoration(),
+                                              child: Column(
                                               mainAxisSize: MainAxisSize.max,
                                               children: [
                                                 Row(
@@ -1508,6 +1600,8 @@ class _DashboardWidgetState extends State<DashboardWidget> {
           ),
         ),
       ),
-    );
+      ),
+    ),
+  );
   }
 }

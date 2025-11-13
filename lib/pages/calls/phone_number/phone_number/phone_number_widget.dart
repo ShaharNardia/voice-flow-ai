@@ -90,6 +90,13 @@ class _PhoneNumberWidgetState extends State<PhoneNumberWidget> {
                                   false,
                                 );
                                 final isAdmin = currentUserDocument?.role == Role.admin;
+                                final hasSubscriptionAccess =
+                                    valueOrDefault<bool>(
+                                          currentUserDocument?.subscribed,
+                                          false,
+                                        ) ||
+                                        (currentUserDocument?.role?.name ==
+                                            'admin');
                                 if (!subscribed && !isAdmin) {
                                   return wrapWithModel(
                                     model: _model.subscribeModel,

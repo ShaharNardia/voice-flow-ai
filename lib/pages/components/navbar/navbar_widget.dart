@@ -672,6 +672,84 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                   ),
                                 ].divide(SizedBox(width: 15.0)),
                               ),
+                              Padding(
+                                padding: EdgeInsetsDirectional.fromSTEB(
+                                    0.0, 16.0, 0.0, 0.0),
+                                child: Consumer<FFAppState>(
+                                  builder: (context, appState, _) {
+                                    final isHebrew =
+                                        appState.languageCode == 'he';
+                                    return ToggleButtons(
+                                      constraints: const BoxConstraints(
+                                        minHeight: 36.0,
+                                        minWidth: 60.0,
+                                      ),
+                                      borderRadius: BorderRadius.circular(12.0),
+                                      isSelected: [
+                                        !isHebrew,
+                                        isHebrew,
+                                      ],
+                                      onPressed: (index) {
+                                        final languageCode =
+                                            index == 1 ? 'he' : 'en';
+                                        if (languageCode ==
+                                            appState.languageCode) {
+                                          return;
+                                        }
+                                        final appStateNotifier =
+                                            context.read<FFAppState>();
+                                        appStateNotifier.update(() {
+                                          appStateNotifier.languageCode =
+                                              languageCode;
+                                        });
+                                      },
+                                      fillColor:
+                                          FlutterFlowTheme.of(context).primary,
+                                      selectedColor:
+                                          FlutterFlowTheme.of(context)
+                                              .primaryText,
+                                      color: FlutterFlowTheme.of(context)
+                                          .secondaryText,
+                                      children: [
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 12.0,
+                                              vertical: 6.0),
+                                          child: LocalizedText(
+                                            'English',
+                                            style:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodyMedium
+                                                    .override(
+                                                      font:
+                                                          GoogleFonts.inter(),
+                                                      fontSize: 12.0,
+                                                      letterSpacing: 0.0,
+                                                    ),
+                                          ),
+                                        ),
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                              horizontal: 12.0,
+                                              vertical: 6.0),
+                                          child: LocalizedText(
+                                            'Hebrew',
+                                            style:
+                                                FlutterFlowTheme.of(context)
+                                                    .bodyMedium
+                                                    .override(
+                                                      font:
+                                                          GoogleFonts.inter(),
+                                                      fontSize: 12.0,
+                                                      letterSpacing: 0.0,
+                                                    ),
+                                          ),
+                                        ),
+                                      ],
+                                    );
+                                  },
+                                ),
+                              ),
                             ],
                           ),
                           Expanded(

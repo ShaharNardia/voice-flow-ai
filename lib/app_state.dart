@@ -33,6 +33,14 @@ class FFAppState extends ChangeNotifier {
     _safeInit(() {
       _showAppBar = prefs.getBool('ff_showAppBar') ?? _showAppBar;
     });
+    _safeInit(() {
+      _languageCode = prefs.getString('ff_languageCode') ?? _languageCode;
+    });
+    _safeInit(() {
+      _hasCompletedDashboardWalkthrough =
+          prefs.getBool('ff_hasCompletedDashboardWalkthrough') ??
+              _hasCompletedDashboardWalkthrough;
+    });
   }
 
   void update(VoidCallback callback) {
@@ -68,6 +76,21 @@ class FFAppState extends ChangeNotifier {
   set showAppBar(bool value) {
     _showAppBar = value;
     prefs.setBool('ff_showAppBar', value);
+  }
+
+  String _languageCode = 'en';
+  String get languageCode => _languageCode;
+  set languageCode(String value) {
+    _languageCode = value;
+    prefs.setString('ff_languageCode', value);
+  }
+
+  bool _hasCompletedDashboardWalkthrough = false;
+  bool get hasCompletedDashboardWalkthrough =>
+      _hasCompletedDashboardWalkthrough;
+  set hasCompletedDashboardWalkthrough(bool value) {
+    _hasCompletedDashboardWalkthrough = value;
+    prefs.setBool('ff_hasCompletedDashboardWalkthrough', value);
   }
 
   bool _expand = false;
