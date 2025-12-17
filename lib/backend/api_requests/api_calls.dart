@@ -2,7 +2,6 @@ import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
-import '/app_constants.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import 'api_manager.dart';
 
@@ -15,778 +14,7 @@ bool _isValidUuid(String? uuid) {
   return uuidRegex.hasMatch(uuid);
 }
 
-
-/// Start Vapi Group Code
-
-class VapiGroup {
-  static String getBaseUrl() => 'https://api.vapi.ai';
-  static Map<String, String> headers = {
-    'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-  };
-  static CreateAssitantCall createAssitantCall = CreateAssitantCall();
-  static CreatePhoneNumberCall createPhoneNumberCall = CreatePhoneNumberCall();
-  static LIstAllPhoneNumbersCall lIstAllPhoneNumbersCall =
-      LIstAllPhoneNumbersCall();
-  static ListPhoneCallsCall listPhoneCallsCall = ListPhoneCallsCall();
-  static GetPhoneCallDetailsCall getPhoneCallDetailsCall =
-      GetPhoneCallDetailsCall();
-  static DeleteAssistantCall deleteAssistantCall = DeleteAssistantCall();
-  static UpdateAssistantCall updateAssistantCall = UpdateAssistantCall();
-  static UpdatePhoneNumberCall updatePhoneNumberCall = UpdatePhoneNumberCall();
-  static GetPhoneNumberCall getPhoneNumberCall = GetPhoneNumberCall();
-  static DeletePhoneCall deletePhoneCall = DeletePhoneCall();
-  static GetAllAssistantsCall getAllAssistantsCall = GetAllAssistantsCall();
-  static GetAssistantCopyCall getAssistantCopyCall = GetAssistantCopyCall();
-  static UpdateToolCall updateToolCall = UpdateToolCall();
-  static GetToolCall getToolCall = GetToolCall();
-  static UpdateCallDetailsCall updateCallDetailsCall = UpdateCallDetailsCall();
-  static CreateToolCall createToolCall = CreateToolCall();
-  static PlaceCallCall placeCallCall = PlaceCallCall();
-  static GetAssistantCall getAssistantCall = GetAssistantCall();
-  static CreateJobCall createJobCall = CreateJobCall();
-}
-
-class CreateAssitantCall {
-  Future<ApiCallResponse> call({
-    String? systemPrompt = '',
-    String? firstMessage = '',
-    String? assistantName = '',
-    String? language = '',
-    String? userId = '',
-    List<String>? toolsList,
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-    final tools = _serializeList(toolsList);
-
-    final ffApiRequestBody = '''
-{
-  "model": {
-    "messages": [
-      {
-        "content": "${escapeStringForJson(systemPrompt)}",
-        "role": "system"
-      }
-    ],
-    "provider": "openai",
-    "model": "gpt-4o",
-    "fallbackModels": [
-      "gpt-4-0125-preview",
-      "gpt-4-0613"
-    ],
-    "semanticCachingEnabled": true,
-    "numFastTurns": 1,
-    "temperature": 0.7,
-    "maxTokens": 250,
-    "emotionRecognitionEnabled": true,
-    "toolIds": ${tools}
-  },
-  "voice": {
-    "inputPreprocessingEnabled": true,
-    "inputMinCharacters": 10,
-    "inputPunctuationBoundaries": [
-      "。",
-      "，",
-      ".",
-      "!",
-      "?",
-      ";",
-      ")",
-      "،",
-      "۔",
-      "।",
-      "॥",
-      "|",
-      "||",
-      ",",
-      ":"
-    ],
-    "fillerInjectionEnabled": true,
-    "provider": "vapi",
-    "voiceId": "Paige",
-    "speed": 1
-  },
-  "firstMessageMode": "assistant-speaks-first",
-  "recordingEnabled": true,
-  "hipaaEnabled": false,
-  "clientMessages": [
-    "transcript",
-    "hang",
-    "tool-calls",
-    "speech-update",
-    "metadata",
-    "conversation-update"
-  ],
-  "serverMessages": [
-    "end-of-call-report"
-  ],
-  "silenceTimeoutSeconds": 30,
-  "responseDelaySeconds": 0.4,
-  "llmRequestDelaySeconds": 0.1,
-  "numWordsToInterruptAssistant": 1,
-  "maxDurationSeconds": 1800,
-  "backgroundSound": "off",
-  "backchannelingEnabled": true,
-  "name": "${escapeStringForJson(assistantName)}",
-  "firstMessage": "${escapeStringForJson(firstMessage)}",
-  "transcriber": {
-    "provider": "deepgram",
-    "model": "nova-2",
-    "language": "${escapeStringForJson(language)}"
-  },
-  "metadata": {
-    "userId": "${escapeStringForJson(userId)}"
-  }
-}''';
-    return ApiManager.instance.makeApiCall(
-      callName: 'createAssitant',
-      apiUrl: '${baseUrl}/assistant',
-      callType: ApiCallType.POST,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      body: ffApiRequestBody,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-
-  String? id(dynamic response) => castToType<String>(getJsonField(
-        response,
-        r'''$.id''',
-      ));
-  String? name(dynamic response) => castToType<String>(getJsonField(
-        response,
-        r'''$.name''',
-      ));
-}
-
-class CreatePhoneNumberCall {
-  Future<ApiCallResponse> call({
-    String? number = '',
-    String? name = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    final ffApiRequestBody = '''
-{
-  "provider": "twilio",
-  "number": "${escapeStringForJson(number)}",
-  "name": "${escapeStringForJson(name)}",
-  "twilioAccountSid": "ACcf36ee2a4549fb9077606737abb6242a",
-  "twilioApiKey": "SK5125bb6643e45f4bd87038ca91139cc9",
-  "twilioApiSecret": "otFG5qF5vuSjbP7wzikzc1bKcDUQI9NI",
-  "twilioAuthToken": "a1b1388d1698fdd866e10dd22124844c",
-  "serverUrl":"${FFAppConstants.assignAssistantEndpoint}"
-}''';
-    return ApiManager.instance.makeApiCall(
-      callName: 'Create Phone Number',
-      apiUrl: '${baseUrl}/phone-number',
-      callType: ApiCallType.POST,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-        'Content-Type': 'application/json',
-      },
-      params: {},
-      body: ffApiRequestBody,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-
-  String? id(dynamic response) => castToType<String>(getJsonField(
-        response,
-        r'''$.id''',
-      ));
-  String? number(dynamic response) => castToType<String>(getJsonField(
-        response,
-        r'''$.number''',
-      ));
-  String? message(dynamic response) => castToType<String>(getJsonField(
-        response,
-        r'''$.message''',
-      ));
-}
-
-class LIstAllPhoneNumbersCall {
-  Future<ApiCallResponse> call() async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'LIst All Phone Numbers',
-      apiUrl: '${baseUrl}/phone-number',
-      callType: ApiCallType.GET,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-
-  List? phoneNumbers(dynamic response) => getJsonField(
-        response,
-        r'''$''',
-        true,
-      ) as List?;
-}
-
-class ListPhoneCallsCall {
-  Future<ApiCallResponse> call({
-    String? assistantId = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'List Phone Calls',
-      apiUrl: '${baseUrl}/call',
-      callType: ApiCallType.GET,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-
-  List? calls(dynamic response) => getJsonField(
-        response,
-        r'''$''',
-        true,
-      ) as List?;
-}
-
-class GetPhoneCallDetailsCall {
-  Future<ApiCallResponse> call({
-    String? callId = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'get phone call details',
-      apiUrl: '${baseUrl}/call/${callId}',
-      callType: ApiCallType.GET,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class DeleteAssistantCall {
-  Future<ApiCallResponse> call({
-    String? id = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'deleteAssistant',
-      apiUrl: '${baseUrl}/assistant/${id}',
-      callType: ApiCallType.DELETE,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class UpdateAssistantCall {
-  Future<ApiCallResponse> call({
-    String? id = '',
-    String? firstMessage = '',
-    String? assistantName = '',
-    String? language = '',
-    String? userId = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    final ffApiRequestBody = '''
-{
- "name": "${escapeStringForJson(assistantName)}",
-  "firstMessage": "${escapeStringForJson(firstMessage)}",
-  "transcriber": {
-    "provider": "deepgram",
-    "model": "nova-2",
-    "language": "${escapeStringForJson(language)}"
-  }
-}''';
-    return ApiManager.instance.makeApiCall(
-      callName: 'updateAssistant',
-      apiUrl: '${baseUrl}/assistant/${id}',
-      callType: ApiCallType.PATCH,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      body: ffApiRequestBody,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class UpdatePhoneNumberCall {
-  Future<ApiCallResponse> call({
-    String? id = '',
-    String? assistantId = '',
-    String? userId = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    final ffApiRequestBody = '''
-{
-"serverUrl":"${FFAppConstants.assignAssistantEndpoint}"
-}''';
-    return ApiManager.instance.makeApiCall(
-      callName: 'updatePhoneNumber',
-      apiUrl: '${baseUrl}/phone-number/${id}',
-      callType: ApiCallType.PATCH,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      body: ffApiRequestBody,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class GetPhoneNumberCall {
-  Future<ApiCallResponse> call({
-    String? id = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'getPhoneNumber ',
-      apiUrl: '${baseUrl}/phone-number/${id}',
-      callType: ApiCallType.GET,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class DeletePhoneCall {
-  Future<ApiCallResponse> call({
-    String? id = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'deletePhone',
-      apiUrl: '${baseUrl}/phone-number/${id}',
-      callType: ApiCallType.DELETE,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class GetAllAssistantsCall {
-  Future<ApiCallResponse> call() async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'getAllAssistants',
-      apiUrl: '${baseUrl}/assistant',
-      callType: ApiCallType.GET,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-
-  List? assistants(dynamic response) => getJsonField(
-        response,
-        r'''$''',
-        true,
-      ) as List?;
-}
-
-class GetAssistantCopyCall {
-  Future<ApiCallResponse> call({
-    String? assistantId = 'a4ed12b7-5551-44b6-b2f4-cf48f1c3680b',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'getAssistant Copy',
-      apiUrl: '${baseUrl}/assistant/${assistantId}',
-      callType: ApiCallType.GET,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class UpdateToolCall {
-  Future<ApiCallResponse> call({
-    dynamic bodyJson,
-    String? id = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    final body = _serializeJson(bodyJson);
-    final ffApiRequestBody = '''
-${body}''';
-    return ApiManager.instance.makeApiCall(
-      callName: 'Update tool',
-      apiUrl: '${baseUrl}/tool/${id}',
-      callType: ApiCallType.PATCH,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      body: ffApiRequestBody,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class GetToolCall {
-  Future<ApiCallResponse> call({
-    String? id = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'getTool',
-      apiUrl: '${baseUrl}/tool/${id}',
-      callType: ApiCallType.GET,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class UpdateCallDetailsCall {
-  Future<ApiCallResponse> call() async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    final ffApiRequestBody = '''
-{
-"artifactPlan":{
-  "assistant": {
-    "metadata": {
-      "jobStatus": "success"
-    }
-  }
-}
-}''';
-    return ApiManager.instance.makeApiCall(
-      callName: 'Update Call Details',
-      apiUrl: '${baseUrl}/call/722a79b9-15dd-4a17-a8e6-fb01d1ff9234',
-      callType: ApiCallType.PATCH,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      body: ffApiRequestBody,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class CreateToolCall {
-  Future<ApiCallResponse> call({
-    String? toolName = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    final ffApiRequestBody = '''
-{
-  "type": "transferCall",
-  "function": {
-    "name": "${escapeStringForJson(toolName)}",
-    "strict": false,
-    "description": "This tool will transfer technician's call to customer ensuring call masking.",
-    "parameters": {
-      "type": "object",
-      "properties": {
-        "phoneNumber": {
-          "description": "This is customer's phone number where the call will be forwarded",
-          "type": "string"
-        }
-      },
-      "required": [
-        "phoneNumber"
-      ]
-    }
-  },
-  "messages": [
-    {
-      "type": "request-start",
-      "content": "Please hold on I am transferring the call to customer.",
-      "blocking": false,
-      "conditions": []
-    }
-  ],
-  "async": false,
-  "destinations": []
-}''';
-    return ApiManager.instance.makeApiCall(
-      callName: 'createTool',
-      apiUrl: '${baseUrl}/tool',
-      callType: ApiCallType.POST,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      body: ffApiRequestBody,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class PlaceCallCall {
-  Future<ApiCallResponse> call({
-    String? name = '',
-    String? number = '',
-    String? phoneNumberId = '',
-    String? companyPhoneNumber = '',
-    dynamic assistantJson,
-    String? industry = '',
-    String? company = '',
-    String? now = '',
-    String? assistantName = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    final assistant = _serializeJson(assistantJson);
-    final ffApiRequestBody = '''
-{
-  "customer": {
-    "name": "${escapeStringForJson(name)}",
-    "number": "${escapeStringForJson(number)}"
-  },
-  "assistantOverrides": {
-    "variableValues": {
-      "customertName": "${escapeStringForJson(name)}",
-      "industry": "${escapeStringForJson(industry)}",
-      "companyName": "${escapeStringForJson(company)}",
-      "now": "${escapeStringForJson(now)}",
-      "assistantName": "${escapeStringForJson(assistantName)}"
-    }
-  },
-  ${_isValidUuid(phoneNumberId) ? '"phoneNumberId": "${escapeStringForJson(phoneNumberId)}"' : '"phoneNumber": {"twilioPhoneNumber": "${escapeStringForJson(companyPhoneNumber)}", "twilioAccountSid": "ACcf36ee2a4549fb9077606737abb6242a"}'},
-  "assistant": ${assistant},
-  "serverUrl": "https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net/vapiWebhook"
-}''';
-    return ApiManager.instance.makeApiCall(
-      callName: 'Place Call',
-      apiUrl: '${baseUrl}/call',
-      callType: ApiCallType.POST,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      body: ffApiRequestBody,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-class GetAssistantCall {
-  Future<ApiCallResponse> call({
-    String? id = '',
-  }) async {
-    final baseUrl = VapiGroup.getBaseUrl();
-
-    return ApiManager.instance.makeApiCall(
-      callName: 'getAssistant',
-      apiUrl: '${baseUrl}/assistant/${id}',
-      callType: ApiCallType.GET,
-      headers: {
-        'Authorization': '350fcb5e-8d29-4eff-bb3d-8566e28cf09a',
-      },
-      params: {},
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-}
-
-/// End Vapi Group Code
-
-/// Start Create Job Group Code
-
-class CreateJobGroup {
-  static CreateJobCall createJobCall = CreateJobCall();
-}
-
-class CreateJobCall {
-  Future<ApiCallResponse> call({
-    String? userName = '',
-    String? userEmail = '',
-    String? title = '',
-    String? jobDescription = '',
-    String? userPhoneNumber = '',
-    String? address = '',
-    String? requestedTime = '',
-    String? companyId = '',
-  }) async {
-    final ffApiRequestBody = '''
-{
-  "userName": "${escapeStringForJson(userName)}",
-  "userEmail": "${escapeStringForJson(userEmail)}",
-  "title": "${escapeStringForJson(title)}",
-  "jobDescription": "${escapeStringForJson(jobDescription)}",
-  "userPhoneNumber": "${escapeStringForJson(userPhoneNumber)}",
-  "address": "${escapeStringForJson(address)}",
-  "requestedTime": "${escapeStringForJson(requestedTime)}",
-  "companyId": "${escapeStringForJson(companyId)}"
-}''';
-    return ApiManager.instance.makeApiCall(
-      callName: 'Create Job',
-      apiUrl: 'https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net/createJob',
-      callType: ApiCallType.POST,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      params: {},
-      body: ffApiRequestBody,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-
-  String? success(dynamic response) => getJsonField(
-        response,
-        r'''$.success''',
-      ).toString();
-  String? jobId(dynamic response) => getJsonField(
-        response,
-        r'''$.jobId''',
-      ).toString();
-  String? message(dynamic response) => getJsonField(
-        response,
-        r'''$.message''',
-      ).toString();
-  String? error(dynamic response) => getJsonField(
-        response,
-        r'''$.error''',
-      ).toString();
-}
-
-/// End Create Job Group Code
+const _kPrivateApiFunctionName = 'ffPrivateApiCall';
 
 /// Start Stripe Group Code
 
@@ -1192,7 +420,7 @@ class BuyPhoneNumberCall {
       params: {
         'PhoneNumber': phonenNumber,
         'friendly_name': friendlyName,
-        'SmsUrl': "${FFAppConstants.transferCallEndpoint}",
+        'SmsUrl': "https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net/twilioVoiceWebhook",
         'SmsMethod': "POST",
       },
       bodyType: BodyType.X_WWW_FORM_URL_ENCODED,
@@ -1270,6 +498,473 @@ class SendSmsCall {
 
 /// End Twillio Group Code
 
+/// Start VoiceService Group Code (Firebase Cloud Functions + Twilio)
+
+class VoiceServiceGroup {
+  static String getBaseUrl() =>
+      'https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net';
+  static Map<String, String> headers = {
+    'Content-Type': 'application/json',
+  };
+  static VoiceServicePlaceCallCall placeCallCall = VoiceServicePlaceCallCall();
+  static VoiceServiceSearchNumbersCall searchNumbersCall =
+      VoiceServiceSearchNumbersCall();
+  static VoiceServicePurchaseNumberCall purchaseNumberCall =
+      VoiceServicePurchaseNumberCall();
+  // Alias for phone number creation
+  static VoiceServicePurchaseNumberCall createPhoneNumberCall =
+      VoiceServicePurchaseNumberCall();
+  static VoiceServiceConfigureNumberCall configureNumberCall =
+      VoiceServiceConfigureNumberCall();
+  static VoiceServiceReleaseNumberCall releaseNumberCall =
+      VoiceServiceReleaseNumberCall();
+  // Alias for phone number deletion
+  static VoiceServiceReleaseNumberCall deletePhoneCall =
+      VoiceServiceReleaseNumberCall();
+  // Assistant management via Firebase Cloud Functions
+  static VoiceServiceGetAllAssistantsCall getAllAssistantsCall =
+      VoiceServiceGetAllAssistantsCall();
+  static VoiceServiceCreateAssistantCall createAssistantCall =
+      VoiceServiceCreateAssistantCall();
+  static VoiceServiceUpdateAssistantCall updateAssistantCall =
+      VoiceServiceUpdateAssistantCall();
+  static VoiceServiceDeleteAssistantCall deleteAssistantCall =
+      VoiceServiceDeleteAssistantCall();
+  // Tool management (placeholders - tools are now managed via Firestore)
+  static VoiceServiceGetToolCall getToolCall = VoiceServiceGetToolCall();
+  static VoiceServiceUpdateToolCall updateToolCall = VoiceServiceUpdateToolCall();
+}
+
+class VoiceServicePlaceCallCall {
+  Future<ApiCallResponse> call({
+    String? name = '',
+    String? number = '',
+    String? companyPhone = '',
+    String? companyId = '',
+    String? assistantId = '',
+    dynamic? assistantJson,
+    Map<String, dynamic>? metadata,
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+
+    final assistant = _serializeJson(assistantJson);
+    final metadataStr = _serializeJson(metadata);
+    final ffApiRequestBody = '''
+{
+  "name": "${escapeStringForJson(name)}",
+  "number": "${escapeStringForJson(number)}",
+  "companyPhone": "${escapeStringForJson(companyPhone)}",
+  "companyId": "${escapeStringForJson(companyId)}",
+  "assistantId": "${escapeStringForJson(assistantId)}",
+  "assistantJson": ${assistant},
+  "metadata": ${metadataStr}
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Place Call',
+      apiUrl: '${baseUrl}/placeCall',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+
+  String? callSid(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.callSid''',
+      ));
+  String? callSessionId(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.callSessionId''',
+      ));
+  String? status(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.status''',
+      ));
+}
+
+class VoiceServiceSearchNumbersCall {
+  Future<ApiCallResponse> call({
+    String? country = 'US',
+    String? areaCode = '',
+    String? contains = '',
+    int? limit = 10,
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+
+    final ffApiRequestBody = '''
+{
+  "country": "${escapeStringForJson(country)}",
+  "areaCode": "${escapeStringForJson(areaCode)}",
+  "contains": "${escapeStringForJson(contains)}",
+  "limit": ${limit ?? 10}
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Search Numbers',
+      apiUrl: '${baseUrl}/searchPhoneNumbers',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+
+  List? phoneNumbers(dynamic response) => getJsonField(
+        response,
+        r'''$''',
+        true,
+      ) as List?;
+}
+
+class VoiceServicePurchaseNumberCall {
+  Future<ApiCallResponse> call({
+    String? phoneNumber = '',
+    String? friendlyName = '',
+    String? companyId = '',
+    String? number = '',
+    String? name = '',
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+
+    final ffApiRequestBody = '''
+{
+  "phoneNumber": "${escapeStringForJson(phoneNumber ?? number)}",
+  "friendlyName": "${escapeStringForJson(friendlyName ?? name)}",
+  "companyId": "${escapeStringForJson(companyId)}"
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Purchase Number',
+      apiUrl: '${baseUrl}/purchasePhoneNumber',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+
+  String? sid(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.sid''',
+      ));
+  String? id(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.sid''',
+      ));
+  String? phoneNumber(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.phoneNumber''',
+      ));
+  String? number(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.phoneNumber''',
+      ));
+  String? message(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.message''',
+      ));
+}
+
+class VoiceServiceConfigureNumberCall {
+  Future<ApiCallResponse> call({
+    String? phoneNumber = '',
+    String? friendlyName = '',
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+
+    final ffApiRequestBody = '''
+{
+  "number": "${escapeStringForJson(phoneNumber)}",
+  "friendlyName": "${escapeStringForJson(friendlyName)}"
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Configure Number',
+      apiUrl: '${baseUrl}/configurePhoneNumber',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class VoiceServiceReleaseNumberCall {
+  Future<ApiCallResponse> call({
+    String? sid = '',
+    String? id = '',
+    String? phoneNumber = '',
+    String? companyId = '',
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+
+    final ffApiRequestBody = '''
+{
+  "sid": "${escapeStringForJson(sid ?? id)}",
+  "phoneNumber": "${escapeStringForJson(phoneNumber)}",
+  "companyId": "${escapeStringForJson(companyId)}"
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Release Number',
+      apiUrl: '${baseUrl}/releasePhoneNumber',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class VoiceServiceGetAllAssistantsCall {
+  Future<ApiCallResponse> call() async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Get All Assistants',
+      apiUrl: '${baseUrl}/assistantsList',
+      callType: ApiCallType.GET,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+
+  List? assistants(dynamic response) => getJsonField(
+        response,
+        r'''$''',
+        true,
+      ) as List?;
+}
+
+class VoiceServiceCreateAssistantCall {
+  Future<ApiCallResponse> call({
+    String? systemPrompt = '',
+    String? firstMessage = '',
+    String? assistantName = '',
+    String? language = '',
+    String? userId = '',
+    List<String>? toolsList,
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+    final tools = _serializeList(toolsList);
+
+    final ffApiRequestBody = '''
+{
+  "systemPrompt": "${escapeStringForJson(systemPrompt)}",
+  "firstMessage": "${escapeStringForJson(firstMessage)}",
+  "name": "${escapeStringForJson(assistantName)}",
+  "language": "${escapeStringForJson(language)}",
+  "userId": "${escapeStringForJson(userId)}",
+  "toolIds": ${tools}
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Create Assistant',
+      apiUrl: '${baseUrl}/assistantsCreate',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+
+  String? id(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.id''',
+      ));
+  String? name(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.name''',
+      ));
+}
+
+class VoiceServiceUpdateAssistantCall {
+  Future<ApiCallResponse> call({
+    String? id = '',
+    String? firstMessage = '',
+    String? assistantName = '',
+    String? language = '',
+    String? userId = '',
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+
+    final ffApiRequestBody = '''
+{
+  "id": "${escapeStringForJson(id)}",
+  "name": "${escapeStringForJson(assistantName)}",
+  "firstMessage": "${escapeStringForJson(firstMessage)}",
+  "language": "${escapeStringForJson(language)}"
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Update Assistant',
+      apiUrl: '${baseUrl}/assistantsUpdate',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class VoiceServiceDeleteAssistantCall {
+  Future<ApiCallResponse> call({
+    String? id = '',
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+
+    final ffApiRequestBody = '''
+{
+  "id": "${escapeStringForJson(id)}"
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Delete Assistant',
+      apiUrl: '${baseUrl}/assistantsDelete',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class VoiceServiceGetToolCall {
+  Future<ApiCallResponse> call({
+    String? id = '',
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Get Tool',
+      apiUrl: '${baseUrl}/toolsGet',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {
+        'id': id,
+      },
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class VoiceServiceUpdateToolCall {
+  Future<ApiCallResponse> call({
+    dynamic? bodyJson,
+    String? id = '',
+  }) async {
+    final baseUrl = VoiceServiceGroup.getBaseUrl();
+    final body = _serializeJson(bodyJson);
+
+    final ffApiRequestBody = '''
+{
+  "id": "${escapeStringForJson(id)}",
+  "data": ${body}
+}''';
+    return ApiManager.instance.makeApiCall(
+      callName: 'VoiceService Update Tool',
+      apiUrl: '${baseUrl}/toolsUpdate',
+      callType: ApiCallType.POST,
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+/// End VoiceService Group Code
+
 class SendASMSCall {
   static Future<ApiCallResponse> call({
     String? smsMessage = 'A text message sent using the Vonage SMS API',
@@ -1305,90 +1000,6 @@ class SendASMSCall {
         r'''$.messages''',
         true,
       ) as List?;
-}
-
-class TtsServiceGroup {
-  static ListTtsVoicesCall listTtsVoicesCall = ListTtsVoicesCall();
-  static SynthesizeTtsCall synthesizeTtsCall = SynthesizeTtsCall();
-}
-
-class ListTtsVoicesCall {
-  Future<ApiCallResponse> call({required String provider}) async {
-    return ApiManager.instance.makeApiCall(
-      callName: 'List TTS Voices',
-      apiUrl: '${FFAppConstants.cloudFunctionsBaseUrl}/listTtsVoices',
-      callType: ApiCallType.POST,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      params: {},
-      body: '''{"provider":"${escapeStringForJson(provider)}"}''',
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-
-  List<dynamic>? voices(dynamic response) => getJsonField(
-        response,
-        r'''$.voices''',
-        true,
-      ) as List<dynamic>?;
-}
-
-class SynthesizeTtsCall {
-  Future<ApiCallResponse> call({
-    required String provider,
-    required String voiceId,
-    String? text,
-    Map<String, dynamic>? options,
-  }) async {
-    final bodyMap = {
-      'provider': provider,
-      'voiceId': voiceId,
-      if (text != null) 'text': text,
-      if (options != null) 'options': options,
-    };
-    final body = jsonEncode(bodyMap);
-    return ApiManager.instance.makeApiCall(
-      callName: 'Synthesize TTS',
-      apiUrl: '${FFAppConstants.cloudFunctionsBaseUrl}/synthesizeTts',
-      callType: ApiCallType.POST,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      params: {},
-      body: body,
-      bodyType: BodyType.JSON,
-      returnBody: true,
-      encodeBodyUtf8: false,
-      decodeUtf8: false,
-      cache: false,
-      isStreamingApi: false,
-      alwaysAllowBody: false,
-    );
-  }
-
-  String? audioContent(dynamic response) => castToType<String>(getJsonField(
-        response,
-        r'''$.audioContent''',
-      ));
-  String? audioEncoding(dynamic response) => castToType<String>(getJsonField(
-        response,
-        r'''$.audioEncoding''',
-      ));
-  int? sampleRateHertz(dynamic response) => castToType<int>(getJsonField(
-        response,
-        r'''$.sampleRateHertz''',
-      ));
-  double? latencyMs(dynamic response) => castToType<double>(getJsonField(
-        response,
-        r'''$.latencyMs''',
-      ));
 }
 
 class ApiPagingParams {

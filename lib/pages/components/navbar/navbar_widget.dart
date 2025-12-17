@@ -4,6 +4,7 @@ import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/flutter_flow/info_tooltip_widget.dart';
 import 'dart:ui';
 import '/index.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -42,15 +43,15 @@ class _NavbarWidgetState extends State<NavbarWidget> {
     _model = createModel(context, () => NavbarModel());
 
     _model.expandableExpandableController1 =
-        ExpandableController(initialExpanded: true);
+        ExpandableController(initialExpanded: false);
     _model.expandableExpandableController2 =
-        ExpandableController(initialExpanded: true);
+        ExpandableController(initialExpanded: false);
     _model.expandableExpandableController3 =
-        ExpandableController(initialExpanded: true);
+        ExpandableController(initialExpanded: false);
     _model.expandableExpandableController4 =
-        ExpandableController(initialExpanded: true);
+        ExpandableController(initialExpanded: false);
     _model.expandableExpandableController5 =
-        ExpandableController(initialExpanded: true);
+        ExpandableController(initialExpanded: false);
     WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
 
@@ -75,7 +76,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
         opaque: false,
         cursor: MouseCursor.defer ?? MouseCursor.defer,
         child: Container(
-          width: 250.0, // Always expanded
+          width: FFAppState().expand ? 250.0 : 80.0,
           decoration: BoxDecoration(
             color: FlutterFlowTheme.of(context).primaryBackground,
             borderRadius: BorderRadius.circular(12.0),
@@ -86,7 +87,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
               padding: EdgeInsetsDirectional.fromSTEB(10.0, 10.0, 10.0, 0.0),
               child: Builder(
                 builder: (context) {
-                  if (false) { // Always show expanded content
+                  if (!FFAppState().expand) {
                     return Column(
                       mainAxisSize: MainAxisSize.max,
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -354,7 +355,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               phone: false,
                               tablet: false,
                               tabletLandscape: false,
-                              desktop: true,
+                              desktop: false,
                             ))
                           AuthUserStreamWidget(
                             builder: (context) => Container(
@@ -401,7 +402,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               phone: false,
                               tablet: false,
                               tabletLandscape: false,
-                              desktop: true,
+                              desktop: false,
                             ))
                           AuthUserStreamWidget(
                             builder: (context) => Container(
@@ -448,7 +449,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               phone: false,
                               tablet: false,
                               tabletLandscape: false,
-                              desktop: true,
+                              desktop: false,
                             ))
                           AuthUserStreamWidget(
                             builder: (context) => Container(
@@ -495,7 +496,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                           phone: false,
                           tablet: false,
                           tabletLandscape: false,
-                          desktop: true,
+                          desktop: false,
                         ))
                           Container(
                             width: 40.0,
@@ -571,7 +572,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                           phone: false,
                           tablet: false,
                           tabletLandscape: false,
-                          desktop: true,
+                          desktop: false,
                         ))
                           Padding(
                             padding: EdgeInsetsDirectional.fromSTEB(
@@ -588,20 +589,14 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                 borderColor: Colors.transparent,
                                 borderRadius: 8.0,
                                 borderWidth: 1.0,
-                                buttonSize: 45.0,
+                                buttonSize: 35.0,
                                 icon: Icon(
                                   Icons.logout_outlined,
                                   color: Color(0xFF919191),
-                                  size: 24.0,
+                                  size: 20.0,
                                 ),
-                                onPressed: () async {
-                                  GoRouter.of(context).prepareAuthEvent();
-                                  await authManager.signOut();
-                                  GoRouter.of(context).clearRedirectLocation();
-
-                                  context.goNamedAuth(
-                                      LoginScreenWidget.routeName,
-                                      context.mounted);
+                                onPressed: () {
+                                  print('IconButton pressed ...');
                                 },
                               ),
                             ),
@@ -671,84 +666,6 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                     ],
                                   ),
                                 ].divide(SizedBox(width: 15.0)),
-                              ),
-                              Padding(
-                                padding: EdgeInsetsDirectional.fromSTEB(
-                                    0.0, 16.0, 0.0, 0.0),
-                                child: Consumer<FFAppState>(
-                                  builder: (context, appState, _) {
-                                    final isHebrew =
-                                        appState.languageCode == 'he';
-                                    return ToggleButtons(
-                                      constraints: const BoxConstraints(
-                                        minHeight: 36.0,
-                                        minWidth: 60.0,
-                                      ),
-                                      borderRadius: BorderRadius.circular(12.0),
-                                      isSelected: [
-                                        !isHebrew,
-                                        isHebrew,
-                                      ],
-                                      onPressed: (index) {
-                                        final languageCode =
-                                            index == 1 ? 'he' : 'en';
-                                        if (languageCode ==
-                                            appState.languageCode) {
-                                          return;
-                                        }
-                                        final appStateNotifier =
-                                            context.read<FFAppState>();
-                                        appStateNotifier.update(() {
-                                          appStateNotifier.languageCode =
-                                              languageCode;
-                                        });
-                                      },
-                                      fillColor:
-                                          FlutterFlowTheme.of(context).primary,
-                                      selectedColor:
-                                          FlutterFlowTheme.of(context)
-                                              .primaryText,
-                                      color: FlutterFlowTheme.of(context)
-                                          .secondaryText,
-                                      children: [
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 12.0,
-                                              vertical: 6.0),
-                                          child: LocalizedText(
-                                            'English',
-                                            style:
-                                                FlutterFlowTheme.of(context)
-                                                    .bodyMedium
-                                                    .override(
-                                                      font:
-                                                          GoogleFonts.inter(),
-                                                      fontSize: 12.0,
-                                                      letterSpacing: 0.0,
-                                                    ),
-                                          ),
-                                        ),
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 12.0,
-                                              vertical: 6.0),
-                                          child: LocalizedText(
-                                            'Hebrew',
-                                            style:
-                                                FlutterFlowTheme.of(context)
-                                                    .bodyMedium
-                                                    .override(
-                                                      font:
-                                                          GoogleFonts.inter(),
-                                                      fontSize: 12.0,
-                                                      letterSpacing: 0.0,
-                                                    ),
-                                          ),
-                                        ),
-                                      ],
-                                    );
-                                  },
-                                ),
                               ),
                             ],
                           ),
@@ -911,7 +828,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                               phone: false,
                                               tablet: false,
                                               tabletLandscape: false,
-                                              desktop: true,
+                                              desktop: false,
                                             ))
                                               Container(
                                                 width: double.infinity,
@@ -1274,7 +1191,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: true,
+                                                  desktop: false,
                                                 ))
                                               AuthUserStreamWidget(
                                                 builder: (context) => Container(
@@ -1411,7 +1328,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: true,
+                                                  desktop: false,
                                                 ))
                                               AuthUserStreamWidget(
                                                 builder: (context) => Container(
@@ -1635,7 +1552,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: true,
+                                                  desktop: false,
                                                 ))
                                               AuthUserStreamWidget(
                                                 builder: (context) => Container(
@@ -1981,7 +1898,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                               phone: false,
                                               tablet: false,
                                               tabletLandscape: false,
-                                              desktop: true,
+                                              desktop: false,
                                             ))
                                               Container(
                                                 width: double.infinity,
@@ -2447,7 +2364,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: true,
+                                                  desktop: false,
                                                 ))
                                                   Container(
                                                     width: double.infinity,
@@ -2684,7 +2601,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: true,
+                                                  desktop: false,
                                                 ))
                                                   Container(
                                                     width: double.infinity,
@@ -3217,7 +3134,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   phone: false,
                                                   tablet: false,
                                                   tabletLandscape: false,
-                                                  desktop: true,
+                                                  desktop: false,
                                                 ))
                                                   Container(
                                                     width: double.infinity,
@@ -3386,7 +3303,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         phone: false,
                                         tablet: false,
                                         tabletLandscape: false,
-                                        desktop: true,
+                                        desktop: false,
                                       ))
                                     AuthUserStreamWidget(
                                       builder: (context) => FFButtonWidget(
@@ -3477,7 +3394,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         phone: false,
                                         tablet: false,
                                         tabletLandscape: false,
-                                        desktop: true,
+                                        desktop: false,
                                       ))
                                     AuthUserStreamWidget(
                                       builder: (context) => FFButtonWidget(
@@ -3568,7 +3485,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         phone: false,
                                         tablet: false,
                                         tabletLandscape: false,
-                                        desktop: true,
+                                        desktop: false,
                                       ))
                                     AuthUserStreamWidget(
                                       builder: (context) => FFButtonWidget(
@@ -3657,7 +3574,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                     phone: false,
                                     tablet: false,
                                     tabletLandscape: false,
-                                    desktop: true,
+                                    desktop: false,
                                   ))
                                     FFButtonWidget(
                                       onPressed: () async {
@@ -3928,35 +3845,27 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                           ),
                                         ].divide(SizedBox(width: 12.0)),
                                       ),
-                                      Container(
-                                        padding: EdgeInsets.all(8.0),
-                                        decoration: BoxDecoration(
-                                          color: FlutterFlowTheme.of(context)
-                                              .secondaryBackground,
-                                          borderRadius: BorderRadius.circular(8.0),
-                                        ),
-                                        child: InkWell(
-                                          splashColor: Colors.transparent,
-                                          focusColor: Colors.transparent,
-                                          hoverColor: Colors.transparent,
-                                          highlightColor: Colors.transparent,
-                                          onTap: () async {
-                                            GoRouter.of(context)
-                                                .prepareAuthEvent();
-                                            await authManager.signOut();
-                                            GoRouter.of(context)
-                                                .clearRedirectLocation();
+                                      InkWell(
+                                        splashColor: Colors.transparent,
+                                        focusColor: Colors.transparent,
+                                        hoverColor: Colors.transparent,
+                                        highlightColor: Colors.transparent,
+                                        onTap: () async {
+                                          GoRouter.of(context)
+                                              .prepareAuthEvent();
+                                          await authManager.signOut();
+                                          GoRouter.of(context)
+                                              .clearRedirectLocation();
 
-                                            context.goNamedAuth(
-                                                LoginScreenWidget.routeName,
-                                                context.mounted);
-                                          },
-                                          child: Icon(
-                                            Icons.logout_outlined,
-                                            color: FlutterFlowTheme.of(context)
-                                                .primaryText,
-                                            size: 24.0,
-                                          ),
+                                          context.goNamedAuth(
+                                              LoginScreenWidget.routeName,
+                                              context.mounted);
+                                        },
+                                        child: Icon(
+                                          Icons.logout_outlined,
+                                          color: FlutterFlowTheme.of(context)
+                                              .primaryText,
+                                          size: 24.0,
                                         ),
                                       ),
                                     ].divide(SizedBox(width: 10.0)),
@@ -3975,10 +3884,10 @@ class _NavbarWidgetState extends State<NavbarWidget> {
           ),
         ),
         onEnter: ((event) async {
-          // Keep sidebar always expanded
+          safeSetState(() => _model.mouseRegionHovered = true);
         }),
         onExit: ((event) async {
-          // Keep sidebar always expanded
+          safeSetState(() => _model.mouseRegionHovered = false);
         }),
       ),
     );

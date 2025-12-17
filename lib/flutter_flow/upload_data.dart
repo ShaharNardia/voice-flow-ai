@@ -232,9 +232,7 @@ bool validateFileFormat(String filePath, BuildContext context) {
   ScaffoldMessenger.of(context)
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(
-      content: LocalizedText(
-        'Invalid file format: ${mime(filePath)}',
-      ),
+      content: Text('Invalid file format: ${mime(filePath)}'),
     ));
   return false;
 }

@@ -19,8 +19,6 @@ export 'package:firebase_core/firebase_core.dart';
 export 'schema/index.dart';
 export 'schema/util/firestore_util.dart';
 export 'schema/util/schema_util.dart';
-export 'schema/enums/enums.dart';
-export 'workflows/workflow_service.dart';
 
 export 'schema/user_record.dart';
 export 'schema/jobs_record.dart';
@@ -293,19 +291,16 @@ Future<int> queryCollectionCount(
   Query collection, {
   Query Function(Query)? queryBuilder,
   int limit = -1,
-}) async {
+}) {
   final builder = queryBuilder ?? (q) => q;
   var query = builder(collection);
   if (limit > 0) {
     query = query.limit(limit);
   }
-  try {
-    final snapshot = await query.count().get();
-    return snapshot.count ?? 0;
-  } catch (err) {
+
+  return query.count().get().catchError((err) {
     print('Error querying $collection: $err');
-    return 0;
-  }
+  }).then((value) => value.count!);
 }
 
 Stream<List<T>> queryCollection<T>(
@@ -365,41 +360,28 @@ Future<List<T>> queryCollectionOnce<T>(
       .toList());
 }
 
-Filter filterIn(String field, List? list) {
-  if (list == null || list.isEmpty) {
-    return Filter(field);
-  }
-  return Filter(field, whereIn: list);
-}
+Filter filterIn(String field, List? list) => (list?.isEmpty ?? true)
+    ? Filter(field, whereIn: null)
+    : Filter(field, whereIn: list);
 
-Filter filterArrayContainsAny(String field, List? list) {
-  if (list == null || list.isEmpty) {
-    return Filter(field);
-  }
-  return Filter(field, arrayContainsAny: list);
-}
+Filter filterArrayContainsAny(String field, List? list) =>
+    (list?.isEmpty ?? true)
+        ? Filter(field, arrayContainsAny: null)
+        : Filter(field, arrayContainsAny: list);
 
 extension QueryExtension on Query {
-  Query whereIn(String field, List? list) {
-    if (list == null || list.isEmpty) {
-      return this;
-    }
-    return where(field, whereIn: list);
-  }
+  Query whereIn(String field, List? list) => (list?.isEmpty ?? true)
+      ? where(field, whereIn: null)
+      : where(field, whereIn: list);
 
-  Query whereNotIn(String field, List? list) {
-    if (list == null || list.isEmpty) {
-      return this;
-    }
-    return where(field, whereNotIn: list);
-  }
+  Query whereNotIn(String field, List? list) => (list?.isEmpty ?? true)
+      ? where(field, whereNotIn: null)
+      : where(field, whereNotIn: list);
 
-  Query whereArrayContainsAny(String field, List? list) {
-    if (list == null || list.isEmpty) {
-      return this;
-    }
-    return where(field, arrayContainsAny: list);
-  }
+  Query whereArrayContainsAny(String field, List? list) =>
+      (list?.isEmpty ?? true)
+          ? where(field, arrayContainsAny: null)
+          : where(field, arrayContainsAny: list);
 }
 
 class FFFirestorePage<T> {

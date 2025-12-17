@@ -992,8 +992,8 @@ class _AddAgentWidgetState extends State<AddAgentWidget> {
                               context: context,
                               builder: (alertDialogContext) {
                                 return AlertDialog(
-                                  title: const LocalizedText('Success'),
-                                  content: LocalizedText(getJsonField(
+                                  title: Text('Success'),
+                                  content: Text(getJsonField(
                                     _model.cloudFunctionmln!.jsonBody,
                                     r'''$.message''',
                                   ).toString()),
@@ -1001,7 +1001,7 @@ class _AddAgentWidgetState extends State<AddAgentWidget> {
                                     TextButton(
                                       onPressed: () =>
                                           Navigator.pop(alertDialogContext),
-                                      child: const LocalizedText('Ok'),
+                                      child: Text('Ok'),
                                     ),
                                   ],
                                 );
@@ -1013,8 +1013,8 @@ class _AddAgentWidgetState extends State<AddAgentWidget> {
                               context: context,
                               builder: (alertDialogContext) {
                                 return AlertDialog(
-                                  title: const LocalizedText('Failed'),
-                                  content: LocalizedText(getJsonField(
+                                  title: Text('Failed'),
+                                  content: Text(getJsonField(
                                     _model.cloudFunctionmln!.jsonBody,
                                     r'''$.invalid''',
                                   ).toString()),
@@ -1022,7 +1022,7 @@ class _AddAgentWidgetState extends State<AddAgentWidget> {
                                     TextButton(
                                       onPressed: () =>
                                           Navigator.pop(alertDialogContext),
-                                      child: const LocalizedText('Ok'),
+                                      child: Text('Ok'),
                                     ),
                                   ],
                                 );
@@ -1034,19 +1034,19 @@ class _AddAgentWidgetState extends State<AddAgentWidget> {
                                 context: context,
                                 builder: (alertDialogContext) {
                                   return AlertDialog(
-                                    title: const LocalizedText('invalid action'),
-                                    content: const LocalizedText(
-                                        'Please enter a password; the field is empty.'),
+                                    title: Text('invalid action'),
+                                    content: Text(
+                                        'Please enter password  field is empty .'),
                                     actions: [
                                       TextButton(
                                         onPressed: () => Navigator.pop(
                                             alertDialogContext, false),
-                                        child: const LocalizedText('Cancel'),
+                                        child: Text('Cancel'),
                                       ),
                                       TextButton(
                                         onPressed: () => Navigator.pop(
                                             alertDialogContext, true),
-                                        child: const LocalizedText('Confirm'),
+                                        child: Text('Confirm'),
                                       ),
                                     ],
                                   );

@@ -93,7 +93,7 @@ class FFAppState extends ChangeNotifier {
     prefs.setBool('ff_hasCompletedDashboardWalkthrough', value);
   }
 
-  bool _expand = false;
+  bool _expand = true;
   bool get expand => _expand;
   set expand(bool value) {
     _expand = value;

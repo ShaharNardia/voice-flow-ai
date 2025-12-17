@@ -135,7 +135,7 @@ class _EditNumberWidgetState extends State<EditNumberWidget> {
                             EdgeInsetsDirectional.fromSTEB(8.0, 0.0, 8.0, 0.0),
                         child: AuthUserStreamWidget(
                           builder: (context) => FutureBuilder<ApiCallResponse>(
-                            future: VapiGroup.getAllAssistantsCall.call(),
+                            future: VoiceServiceGroup.getAllAssistantsCall.call(),
                             builder: (context, snapshot) {
                               // Customize what your widget looks like when it's loading.
                               if (!snapshot.hasData) {
@@ -238,7 +238,7 @@ class _EditNumberWidgetState extends State<EditNumberWidget> {
                         ),
                       ),
                     FutureBuilder<ApiCallResponse>(
-                      future: VapiGroup.getAllAssistantsCall.call(),
+                      future: VoiceServiceGroup.getAllAssistantsCall.call(),
                       builder: (context, snapshot) {
                         // Customize what your widget looks like when it's loading.
                         if (!snapshot.hasData) {
@@ -263,7 +263,7 @@ class _EditNumberWidgetState extends State<EditNumberWidget> {
                                   FormFieldController<String>(
                             _model.assistantDropDownValue ??= '',
                           ),
-                          options: List<String>.from(VapiGroup
+                          options: List<String>.from(VoiceServiceGroup
                               .getAllAssistantsCall
                               .assistants(
                                 assistantDropDownGetAllAssistantsResponse
@@ -279,7 +279,7 @@ class _EditNumberWidgetState extends State<EditNumberWidget> {
                               .toList()
                               .map((e) => e.toString())
                               .toList()),
-                          optionLabels: VapiGroup.getAllAssistantsCall
+                          optionLabels: VoiceServiceGroup.getAllAssistantsCall
                               .assistants(
                                 assistantDropDownGetAllAssistantsResponse
                                     .jsonBody,

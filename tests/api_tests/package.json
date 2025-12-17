@@ -7,7 +7,11 @@
     "test": "node runAllTests.js",
     "test:functions": "node testFirebaseFunctions.js",
     "test:workflow": "node testWorkflowService.js",
-    "test:smoke": "node smokeTest.js"
+    "test:smoke": "node smokeTest.js",
+    "test:edge-cases": "node testEdgeCases.js",
+    "test:integration": "node testIntegration.js",
+    "test:performance": "node ../performance/load-test.js",
+    "test:security": "node ../security/security-tests.js"
   },
   "dependencies": {
     "axios": "^1.6.0",

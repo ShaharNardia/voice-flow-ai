@@ -108,14 +108,9 @@ class _ClientWidgetState extends State<ClientWidget>
                     Expanded(
                       child: Builder(
                         builder: (context) {
-                          final hasSubscriptionAccess =
-                              valueOrDefault<bool>(
-                                    currentUserDocument?.subscribed,
-                                    false,
-                                  ) ||
-                                  (currentUserDocument?.role?.name ==
-                                      'admin');
-                          if (hasSubscriptionAccess) {
+                          if (valueOrDefault<bool>(
+                                  currentUserDocument?.subscribed, false) ==
+                              true) {
                             return Padding(
                               padding: EdgeInsets.all(10.0),
                               child: Container(
@@ -511,21 +506,14 @@ class _ClientWidgetState extends State<ClientWidget>
                                               Expanded(
                                                 child: StreamBuilder<
                                                     List<LeadRecord>>(
-                                                  stream: currentUserDocument?.company != null
-                                                      ? queryLeadRecord(
-                                                          queryBuilder:
-                                                              (leadRecord) =>
-                                                                  leadRecord
-                                                                      .where(
-                                                                        'isClient',
-                                                                        isEqualTo: true,
-                                                                      )
-                                                                      .where(
-                                                                        'company',
-                                                                        isEqualTo: currentUserDocument?.company?.id,
-                                                                      ),
-                                                        )
-                                                      : const Stream.empty(),
+                                                  stream: queryLeadRecord(
+                                                    queryBuilder:
+                                                        (leadRecord) =>
+                                                            leadRecord.where(
+                                                      'isClient',
+                                                      isEqualTo: true,
+                                                    ),
+                                                  ),
                                                   builder: (context, snapshot) {
                                                     // Customize what your widget looks like when it's loading.
                                                     if (!snapshot.hasData) {
@@ -1260,48 +1248,20 @@ class _ClientWidgetState extends State<ClientWidget>
                                                                           Expanded(
                                                                             child:
                                                                                 StreamBuilder<List<JobsRecord>>(
-                                                                              stream: currentUserDocument?.company != null
-                                                                                  ? queryJobsRecord(
-                                                                                      queryBuilder: (jobsRecord) => jobsRecord
-                                                                                          .where(
-                                                                                            'leadRef',
-                                                                                            isEqualTo: _model.leadStateData?.reference.id,
-                                                                                          )
-                                                                                          .where(
-                                                                                            'company',
-                                                                                            isEqualTo: currentUserDocument?.company?.id,
-                                                                                          ),
+                                                                              stream: queryJobsRecord(
+                                                                                queryBuilder: (jobsRecord) => jobsRecord
+                                                                                    .where(
+                                                                                      'leadRef',
+                                                                                      isEqualTo: _model.leadStateData?.reference.id,
                                                                                     )
-                                                                                  : const Stream.empty(),
+                                                                                    .where(
+                                                                                      'company',
+                                                                                      isEqualTo: currentUserDocument?.company?.id,
+                                                                                    ),
+                                                                              ),
                                                                               builder: (context, snapshot) {
                                                                                 // Customize what your widget looks like when it's loading.
-                                                                                if (snapshot.hasError) {
-                                                                                  return Center(
-                                                                                    child: Column(
-                                                                                      mainAxisAlignment: MainAxisAlignment.center,
-                                                                                      children: [
-                                                                                        Icon(
-                                                                                          Icons.error_outline,
-                                                                                          size: 50.0,
-                                                                                          color: FlutterFlowTheme.of(context).error,
-                                                                                        ),
-                                                                                        SizedBox(height: 16.0),
-                                                                                        Text(
-                                                                                          'Error loading jobs',
-                                                                                          style: FlutterFlowTheme.of(context).bodyMedium,
-                                                                                        ),
-                                                                                        SizedBox(height: 8.0),
-                                                                                        Text(
-                                                                                          snapshot.error.toString(),
-                                                                                          style: FlutterFlowTheme.of(context).bodySmall,
-                                                                                          textAlign: TextAlign.center,
-                                                                                        ),
-                                                                                      ],
-                                                                                    ),
-                                                                                  );
-                                                                                }
-                                                                                
-                                                                                if (snapshot.connectionState == ConnectionState.waiting) {
+                                                                                if (!snapshot.hasData) {
                                                                                   return Center(
                                                                                     child: SizedBox(
                                                                                       width: 50.0,
@@ -1311,32 +1271,6 @@ class _ClientWidgetState extends State<ClientWidget>
                                                                                           FlutterFlowTheme.of(context).primary,
                                                                                         ),
                                                                                       ),
-                                                                                    ),
-                                                                                  );
-                                                                                }
-                                                                                
-                                                                                if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                                                                                  return Center(
-                                                                                    child: Column(
-                                                                                      mainAxisAlignment: MainAxisAlignment.center,
-                                                                                      children: [
-                                                                                        Icon(
-                                                                                          Icons.work_outline,
-                                                                                          size: 50.0,
-                                                                                          color: FlutterFlowTheme.of(context).secondaryText,
-                                                                                        ),
-                                                                                        SizedBox(height: 16.0),
-                                                                                        Text(
-                                                                                          'No jobs available',
-                                                                                          style: FlutterFlowTheme.of(context).bodyMedium,
-                                                                                        ),
-                                                                                        SizedBox(height: 8.0),
-                                                                                        Text(
-                                                                                          'Jobs will appear here once they are created',
-                                                                                          style: FlutterFlowTheme.of(context).bodySmall,
-                                                                                          textAlign: TextAlign.center,
-                                                                                        ),
-                                                                                      ],
                                                                                     ),
                                                                                   );
                                                                                 }

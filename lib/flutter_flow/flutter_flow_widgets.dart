@@ -2,8 +2,6 @@ import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:flutter/material.dart';
 import 'package:auto_size_text/auto_size_text.dart';
 
-import '../localization/app_localizations.dart';
-
 class FFButtonOptions {
   const FFButtonOptions({
     this.textAlign,
@@ -87,11 +85,6 @@ class _FFButtonWidgetState extends State<FFButtonWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final locale = Localizations.maybeLocaleOf(context) ?? const Locale('en');
-    final localization = Localizations.maybeOf<AppLocalizations>(context) ??
-        AppLocalizations(locale);
-    final translatedText = text == null ? null : localization.translate(text!);
-
     Widget textWidget = loading
         ? SizedBox(
             width: widget.options.width == null
@@ -110,7 +103,7 @@ class _FFButtonWidgetState extends State<FFButtonWidget> {
             ),
           )
         : AutoSizeText(
-            translatedText ?? '',
+            text ?? '',
             style:
                 text == null ? null : widget.options.textStyle?.withoutColor(),
             textAlign: widget.options.textAlign,

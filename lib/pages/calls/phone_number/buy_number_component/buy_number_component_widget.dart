@@ -389,17 +389,17 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                             currentUserDocument!.company!);
                         if (currentUserDocument?.company != null) {
                           _model.apiResult73a =
-                              await VapiGroup.createPhoneNumberCall.call(
+                              await VoiceServiceGroup.createPhoneNumberCall.call(
                             number: _model.dropDownValue,
                             name: _model.comapny?.name,
                           );
 
-                          if ((_model.apiResult73a?.statusCode ?? 200) == 201) {
+                          if (_model.apiResult73a?.succeeded == true || (_model.apiResult73a?.statusCode ?? 0) == 201) {
                             await currentUserDocument!.company!.update({
                               ...mapToFirestore(
                                 {
                                   'companyPhoneNumbers': FieldValue.arrayUnion([
-                                    VapiGroup.createPhoneNumberCall.number(
+                                    VoiceServiceGroup.createPhoneNumberCall.number(
                                       (_model.apiResult73a?.jsonBody ?? ''),
                                     )
                                   ]),
@@ -407,12 +407,12 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                                     getPhoneNumberFirestoreData(
                                       updatePhoneNumberStruct(
                                         PhoneNumberStruct(
-                                          id: VapiGroup.createPhoneNumberCall
+                                          id: VoiceServiceGroup.createPhoneNumberCall
                                               .id(
                                             (_model.apiResult73a?.jsonBody ??
                                                 ''),
                                           ),
-                                          phoneNumber: VapiGroup
+                                          phoneNumber: VoiceServiceGroup
                                               .createPhoneNumberCall
                                               .number(
                                             (_model.apiResult73a?.jsonBody ??
@@ -446,11 +446,13 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                           } else {
                             ScaffoldMessenger.of(context).showSnackBar(
                               SnackBar(
-                                content: LocalizedText(
+                                content: Text(
                                   getJsonField(
                                     (_model.apiResult73a?.jsonBody ?? ''),
                                     r'''$.message''',
-                                  ).toString(),
+                                  )?.toString() ?? 
+                                  _model.apiResult73a?.bodyText ?? 
+                                  'Failed to purchase phone number. Please try again.',
                                   style: TextStyle(
                                     color: FlutterFlowTheme.of(context)
                                         .primaryBackground,
@@ -468,14 +470,14 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                             context: context,
                             builder: (alertDialogContext) {
                               return AlertDialog(
-                                title: const LocalizedText('Invalid Action'),
-                                content: const LocalizedText(
-                                    'Sorry company information doesn\'t exist'),
+                                title: Text('Invalid Action'),
+                                content: Text(
+                                    'Sorry Compnay information doesn\'t exists'),
                                 actions: [
                                   TextButton(
                                     onPressed: () =>
                                         Navigator.pop(alertDialogContext),
-                                    child: const LocalizedText('Ok'),
+                                    child: Text('Ok'),
                                   ),
                                 ],
                               );

@@ -1,0 +1,14 @@
+{
+  "name": "voice-flow-performance-tests",
+  "version": "1.0.0",
+  "description": "Performance tests for Voice Flow AI",
+  "main": "load-test.js",
+  "scripts": {
+    "test": "node load-test.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}
+
+

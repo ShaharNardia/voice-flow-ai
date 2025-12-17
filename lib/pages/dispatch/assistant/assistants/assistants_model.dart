@@ -1,4 +1,5 @@
 import '/auth/firebase_auth/auth_util.dart';
+import '/backend/api_requests/api_calls.dart';
 import '/flutter_flow/flutter_flow_data_table.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -31,6 +32,8 @@ class AssistantsModel extends FlutterFlowModel<AssistantsWidget> {
   // State field(s) for PaginatedDataTable widget.
   final paginatedDataTableController =
       FlutterFlowDataTableController<dynamic>();
+  // Stores action output result for [Backend Call - API (deleteAssistant)] action in IconButton widget.
+  ApiCallResponse? apiResultscs;
 
   @override
   void initState(BuildContext context) {

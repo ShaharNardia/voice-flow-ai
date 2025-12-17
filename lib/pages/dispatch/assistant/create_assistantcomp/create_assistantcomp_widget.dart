@@ -1,10 +1,11 @@
 import '/auth/firebase_auth/auth_util.dart';
-import '/backend/workflows/workflow_service.dart';
+import '/backend/api_requests/api_calls.dart';
 import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_drop_down.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/flutter_flow/info_tooltip_widget.dart';
 import '/flutter_flow/form_field_controller.dart';
 import 'dart:ui';
 import '/flutter_flow/custom_functions.dart' as functions;
@@ -99,22 +100,28 @@ class _CreateAssistantcompWidgetState extends State<CreateAssistantcompWidget> {
                       child: Padding(
                         padding:
                             EdgeInsetsDirectional.fromSTEB(20.0, 0.0, 0.0, 0.0),
-                        child: Text(
-                          'Assistant Name',
-                          style:
-                              FlutterFlowTheme.of(context).bodyMedium.override(
-                                    font: GoogleFonts.inter(
-                                      fontWeight: FontWeight.w600,
-                                      fontStyle: FlutterFlowTheme.of(context)
-                                          .bodyMedium
-                                          .fontStyle,
-                                    ),
-                                    letterSpacing: 0.0,
-                                    fontWeight: FontWeight.w600,
-                                    fontStyle: FlutterFlowTheme.of(context)
-                                        .bodyMedium
-                                        .fontStyle,
-                                  ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              'Assistant Name',
+                              style:
+                                  FlutterFlowTheme.of(context).bodyMedium.override(
+                                        font: GoogleFonts.inter(
+                                          fontWeight: FontWeight.w600,
+                                          fontStyle: FlutterFlowTheme.of(context)
+                                              .bodyMedium
+                                              .fontStyle,
+                                        ),
+                                        letterSpacing: 0.0,
+                                        fontWeight: FontWeight.w600,
+                                        fontStyle: FlutterFlowTheme.of(context)
+                                            .bodyMedium
+                                            .fontStyle,
+                                      ),
+                            ),
+                            InfoTooltip(message: TooltipMessages.assistantName),
+                          ],
                         ),
                       ),
                     ),
@@ -228,21 +235,27 @@ class _CreateAssistantcompWidgetState extends State<CreateAssistantcompWidget> {
                     child: Padding(
                       padding:
                           EdgeInsetsDirectional.fromSTEB(20.0, 0.0, 0.0, 0.0),
-                      child: Text(
-                        'First Message',
-                        style: FlutterFlowTheme.of(context).bodyMedium.override(
-                              font: GoogleFonts.inter(
-                                fontWeight: FontWeight.w600,
-                                fontStyle: FlutterFlowTheme.of(context)
-                                    .bodyMedium
-                                    .fontStyle,
-                              ),
-                              letterSpacing: 0.0,
-                              fontWeight: FontWeight.w600,
-                              fontStyle: FlutterFlowTheme.of(context)
-                                  .bodyMedium
-                                  .fontStyle,
-                            ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'First Message',
+                            style: FlutterFlowTheme.of(context).bodyMedium.override(
+                                  font: GoogleFonts.inter(
+                                    fontWeight: FontWeight.w600,
+                                    fontStyle: FlutterFlowTheme.of(context)
+                                        .bodyMedium
+                                        .fontStyle,
+                                  ),
+                                  letterSpacing: 0.0,
+                                  fontWeight: FontWeight.w600,
+                                  fontStyle: FlutterFlowTheme.of(context)
+                                      .bodyMedium
+                                      .fontStyle,
+                                ),
+                          ),
+                          InfoTooltip(message: TooltipMessages.firstMessage),
+                        ],
                       ),
                     ),
                   ),
@@ -516,62 +529,50 @@ class _CreateAssistantcompWidgetState extends State<CreateAssistantcompWidget> {
                           _model.comapnay = await CompanyRecord.getDocumentOnce(
                               currentUserDocument!.company!);
                           if (_model.comapnay?.reference != null) {
-                            final generatedPrompt =
-                                functions.promptForAssistant(
-                                      _model.comapnay?.name,
-                                      _model.comapnay?.industry,
-                                      _model.nameTextController.text,
-                                    ) ??
-                                    '';
-                            try {
-                              final result =
-                                  await WorkflowService.createAssistant(
-                                name: _model.nameTextController.text,
-                                systemPrompt: generatedPrompt,
-                                firstMessage:
-                                    _model.firstmessageTextController.text,
-                                language: _model.dropDownValue!,
-                                ownerId: currentUserReference?.id,
-                              );
+                            _model.apiResultlh7 =
+                                await VoiceServiceGroup.createAssistantCall.call(
+                              assistantName: _model.nameTextController.text,
+                              systemPrompt: functions.promptForAssistant(
+                                  _model.comapnay?.name,
+                                  _model.comapnay?.industry,
+                                  _model.nameTextController.text),
+                              firstMessage:
+                                  _model.firstmessageTextController.text,
+                              language: _model.dropDownValue,
+                              userId: currentUserReference?.id,
+                            );
 
+                            if (_model.apiResultlh7?.succeeded == true || 
+                                (_model.apiResultlh7?.statusCode ?? 0) == 201) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    'Assistant ${result.name} created successfully',
+                                    'Assistant Created Successsfully',
                                     style: TextStyle(
                                       color: FlutterFlowTheme.of(context)
                                           .secondaryBackground,
                                     ),
                                   ),
                                   duration: Duration(milliseconds: 4000),
-                                  backgroundColor: const Color(0xFF45A671),
+                                  backgroundColor: Color(0xFF45A671),
                                 ),
                               );
-                            } on WorkflowException catch (error) {
+                            } else {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    error.message,
-                                    style: const TextStyle(
+                                    valueOrDefault<String>(
+                                      getJsonField(
+                                        (_model.apiResultlh7?.jsonBody ?? ''),
+                                        r'''$.message''',
+                                      )?.toString(),
+                                      'Error 400 status code ',
+                                    ),
+                                    style: TextStyle(
                                       color: Colors.white,
                                     ),
                                   ),
-                                  duration: const Duration(milliseconds: 4000),
-                                  backgroundColor: FlutterFlowTheme.of(context)
-                                      .customColor10,
-                                ),
-                              );
-                            } catch (error) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: LocalizedText(
-                                    'Failed to create assistant. {details}',
-                                    params: {'details': error.toString()},
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  duration: const Duration(milliseconds: 4000),
+                                  duration: Duration(milliseconds: 4000),
                                   backgroundColor: FlutterFlowTheme.of(context)
                                       .customColor10,
                                 ),
@@ -584,14 +585,14 @@ class _CreateAssistantcompWidgetState extends State<CreateAssistantcompWidget> {
                               context: context,
                               builder: (alertDialogContext) {
                                 return AlertDialog(
-                                  title: const LocalizedText('Invalid Action'),
-                                  content: const LocalizedText(
-                                      'Sorry no company information exists'),
+                                  title: Text('Invalid Action'),
+                                  content: Text(
+                                      'Sorry no compnay information exists'),
                                   actions: [
                                     TextButton(
                                       onPressed: () =>
                                           Navigator.pop(alertDialogContext),
-                                      child: const LocalizedText('Ok'),
+                                      child: Text('Ok'),
                                     ),
                                   ],
                                 );
@@ -603,14 +604,14 @@ class _CreateAssistantcompWidgetState extends State<CreateAssistantcompWidget> {
                             context: context,
                             builder: (alertDialogContext) {
                               return AlertDialog(
-                                title: const LocalizedText('Invalid Action'),
+                                title: Text('Invalid Action'),
                                 content:
-                                    const LocalizedText('Sorry no company information exists'),
+                                    Text('Sorry no compnay information exists'),
                                 actions: [
                                   TextButton(
                                     onPressed: () =>
                                         Navigator.pop(alertDialogContext),
-                                    child: const LocalizedText('Ok'),
+                                    child: Text('Ok'),
                                   ),
                                 ],
                               );

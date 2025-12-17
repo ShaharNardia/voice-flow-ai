@@ -58,8 +58,8 @@ function extractJobDataFromTranscript(transcript, summary, customerNumber) {
 
 exports.vapiWebhook = onRequest(async (req, res) => {
   try {
-    // Log the incoming webhook data
-    console.log("Received VAPI webhook:", req.body);
+    // Log the incoming webhook data (supports both Twilio and legacy formats)
+    console.log("Received voice webhook:", req.body);
 
     const event = req.body;
     const db = getFirestore();
@@ -269,7 +269,7 @@ exports.vapiWebhook = onRequest(async (req, res) => {
 
     res.status(200).send("Webhook processed successfully");
   } catch (error) {
-    console.error("Error processing VAPI webhook:", error);
+    console.error("Error processing voice webhook:", error);
     res.status(500).send("Error processing webhook");
   }
 });

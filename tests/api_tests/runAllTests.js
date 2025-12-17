@@ -4,6 +4,10 @@
 
 const { runSmokeTests } = require('./smokeTest');
 const { runAllTests: runFunctionTests } = require('./testFirebaseFunctions');
+const { runAllTests: runEdgeCaseTests } = require('./testEdgeCases');
+const { runAllTests: runIntegrationTests } = require('./testIntegration');
+const { runAllTests: runPerformanceTests } = require('../performance/load-test');
+const { runAllTests: runSecurityTests } = require('../security/security-tests');
 
 async function runAllTestSuites() {
   console.log('\n');
@@ -25,6 +29,54 @@ async function runAllTestSuites() {
   console.log('→ Running Firebase Functions Tests...\n');
   const functionResult = await runFunctionTests();
   totalFailed += functionResult;
+
+  console.log('\n\n');
+
+  // Run edge case tests
+  console.log('→ Running Edge Case Tests...\n');
+  try {
+    const edgeCaseResult = await runEdgeCaseTests();
+    totalFailed += edgeCaseResult;
+  } catch (error) {
+    console.error('Error running edge case tests:', error.message);
+    totalFailed += 1;
+  }
+
+  console.log('\n\n');
+
+  // Run integration tests
+  console.log('→ Running Integration Tests...\n');
+  try {
+    const integrationResult = await runIntegrationTests();
+    totalFailed += integrationResult;
+  } catch (error) {
+    console.error('Error running integration tests:', error.message);
+    totalFailed += 1;
+  }
+
+  console.log('\n\n');
+
+  // Run performance tests
+  console.log('→ Running Performance Tests...\n');
+  try {
+    const performanceResult = await runPerformanceTests();
+    totalFailed += performanceResult;
+  } catch (error) {
+    console.error('Error running performance tests:', error.message);
+    totalFailed += 1;
+  }
+
+  console.log('\n\n');
+
+  // Run security tests
+  console.log('→ Running Security Tests...\n');
+  try {
+    const securityResult = await runSecurityTests();
+    totalFailed += securityResult;
+  } catch (error) {
+    console.error('Error running security tests:', error.message);
+    totalFailed += 1;
+  }
 
   // Final summary
   console.log('\n\n');

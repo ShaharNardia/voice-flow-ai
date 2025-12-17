@@ -100,15 +100,10 @@ class _AgentWidgetState extends State<AgentWidget> {
                             Expanded(
                               child: Builder(
                                 builder: (context) {
-                                  final hasSubscriptionAccess =
-                                      valueOrDefault<bool>(
-                                            currentUserDocument?.subscribed,
-                                            false,
-                                          ) ||
-                                          (currentUserDocument
-                                                  ?.role?.name ==
-                                              'admin');
-                                  if (hasSubscriptionAccess) {
+                                  if (valueOrDefault<bool>(
+                                          currentUserDocument?.subscribed,
+                                          false) ==
+                                      true) {
                                     return Padding(
                                       padding: EdgeInsets.all(20.0),
                                       child: Container(

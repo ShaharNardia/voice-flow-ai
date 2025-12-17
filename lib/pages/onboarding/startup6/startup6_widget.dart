@@ -3115,7 +3115,7 @@ class _Startup6WidgetState extends State<Startup6Widget> {
                                                                         200) ==
                                                                     201) {
                                                                   _model.vapiPhoneNumber =
-                                                                      await VapiGroup
+                                                                      await VoiceServiceGroup
                                                                           .createPhoneNumberCall
                                                                           .call(
                                                                     number:
@@ -3141,7 +3141,7 @@ class _Startup6WidgetState extends State<Startup6Widget> {
                                                                         {
                                                                           'companyPhoneNumbers':
                                                                               FieldValue.arrayUnion([
-                                                                            VapiGroup.createPhoneNumberCall.number(
+                                                                            VoiceServiceGroup.createPhoneNumberCall.number(
                                                                               (_model.vapiPhoneNumber?.jsonBody ?? ''),
                                                                             )
                                                                           ]),
@@ -3150,11 +3150,11 @@ class _Startup6WidgetState extends State<Startup6Widget> {
                                                                             getPhoneNumberFirestoreData(
                                                                               updatePhoneNumberStruct(
                                                                                 PhoneNumberStruct(
-                                                                                  id: VapiGroup.createPhoneNumberCall.id(
+                                                                                  id: VoiceServiceGroup.createPhoneNumberCall.id(
                                                                                     (_model.vapiPhoneNumber?.jsonBody ?? ''),
                                                                                   ),
                                                                                   label: Labels.inbound_outbound,
-                                                                                  phoneNumber: VapiGroup.createPhoneNumberCall.number(
+                                                                                  phoneNumber: VoiceServiceGroup.createPhoneNumberCall.number(
                                                                                     (_model.vapiPhoneNumber?.jsonBody ?? ''),
                                                                                   ),
                                                                                 ),

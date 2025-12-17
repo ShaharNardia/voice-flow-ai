@@ -1,5 +1,4 @@
 import '/auth/firebase_auth/auth_util.dart';
-import '/app_state.dart';
 import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_data_table.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
@@ -20,7 +19,6 @@ import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
-import 'package:showcaseview/showcaseview.dart';
 import 'dashboard_model.dart';
 export 'dashboard_model.dart';
 
@@ -38,25 +36,13 @@ class _DashboardWidgetState extends State<DashboardWidget> {
   late DashboardModel _model;
 
   final scaffoldKey = GlobalKey<ScaffoldState>();
-  final GlobalKey<ShowCaseWidgetState> _showCaseKey =
-      GlobalKey<ShowCaseWidgetState>();
-  final GlobalKey _navigationKey = GlobalKey();
-  final GlobalKey _metricsKey = GlobalKey();
-  final GlobalKey _recentCallsKey = GlobalKey();
-  bool _autoShowcaseScheduled = false;
-
-  List<GlobalKey> get _walkthroughSteps =>
-      [_navigationKey, _metricsKey, _recentCallsKey];
 
   @override
   void initState() {
     super.initState();
     _model = createModel(context, () => DashboardModel());
 
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      safeSetState(() {});
-      _scheduleAutoShowcase();
-    });
+    WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
   }
 
   @override
@@ -66,110 +52,17 @@ class _DashboardWidgetState extends State<DashboardWidget> {
     super.dispose();
   }
 
-  Future<int> _countCompanyCalls({bool? success}) async {
-    final companyId = currentUserDocument?.company?.id;
-    if (companyId == null) {
-      return 0;
-    }
-
-    final total = await queryCallRecordCount(
-      queryBuilder: (callRecord) {
-        var query = callRecord.where(
-          'company',
-          isEqualTo: companyId,
-        );
-        if (success != null) {
-          query = query.where('success', isEqualTo: success);
-        }
-        return query;
-      },
-    );
-
-    final transfer = await queryCallRecordCount(
-      queryBuilder: (callRecord) {
-        var query = callRecord
-            .where('company', isEqualTo: companyId)
-            .where('callType', isEqualTo: 'transfer');
-        if (success != null) {
-          query = query.where('success', isEqualTo: success);
-        }
-        return query;
-      },
-    );
-
-    final result = total - transfer;
-    return result < 0 ? 0 : result;
-  }
-
-  void _scheduleAutoShowcase() {
-    if (_autoShowcaseScheduled) {
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-    final appState = context.read<FFAppState>();
-    if (appState.hasCompletedDashboardWalkthrough) {
-      return;
-    }
-    _autoShowcaseScheduled = true;
-    Future.delayed(const Duration(milliseconds: 700), () {
-      if (!mounted) {
-        return;
-      }
-      final showCaseState = _showCaseKey.currentState;
-      if (showCaseState != null) {
-        showCaseState.startShowCase(_walkthroughSteps);
-        appState.hasCompletedDashboardWalkthrough = true;
-      } else {
-        _autoShowcaseScheduled = false;
-        Future.delayed(
-          const Duration(milliseconds: 500),
-          _scheduleAutoShowcase,
-        );
-      }
-    });
-  }
-
-  void _startWalkthrough() {
-    final showCaseState = _showCaseKey.currentState;
-    if (showCaseState == null) {
-      return;
-    }
-    context.read<FFAppState>().hasCompletedDashboardWalkthrough = true;
-    showCaseState.startShowCase(_walkthroughSteps);
-  }
-
   @override
   Widget build(BuildContext context) {
-    return ShowCaseWidget(
-      key: _showCaseKey,
-      builder: Builder(
-        builder: (context) => GestureDetector(
-          onTap: () {
-            FocusScope.of(context).unfocus();
-            FocusManager.instance.primaryFocus?.unfocus();
-          },
-          child: Scaffold(
-            key: scaffoldKey,
-            backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
-            floatingActionButton: FloatingActionButton.extended(
-              heroTag: 'dashboard_walkthrough_fab',
-              onPressed: _startWalkthrough,
-              icon: const Icon(Icons.play_circle_outline),
-              label: Text(
-                'הדרכה',
-                style: FlutterFlowTheme.of(context).bodyMedium.override(
-                      font: GoogleFonts.inter(
-                        fontWeight: FontWeight.w600,
-                        fontStyle:
-                            FlutterFlowTheme.of(context).bodyMedium.fontStyle,
-                      ),
-                      fontWeight: FontWeight.w600,
-                    ),
-              ),
-            ),
-            body: SafeArea(
+    return GestureDetector(
+      onTap: () {
+        FocusScope.of(context).unfocus();
+        FocusManager.instance.primaryFocus?.unfocus();
+      },
+      child: Scaffold(
+        key: scaffoldKey,
+        backgroundColor: FlutterFlowTheme.of(context).secondaryBackground,
+        body: SafeArea(
           top: true,
           child: Column(
             mainAxisSize: MainAxisSize.max,
@@ -179,18 +72,12 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                 child: Row(
                   mainAxisSize: MainAxisSize.max,
                   children: [
-                    Showcase(
-                      key: _navigationKey,
-                      title: 'תפריט ניווט',
-                      description:
-                          'כאן תמצא את כל המסכים העיקריים. לחץ על אחד הפריטים כדי לעבור במהירות בין אזורי העבודה.',
-                      child: wrapWithModel(
-                        model: _model.navbarModel,
-                        updateCallback: () => safeSetState(() {}),
-                        updateOnChange: true,
-                        child: NavbarWidget(
-                          pageNum: 0.0,
-                        ),
+                    wrapWithModel(
+                      model: _model.navbarModel,
+                      updateCallback: () => safeSetState(() {}),
+                      updateOnChange: true,
+                      child: NavbarWidget(
+                        pageNum: 0.0,
                       ),
                     ),
                     Expanded(
@@ -209,29 +96,20 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                           Expanded(
                             child: Builder(
                               builder: (context) {
-                                final hasSubscriptionAccess =
-                                    valueOrDefault<bool>(
-                                          currentUserDocument?.subscribed,
-                                          false,
-                                        ) ||
-                                        (currentUserDocument?.role?.name ==
-                                            'admin');
-                                if (hasSubscriptionAccess) {
+                                if (valueOrDefault<bool>(
+                                        currentUserDocument?.subscribed,
+                                        false) ==
+                                    true) {
                                   return Padding(
                                     padding: EdgeInsets.all(15.0),
                                     child: Column(
                                       mainAxisSize: MainAxisSize.max,
                                       children: [
-                                        Showcase(
-                                          key: _metricsKey,
-                                          title: 'תובנות מהירות',
-                                          description:
-                                              'מדדי ביצוע חיים: כמה שיחות בוצעו, הושלמו והועברו.',
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.max,
-                                            mainAxisAlignment:
-                                                MainAxisAlignment.spaceBetween,
-                                            children: [
+                                        Row(
+                                          mainAxisSize: MainAxisSize.max,
+                                          mainAxisAlignment:
+                                              MainAxisAlignment.spaceBetween,
+                                          children: [
                                             Column(
                                               mainAxisSize: MainAxisSize.max,
                                               crossAxisAlignment:
@@ -339,15 +217,10 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                           ],
                                         ),
                                         Expanded(
-                                          child: Showcase(
-                                            key: _recentCallsKey,
-                                            title: 'שיחות אחרונות',
-                                            description:
-                                                'רשימת 10 השיחות האחרונות שלך. לחץ על שורה כדי לפתוח פירוט והקלטות.',
-                                            child: Container(
-                                              height: 200.0,
-                                              decoration: BoxDecoration(),
-                                              child: Column(
+                                          child: Container(
+                                            height: 200.0,
+                                            decoration: BoxDecoration(),
+                                            child: Column(
                                               mainAxisSize: MainAxisSize.max,
                                               children: [
                                                 Row(
@@ -426,7 +299,18 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                 FutureBuilder<
                                                                     int>(
                                                                   future:
-                                                                    _countCompanyCalls(),
+                                                                      queryCallRecordCount(
+                                                                    queryBuilder: (callRecord) =>
+                                                                        callRecord
+                                                                            .where(
+                                                                              'company',
+                                                                              isEqualTo: currentUserDocument?.company?.id,
+                                                                            )
+                                                                            .where(
+                                                                              'callType',
+                                                                              isNotEqualTo: 'transfer',
+                                                                            ),
+                                                                  ),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
@@ -553,7 +437,22 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                 FutureBuilder<
                                                                     int>(
                                                                   future:
-                                                                      _countCompanyCalls(success: true),
+                                                                      queryCallRecordCount(
+                                                                    queryBuilder: (callRecord) =>
+                                                                        callRecord
+                                                                            .where(
+                                                                              'company',
+                                                                              isEqualTo: currentUserDocument?.company?.id,
+                                                                            )
+                                                                            .where(
+                                                                              'success',
+                                                                              isEqualTo: true,
+                                                                            )
+                                                                            .where(
+                                                                              'callType',
+                                                                              isNotEqualTo: 'transfer',
+                                                                            ),
+                                                                  ),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
@@ -680,7 +579,22 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                 FutureBuilder<
                                                                     int>(
                                                                   future:
-                                                                      _countCompanyCalls(success: false),
+                                                                      queryCallRecordCount(
+                                                                    queryBuilder: (callRecord) =>
+                                                                        callRecord
+                                                                            .where(
+                                                                              'company',
+                                                                              isEqualTo: currentUserDocument?.company?.id,
+                                                                            )
+                                                                            .where(
+                                                                              'success',
+                                                                              isEqualTo: false,
+                                                                            )
+                                                                            .where(
+                                                                              'callType',
+                                                                              isNotEqualTo: 'transfer',
+                                                                            ),
+                                                                  ),
                                                                   builder: (context,
                                                                       snapshot) {
                                                                     // Customize what your widget looks like when it's loading.
@@ -743,55 +657,27 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                 Expanded(
                                                   child: StreamBuilder<
                                                       List<CallRecord>>(
-                                                    stream: currentUserDocument?.company != null
-                                                        ? queryCallRecord(
-                                                            queryBuilder:
-                                                                (callRecord) =>
-                                                                    callRecord
-                                                                        .where(
-                                                                          'company',
-                                                                          isEqualTo:
-                                                                              currentUserDocument
-                                                                                  ?.company
-                                                                                  ?.id,
-                                                                        )
-                                                                        .orderBy(
-                                                                            'dateTime',
-                                                                            descending:
-                                                                                true),
-                                                            limit: 10,
-                                                          )
-                                                        : const Stream.empty(),
+                                                    stream: queryCallRecord(
+                                                      queryBuilder:
+                                                          (callRecord) =>
+                                                              callRecord
+                                                                  .where(
+                                                                    'company',
+                                                                    isEqualTo:
+                                                                        currentUserDocument
+                                                                            ?.company
+                                                                            ?.id,
+                                                                  )
+                                                                  .orderBy(
+                                                                      'dateTime',
+                                                                      descending:
+                                                                          true),
+                                                      limit: 10,
+                                                    ),
                                                     builder:
                                                         (context, snapshot) {
                                                       // Customize what your widget looks like when it's loading.
-                                                      if (snapshot.hasError) {
-                                                        return Center(
-                                                          child: Column(
-                                                            mainAxisAlignment: MainAxisAlignment.center,
-                                                            children: [
-                                                              Icon(
-                                                                Icons.error_outline,
-                                                                size: 50.0,
-                                                                color: FlutterFlowTheme.of(context).error,
-                                                              ),
-                                                              SizedBox(height: 16.0),
-                                                              Text(
-                                                                'Error loading call logs',
-                                                                style: FlutterFlowTheme.of(context).bodyMedium,
-                                                              ),
-                                                              SizedBox(height: 8.0),
-                                                              Text(
-                                                                snapshot.error.toString(),
-                                                                style: FlutterFlowTheme.of(context).bodySmall,
-                                                                textAlign: TextAlign.center,
-                                                              ),
-                                                            ],
-                                                          ),
-                                                        );
-                                                      }
-                                                      
-                                                      if (snapshot.connectionState == ConnectionState.waiting) {
+                                                      if (!snapshot.hasData) {
                                                         return Center(
                                                           child: SizedBox(
                                                             width: 50.0,
@@ -806,32 +692,6 @@ class _DashboardWidgetState extends State<DashboardWidget> {
                                                                     .primary,
                                                               ),
                                                             ),
-                                                          ),
-                                                        );
-                                                      }
-                                                      
-                                                      if (!snapshot.hasData || snapshot.data!.isEmpty) {
-                                                        return Center(
-                                                          child: Column(
-                                                            mainAxisAlignment: MainAxisAlignment.center,
-                                                            children: [
-                                                              Icon(
-                                                                Icons.phone_disabled,
-                                                                size: 50.0,
-                                                                color: FlutterFlowTheme.of(context).secondaryText,
-                                                              ),
-                                                              SizedBox(height: 16.0),
-                                                              Text(
-                                                                'No call logs available',
-                                                                style: FlutterFlowTheme.of(context).bodyMedium,
-                                                              ),
-                                                              SizedBox(height: 8.0),
-                                                              Text(
-                                                                'Start making calls to see your call history here',
-                                                                style: FlutterFlowTheme.of(context).bodySmall,
-                                                                textAlign: TextAlign.center,
-                                                              ),
-                                                            ],
                                                           ),
                                                         );
                                                       }
@@ -1600,8 +1460,6 @@ class _DashboardWidgetState extends State<DashboardWidget> {
           ),
         ),
       ),
-      ),
-    ),
-  );
+    );
   }
 }

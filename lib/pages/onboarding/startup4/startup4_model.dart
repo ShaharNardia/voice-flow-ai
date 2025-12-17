@@ -62,15 +62,6 @@ class Startup4Model extends FlutterFlowModel<Startup4Widget> {
   // State field(s) for DropDown widget.
   String? dropDownValue3;
   FormFieldController<String>? dropDownValueController3;
-  // Stores fetched TTS voices for built-in providers.
-  ApiCallResponse? listTtsVoicesResponse;
-  List<Map<String, dynamic>>? dynamicVoiceOptions;
-  bool isLoadingVoiceOptions = false;
-  // Stores preview synthesis response and local audio path.
-  ApiCallResponse? synthesizeTtsResponse;
-  String? ttsPreviewFilePath;
-  bool isGeneratingPreview = false;
-  double? ttsPreviewLatencyMs;
   // State field(s) for TextField widget.
   FocusNode? textFieldFocusNode2;
   TextEditingController? textController2;

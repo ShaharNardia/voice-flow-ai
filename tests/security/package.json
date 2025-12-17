@@ -1,0 +1,14 @@
+{
+  "name": "voice-flow-security-tests",
+  "version": "1.0.0",
+  "description": "Security tests for Voice Flow AI",
+  "main": "security-tests.js",
+  "scripts": {
+    "test": "node security-tests.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0"
+  }
+}
+
+

@@ -1,23 +1,15 @@
 {
   "indexes": [
     {
-      "collectionGroup": "Lead",
+      "collectionGroup": "Call",
       "queryScope": "COLLECTION",
       "fields": [
-        {
-          "fieldPath": "callStatus",
-          "order": "ASCENDING"
-        },
         {
           "fieldPath": "company",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "isClient",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "date",
+          "fieldPath": "dateTime",
           "order": "DESCENDING"
         },
         {
@@ -27,7 +19,7 @@
       ]
     },
     {
-      "collectionGroup": "Lead",
+      "collectionGroup": "Call",
       "queryScope": "COLLECTION",
       "fields": [
         {
@@ -35,42 +27,12 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "isClient",
+          "fieldPath": "callType",
           "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "date",
-          "order": "DESCENDING"
         },
         {
           "fieldPath": "__name__",
-          "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "Lead",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "company",
           "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "isClient",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "date",
-          "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "DESCENDING"
         }
       ]
     }

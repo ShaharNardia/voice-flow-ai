@@ -51,7 +51,7 @@ class _ProfileScreenWidgetState extends State<ProfileScreenWidget> {
       body: Builder(
         builder: (context) {
           if (valueOrDefault<bool>(currentUserDocument?.subscribed, false) ==
-              true || currentUserDocument?.role == Role.admin) {
+              true) {
             return Padding(
               padding: EdgeInsets.all(30.0),
               child: Column(

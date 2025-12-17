@@ -1,5 +1,5 @@
 import '/auth/firebase_auth/auth_util.dart';
-import '/backend/workflows/workflow_service.dart';
+import '/backend/api_requests/api_calls.dart';
 import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_drop_down.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -514,67 +514,43 @@ class _EditAssistantWidgetState extends State<EditAssistantWidget> {
                           _model.comapnay = await CompanyRecord.getDocumentOnce(
                               currentUserDocument!.company!);
                           if (_model.comapnay?.reference != null) {
-                            final generatedPrompt =
-                                functions.promptForAssistant(
-                                      _model.comapnay?.name,
-                                      _model.comapnay?.industry,
-                                      _model.nameTextController.text,
-                                    ) ??
-                                    '';
-                            try {
-                              await WorkflowService.updateAssistant(
-                                assistantId: getJsonField(
-                                  widget!.assitant,
-                                  r'''$.id''',
-                                ).toString(),
-                                name: _model.nameTextController.text,
-                                firstMessage:
-                                    _model.firstmessageTextController.text,
-                                language: _model.dropDownValue ?? 'en',
-                                systemPrompt: generatedPrompt,
-                              );
+                            _model.apiResultlh7 =
+                                await VoiceServiceGroup.updateAssistantCall.call(
+                              id: getJsonField(
+                                widget!.assitant,
+                                r'''$.id''',
+                              ).toString(),
+                              firstMessage:
+                                  _model.firstmessageTextController.text,
+                              assistantName: _model.nameTextController.text,
+                              language: _model.dropDownValue,
+                            );
 
+                            if (_model.apiResultlh7?.succeeded == true) {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    'Assistant updated successfully',
+                                    'Assistant Updated Successfully',
                                     style: TextStyle(
                                       color: FlutterFlowTheme.of(context)
                                           .secondaryBackground,
                                     ),
                                   ),
-                                  duration:
-                                      const Duration(milliseconds: 4000),
-                                  backgroundColor: const Color(0xFF45A671),
+                                  duration: Duration(milliseconds: 4000),
+                                  backgroundColor: Color(0xFF45A671),
                                 ),
                               );
-                            } on WorkflowException catch (error) {
+                            } else {
                               ScaffoldMessenger.of(context).showSnackBar(
                                 SnackBar(
                                   content: Text(
-                                    error.message,
-                                    style: const TextStyle(
+                                    _model.apiResultlh7?.bodyText ?? 
+                                    'Error: Failed to update assistant. Please try again.',
+                                    style: TextStyle(
                                       color: Colors.white,
                                     ),
                                   ),
-                                  duration:
-                                      const Duration(milliseconds: 4000),
-                                  backgroundColor: FlutterFlowTheme.of(context)
-                                      .customColor10,
-                                ),
-                              );
-                            } catch (error) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: LocalizedText(
-                                    'Failed to update assistant. {details}',
-                                    params: {'details': error.toString()},
-                                    style: const TextStyle(
-                                      color: Colors.white,
-                                    ),
-                                  ),
-                                  duration:
-                                      const Duration(milliseconds: 4000),
+                                  duration: Duration(milliseconds: 4000),
                                   backgroundColor: FlutterFlowTheme.of(context)
                                       .customColor10,
                                 ),
@@ -587,14 +563,14 @@ class _EditAssistantWidgetState extends State<EditAssistantWidget> {
                               context: context,
                               builder: (alertDialogContext) {
                                 return AlertDialog(
-                                  title: const LocalizedText('Invalid Action'),
-                                  content: const LocalizedText(
-                                      'Sorry, your company information doesn\'t exist. Please set your company information.'),
+                                  title: Text('Invalid Action'),
+                                  content: Text(
+                                      'Sorry your company information doesn\'t exists please set your company information'),
                                   actions: [
                                     TextButton(
                                       onPressed: () =>
                                           Navigator.pop(alertDialogContext),
-                                      child: const LocalizedText('Ok'),
+                                      child: Text('Ok'),
                                     ),
                                   ],
                                 );
@@ -606,14 +582,14 @@ class _EditAssistantWidgetState extends State<EditAssistantWidget> {
                             context: context,
                             builder: (alertDialogContext) {
                               return AlertDialog(
-                                title: const LocalizedText('Invalid Action'),
-                                content: const LocalizedText(
-                                    'Sorry, your company information doesn\'t exist. Please set your company information.'),
+                                title: Text('Invalid Action'),
+                                content: Text(
+                                    'Sorry your company information doesn\'t exists please set your company information'),
                                 actions: [
                                   TextButton(
                                     onPressed: () =>
                                         Navigator.pop(alertDialogContext),
-                                    child: const LocalizedText('Ok'),
+                                    child: Text('Ok'),
                                   ),
                                 ],
                               );

@@ -1,0 +1,30 @@
+{
+  "name": "voice-flow-ui-tests",
+  "version": "1.0.0",
+  "description": "UI tests for Voice Flow AI using Playwright",
+  "scripts": {
+    "test": "playwright test",
+    "test:smoke": "playwright test --grep @smoke",
+    "test:auth": "playwright test specs/auth.spec.ts",
+    "test:dashboard": "playwright test specs/dashboard.spec.ts",
+    "test:assistants": "playwright test specs/assistants.spec.ts",
+    "test:calls": "playwright test specs/calls.spec.ts",
+    "test:leads": "playwright test specs/leads.spec.ts",
+    "test:jobs": "playwright test specs/jobs.spec.ts",
+    "test:billing": "playwright test specs/billing.spec.ts",
+    "test:phone": "playwright test specs/phone-numbers.spec.ts",
+    "test:profile": "playwright test specs/profile.spec.ts",
+    "test:onboarding": "playwright test specs/onboarding.spec.ts",
+    "test:performance": "playwright test specs/performance.spec.ts",
+    "test:ui": "playwright test --ui",
+    "test:debug": "playwright test --debug",
+    "report": "playwright show-report"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1",
+    "@types/node": "^20.0.0",
+    "dotenv": "^17.2.3",
+    "typescript": "^5.0.0"
+  }
+}
+

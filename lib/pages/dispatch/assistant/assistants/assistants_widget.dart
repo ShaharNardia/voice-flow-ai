@@ -1,5 +1,5 @@
 import '/auth/firebase_auth/auth_util.dart';
-import '/backend/workflows/workflow_service.dart';
+import '/backend/api_requests/api_calls.dart';
 import '/flutter_flow/flutter_flow_data_table.dart';
 import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -475,10 +475,9 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                         ),
                                       ),
                                       Expanded(
-                                        child: FutureBuilder<
-                                            List<AssistantSummary>>(
-                                          future:
-                                              WorkflowService.listAssistants(),
+                                        child: FutureBuilder<ApiCallResponse>(
+                                          future: VoiceServiceGroup.getAllAssistantsCall
+                                              .call(),
                                           builder: (context, snapshot) {
                                             // Customize what your widget looks like when it's loading.
                                             if (!snapshot.hasData) {
@@ -499,7 +498,8 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                 ),
                                               );
                                             }
-                                            final assistants = snapshot.data!;
+                                            final containerGetAllAssistantsResponse =
+                                                snapshot.data!;
 
                                             return Container(
                                               decoration: BoxDecoration(
@@ -511,54 +511,33 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                 padding: EdgeInsets.all(10.0),
                                                 child: Builder(
                                                   builder: (context) {
-                                                    final agents = assistants
-                                                        .map((assistant) => {
-                                                              'id':
-                                                                  assistant.id,
-                                                              'name': assistant
-                                                                  .name,
-                                                              'firstMessage':
-                                                                  assistant
-                                                                      .firstMessage,
-                                                              'language':
-                                                                  assistant
-                                                                      .language,
-                                                              'assistant':
-                                                                  assistant
-                                                                      .definition,
-                                                              'metadata': {
-                                                                'userId':
-                                                                    assistant
-                                                                        .ownerId,
-                                                                'companyId':
-                                                                    assistant
-                                                                        .companyId,
-                                                              },
-                                                            })
-                                                        .where((assistant) =>
-                                                            _model
-                                                                        .textController
-                                                                        .text ==
-                                                                    null ||
-                                                            _model
-                                                                .textController
-                                                                .text!
-                                                                .isEmpty
-                                                                ? (functions.getUserAssistants(
-                                                                    assistant,
+                                                    final agents = VoiceServiceGroup
+                                                            .getAllAssistantsCall
+                                                            .assistants(
+                                                              containerGetAllAssistantsResponse
+                                                                  .jsonBody,
+                                                            )
+                                                            ?.where((e) => _model
+                                                                            .textController
+                                                                            .text ==
+                                                                        null ||
+                                                                    _model.textController
+                                                                            .text ==
+                                                                        ''
+                                                                ? functions.getUserAssistants(
+                                                                    e,
                                                                     currentUserReference
-                                                                        ?.id) ??
-                                                                    false)
-                                                                : (functions.filterAssistant(
-                                                                      assistant,
-                                                                      currentUserReference
-                                                                          ?.id,
-                                                                      _model
-                                                                          .textController
-                                                                          .text,
-                                                                    ) ??
-                                                                    false))
-                                                        .toList();
+                                                                        ?.id)!
+                                                                : functions.filterAssistant(
+                                                                    e,
+                                                                    currentUserReference
+                                                                        ?.id,
+                                                                    _model
+                                                                        .textController
+                                                                        .text)!)
+                                                            .toList()
+                                                            ?.toList() ??
+                                                        [];
 
                                                     return FlutterFlowDataTable<
                                                         dynamic>(
@@ -923,20 +902,23 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                                     true,
                                                                 onPressed:
                                                                     () async {
-                                                                  final assistantId = getJsonField(
-                                                                    agentsItem,
-                                                                    r'''$.id''',
-                                                                  ).toString();
-                                                                  try {
-                                                                    await WorkflowService.deleteAssistant(
-                                                                      assistantId,
-                                                                    );
+                                                                  _model.apiResultscs =
+                                                                      await VoiceServiceGroup
+                                                                          .deleteAssistantCall
+                                                                          .call(
+                                                                    id: getJsonField(
+                                                                      agentsItem,
+                                                                      r'''$.id''',
+                                                                    ).toString(),
+                                                                  );
+
+                                                                  if (_model.apiResultscs?.succeeded == true) {
                                                                     ScaffoldMessenger.of(
                                                                             context)
                                                                         .showSnackBar(
                                                                       SnackBar(
                                                                         content:
-                                                                            const LocalizedText(
+                                                                            Text(
                                                                           'Assistant deleted successfully',
                                                                           style:
                                                                               TextStyle(
@@ -945,57 +927,36 @@ class _AssistantsWidgetState extends State<AssistantsWidget> {
                                                                           ),
                                                                         ),
                                                                         duration:
-                                                                            const Duration(milliseconds: 4000),
+                                                                            Duration(milliseconds: 4000),
                                                                         backgroundColor:
                                                                             FlutterFlowTheme.of(context).secondary,
                                                                       ),
                                                                     );
-                                                                  } on WorkflowException catch (error) {
+                                                                  } else {
                                                                     ScaffoldMessenger.of(
                                                                             context)
                                                                         .showSnackBar(
                                                                       SnackBar(
                                                                         content:
-                                                                            LocalizedText(
-                                                                          error.message,
+                                                                            Text(
+                                                                          _model.apiResultscs?.bodyText ?? 
+                                                                          'Failed to delete assistant. Please try again.',
                                                                           style:
-                                                                              const TextStyle(
+                                                                              TextStyle(
                                                                             color:
                                                                                 Colors.white,
                                                                           ),
                                                                         ),
                                                                         duration:
-                                                                            const Duration(milliseconds: 4000),
+                                                                            Duration(milliseconds: 4000),
                                                                         backgroundColor:
-                                                                            FlutterFlowTheme.of(context).customColor10,
-                                                                      ),
-                                                                    );
-                                                                  } catch (error) {
-                                                                    ScaffoldMessenger.of(
-                                                                            context)
-                                                                        .showSnackBar(
-                                                                      SnackBar(
-                                                                        content:
-                                                                            LocalizedText(
-                                                                          'Failed to delete assistant. {details}',
-                                                                          params: {
-                                                                            'details': error.toString(),
-                                                                          },
-                                                                          style:
-                                                                              const TextStyle(
-                                                                            color:
-                                                                                Colors.white,
-                                                                          ),
-                                                                        ),
-                                                                        duration:
-                                                                            const Duration(milliseconds: 4000),
-                                                                        backgroundColor:
-                                                                            FlutterFlowTheme.of(context).customColor10,
+                                                                            FlutterFlowTheme.of(context).error,
                                                                       ),
                                                                     );
                                                                   }
 
-                                                                  safeSetState(() {});
+                                                                  safeSetState(
+                                                                      () {});
                                                                 },
                                                               ),
                                                             ].divide(SizedBox(

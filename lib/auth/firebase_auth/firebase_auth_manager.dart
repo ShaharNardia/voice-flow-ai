@@ -100,10 +100,8 @@ class FirebaseAuthManager extends AuthManager
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: const LocalizedText(
-              'Too long since most recent sign in. Sign in again before updating your email.',
-            ),
-          ),
+              content: Text(
+                  'Too long since most recent sign in. Sign in again before updating your email.')),
         );
       }
     }
@@ -124,12 +122,7 @@ class FirebaseAuthManager extends AuthManager
       if (e.code == 'requires-recent-login') {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: LocalizedText(
-              'Error: {message}',
-              params: {'message': e.message ?? ''},
-            ),
-          ),
+          SnackBar(content: Text('Error: ${e.message!}')),
         );
       }
     }
@@ -145,19 +138,12 @@ class FirebaseAuthManager extends AuthManager
     } on FirebaseAuthException catch (e) {
       ScaffoldMessenger.of(context).hideCurrentSnackBar();
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: LocalizedText(
-            'Error: {message}',
-            params: {'message': e.message ?? ''},
-          ),
-        ),
+        SnackBar(content: Text('Error: ${e.message!}')),
       );
       return null;
     }
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: LocalizedText('Password reset email sent'),
-      ),
+      SnackBar(content: Text('Password reset email sent')),
     );
   }
 
@@ -223,10 +209,7 @@ class FirebaseAuthManager extends AuthManager
       } else if (phoneAuthManager.phoneAuthError != null) {
         final e = phoneAuthManager.phoneAuthError!;
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content: LocalizedText(
-            'Error: {message}',
-            params: {'message': e.message ?? ''},
-          ),
+          content: Text('Error: ${e.message!}'),
         ));
         phoneAuthManager.update(() => phoneAuthManager.phoneAuthError = null);
       }

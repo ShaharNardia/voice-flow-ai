@@ -1,4 +1,5 @@
 import '/auth/firebase_auth/auth_util.dart';
+import '/backend/api_requests/api_calls.dart';
 import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_drop_down.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
@@ -47,6 +48,8 @@ class EditAssistantModel extends FlutterFlowModel<EditAssistantWidget> {
   FormFieldController<String>? dropDownValueController;
   // Stores action output result for [Backend Call - Read Document] action in SignInBtn widget.
   CompanyRecord? comapnay;
+  // Stores action output result for [Backend Call - API (updateAssistant)] action in SignInBtn widget.
+  ApiCallResponse? apiResultlh7;
 
   @override
   void initState(BuildContext context) {

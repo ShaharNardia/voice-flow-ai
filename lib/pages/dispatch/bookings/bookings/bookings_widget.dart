@@ -54,29 +54,6 @@ class _BookingsWidgetState extends State<BookingsWidget> {
     super.dispose();
   }
 
-  Future<int> _countActiveJobs() async {
-    final companyId = currentUserDocument?.company?.id;
-    if (companyId == null) {
-      return 0;
-    }
-
-    final total = await queryJobsRecordCount(
-      queryBuilder: (jobsRecord) => jobsRecord.where(
-        'company',
-        isEqualTo: companyId,
-      ),
-    );
-
-    final completed = await queryJobsRecordCount(
-      queryBuilder: (jobsRecord) => jobsRecord
-          .where('company', isEqualTo: companyId)
-          .where('status', isEqualTo: JobStatus.Completed.serialize()),
-    );
-
-    final result = total - completed;
-    return result < 0 ? 0 : result;
-  }
-
   @override
   Widget build(BuildContext context) {
     return GestureDetector(
@@ -123,15 +100,10 @@ class _BookingsWidgetState extends State<BookingsWidget> {
                             Expanded(
                               child: Builder(
                                 builder: (context) {
-                                  final hasSubscriptionAccess =
-                                      valueOrDefault<bool>(
-                                            currentUserDocument?.subscribed,
-                                            false,
-                                          ) ||
-                                          (currentUserDocument
-                                                  ?.role?.name ==
-                                              'admin');
-                                  if (hasSubscriptionAccess) {
+                                  if (valueOrDefault<bool>(
+                                          currentUserDocument?.subscribed,
+                                          false) ==
+                                      true) {
                                     return Padding(
                                       padding: EdgeInsets.all(15.0),
                                       child: Column(
@@ -210,7 +182,18 @@ class _BookingsWidgetState extends State<BookingsWidget> {
                                                           ),
                                                           FutureBuilder<int>(
                                                             future:
-                                                                _countActiveJobs(),
+                                                                queryJobsRecordCount(
+                                                              queryBuilder:
+                                                                  (jobsRecord) =>
+                                                                      jobsRecord
+                                                                          .where(
+                                                                'company',
+                                                                isEqualTo:
+                                                                    currentUserDocument
+                                                                        ?.company
+                                                                        ?.id,
+                                                              ),
+                                                            ),
                                                             builder: (context,
                                                                 snapshot) {
                                                               // Customize what your widget looks like when it's loading.
@@ -341,7 +324,21 @@ class _BookingsWidgetState extends State<BookingsWidget> {
                                                           ),
                                                           FutureBuilder<int>(
                                                             future:
-                                                                _countActiveJobs(),
+                                                                queryJobsRecordCount(
+                                                              queryBuilder:
+                                                                  (jobsRecord) =>
+                                                                      jobsRecord
+                                                                          .where(
+                                                                            'company',
+                                                                            isEqualTo:
+                                                                                currentUserDocument?.company?.id,
+                                                                          )
+                                                                          .where(
+                                                                            'status',
+                                                                            isNotEqualTo:
+                                                                                JobStatus.Completed.serialize(),
+                                                                          ),
+                                                            ),
                                                             builder: (context,
                                                                 snapshot) {
                                                               // Customize what your widget looks like when it's loading.
@@ -472,7 +469,21 @@ class _BookingsWidgetState extends State<BookingsWidget> {
                                                           ),
                                                           FutureBuilder<int>(
                                                             future:
-                                                                _countActiveJobs(),
+                                                                queryJobsRecordCount(
+                                                              queryBuilder:
+                                                                  (jobsRecord) =>
+                                                                      jobsRecord
+                                                                          .where(
+                                                                            'status',
+                                                                            isEqualTo:
+                                                                                JobStatus.Completed.serialize(),
+                                                                          )
+                                                                          .where(
+                                                                            'company',
+                                                                            isEqualTo:
+                                                                                currentUserDocument?.company?.id,
+                                                                          ),
+                                                            ),
                                                             builder: (context,
                                                                 snapshot) {
                                                               // Customize what your widget looks like when it's loading.

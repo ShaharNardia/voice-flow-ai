@@ -3,6 +3,7 @@ import '/backend/schema/company_record.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
+import '/flutter_flow/info_tooltip_widget.dart';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -121,25 +122,33 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Name',
-                      style: FlutterFlowTheme.of(context).labelMedium.override(
-                            font: GoogleFonts.inter(
-                              fontWeight: FlutterFlowTheme.of(context)
-                                  .labelMedium
-                                  .fontWeight,
-                              fontStyle: FlutterFlowTheme.of(context)
-                                  .labelMedium
-                                  .fontStyle,
-                            ),
-                            letterSpacing: 0.0,
-                            fontWeight: FlutterFlowTheme.of(context)
-                                .labelMedium
-                                .fontWeight,
-                            fontStyle: FlutterFlowTheme.of(context)
-                                .labelMedium
-                                .fontStyle,
-                          ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Name',
+                          style: FlutterFlowTheme.of(context).labelMedium.override(
+                                font: GoogleFonts.inter(
+                                  fontWeight: FlutterFlowTheme.of(context)
+                                      .labelMedium
+                                      .fontWeight,
+                                  fontStyle: FlutterFlowTheme.of(context)
+                                      .labelMedium
+                                      .fontStyle,
+                                ),
+                                letterSpacing: 0.0,
+                                fontWeight: FlutterFlowTheme.of(context)
+                                    .labelMedium
+                                    .fontWeight,
+                                fontStyle: FlutterFlowTheme.of(context)
+                                    .labelMedium
+                                    .fontStyle,
+                              ),
+                        ),
+                        InfoTooltip(
+                          message: '👤 שם איש הקשר\nהשם של האדם שתרצה להתקשר אליו.\nהרובוט ישתמש בשם הזה בשיחה.',
+                        ),
+                      ],
                     ),
                     TextFormField(
                       controller: _model.textController1,
@@ -226,25 +235,33 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Phone Number',
-                      style: FlutterFlowTheme.of(context).labelMedium.override(
-                            font: GoogleFonts.inter(
-                              fontWeight: FlutterFlowTheme.of(context)
-                                  .labelMedium
-                                  .fontWeight,
-                              fontStyle: FlutterFlowTheme.of(context)
-                                  .labelMedium
-                                  .fontStyle,
-                            ),
-                            letterSpacing: 0.0,
-                            fontWeight: FlutterFlowTheme.of(context)
-                                .labelMedium
-                                .fontWeight,
-                            fontStyle: FlutterFlowTheme.of(context)
-                                .labelMedium
-                                .fontStyle,
-                          ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'Phone Number',
+                          style: FlutterFlowTheme.of(context).labelMedium.override(
+                                font: GoogleFonts.inter(
+                                  fontWeight: FlutterFlowTheme.of(context)
+                                      .labelMedium
+                                      .fontWeight,
+                                  fontStyle: FlutterFlowTheme.of(context)
+                                      .labelMedium
+                                      .fontStyle,
+                                ),
+                                letterSpacing: 0.0,
+                                fontWeight: FlutterFlowTheme.of(context)
+                                    .labelMedium
+                                    .fontWeight,
+                                fontStyle: FlutterFlowTheme.of(context)
+                                    .labelMedium
+                                    .fontStyle,
+                              ),
+                        ),
+                        InfoTooltip(
+                          message: '📱 מספר טלפון\nהמספר שהרובוט יתקשר אליו.\nחשוב לכלול קידומת מדינה (+972 לישראל).\nלדוגמה: +972501234567',
+                        ),
+                      ],
                     ),
                     TextFormField(
                       controller: _model.textController2,
@@ -339,12 +356,12 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                     context: context,
                     builder: (alertDialogContext) {
                       return AlertDialog(
-                        title: const LocalizedText('Error'),
-                        content: const LocalizedText('Company information not found. Please contact support.'),
+                        title: Text('Error'),
+                        content: Text('Company information not found. Please contact support.'),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(alertDialogContext),
-                            child: const LocalizedText('OK'),
+                            child: Text('OK'),
                           ),
                         ],
                       );
@@ -361,12 +378,12 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                     context: context,
                     builder: (alertDialogContext) {
                       return AlertDialog(
-                        title: const LocalizedText('Error'),
-                        content: const LocalizedText('No company phone number found. Please add a phone number first.'),
+                        title: Text('Error'),
+                        content: Text('No company phone number found. Please add a phone number first.'),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(alertDialogContext),
-                            child: const LocalizedText('OK'),
+                            child: Text('OK'),
                           ),
                         ],
                       );
@@ -375,27 +392,50 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                   return;
                 }
 
-                _model.apiResultuoh = await VapiGroup.placeCallCall.call(
+                // Use VoiceService (Firebase Cloud Functions + Twilio) instead of VAPI
+                _model.apiResultuoh = await VoiceServiceGroup.placeCallCall.call(
                   name: _model.textController1.text,
                   number: _model.textController2.text,
-                  phoneNumberId: company?.phoneNumberMap?.firstOrNull?.id,
-                  companyPhoneNumber: companyPhoneNumber,
-                  company: company?.name,
-                  industry: company?.industry,
-                  assistantName: company?.assistantname,
-                  now: getCurrentTimestamp.toString(),
+                  companyPhone: companyPhoneNumber,
+                  companyId: company?.reference.id ?? '',
+                  assistantId: company?.phoneNumberMap?.firstOrNull?.id ?? '',
+                  metadata: {
+                    'company': company?.name,
+                    'industry': company?.industry,
+                    'assistantName': company?.assistantname,
+                    'timestamp': getCurrentTimestamp.toString(),
+                  },
                 );
 
-                if ((_model.apiResultuoh?.succeeded ?? true)) {
+                if (_model.apiResultuoh?.succeeded == true) {
                   await showDialog(
                     context: context,
                     builder: (alertDialogContext) {
                       return AlertDialog(
-                        title: const LocalizedText('Call Successfull'),
+                        title: Text('Call Successfull'),
                         actions: [
                           TextButton(
                             onPressed: () => Navigator.pop(alertDialogContext),
-                            child: const LocalizedText('Ok'),
+                            child: Text('Ok'),
+                          ),
+                        ],
+                      );
+                    },
+                  );
+                } else {
+                  await showDialog(
+                    context: context,
+                    builder: (alertDialogContext) {
+                      return AlertDialog(
+                        title: Text('Error'),
+                        content: Text(
+                          _model.apiResultuoh?.bodyText ?? 
+                          'Failed to place call. Please try again.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(alertDialogContext),
+                            child: Text('Ok'),
                           ),
                         ],
                       );
