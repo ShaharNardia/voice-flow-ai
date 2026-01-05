@@ -1881,6 +1881,7 @@ class _LeadsWidgetState extends State<LeadsWidget> {
                                                                               return;
                                                                             }
                                                                             
+                                                                            // Pass all data needed for placeholder replacement
                                                                             _model.callResponse = await VoiceServiceGroup.placeCallCall.call(
                                                                               name: leadsItem.name,
                                                                               number: (String var1) {
@@ -1888,6 +1889,15 @@ class _LeadsWidgetState extends State<LeadsWidget> {
                                                                               }(leadsItem.phoneNumber),
                                                                               companyPhone: companyPhoneNumber,
                                                                               companyId: _model.company?.reference.id ?? '',
+                                                                              assistantJson: {
+                                                                                'firstMessage': _model.company?.outboundmessage ?? 'Hello, this is {{assistantName}} from {{companyName}}. How can I help you today?',
+                                                                                'leadName': leadsItem.name,
+                                                                                'assistantName': _model.company?.assistantname ?? 'your assistant',
+                                                                                'companyName': _model.company?.name ?? 'our company',
+                                                                                'name': _model.company?.assistantname ?? 'Assistant',
+                                                                                'voice': _model.company?.voice ?? 'Polly.Joanna',
+                                                                                'language': _model.company?.language ?? 'en-US',
+                                                                              },
                                                                               metadata: {
                                                                                 'leadId': leadsItem.reference.id,
                                                                                 'company': _model.company?.name,

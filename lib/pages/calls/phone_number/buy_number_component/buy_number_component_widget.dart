@@ -368,11 +368,11 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                             !_model.formKey.currentState!.validate()) {
                           return;
                         }
-                        if (_model.dropDownValue == null) {
+                        if (_model.dropDownValue == null || _model.dropDownValue!.isEmpty) {
                           ScaffoldMessenger.of(context).showSnackBar(
                             SnackBar(
                               content: Text(
-                                'Pleaase select language',
+                                'Please select an area code first',
                                 style: TextStyle(
                                   color: FlutterFlowTheme.of(context)
                                       .secondaryBackground,
@@ -385,8 +385,40 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                           );
                           return;
                         }
-                        _model.comapny = await CompanyRecord.getDocumentOnce(
-                            currentUserDocument!.company!);
+                        
+                        // Check if user has company reference
+                        if (currentUserDocument?.company == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Error: Company information not found. Please complete your profile setup.',
+                                style: TextStyle(
+                                  color: FlutterFlowTheme.of(context).primaryBackground,
+                                ),
+                              ),
+                              duration: Duration(milliseconds: 4000),
+                              backgroundColor: Color(0xFFE6425D),
+                            ),
+                          );
+                          return;
+                        }
+                        
+                        // Show loading indicator
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (context) => Center(
+                            child: CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(
+                                FlutterFlowTheme.of(context).primary,
+                              ),
+                            ),
+                          ),
+                        );
+                        
+                        try {
+                          _model.comapny = await CompanyRecord.getDocumentOnce(
+                              currentUserDocument!.company!);
                         if (currentUserDocument?.company != null) {
                           _model.apiResult73a =
                               await VoiceServiceGroup.createPhoneNumberCall.call(
@@ -464,15 +496,20 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                             );
                           }
 
+                          // Close loading dialog
+                          Navigator.pop(context);
+                          // Close the buy number component
                           Navigator.pop(context);
                         } else {
+                          // Close loading dialog
+                          Navigator.pop(context);
                           await showDialog(
                             context: context,
                             builder: (alertDialogContext) {
                               return AlertDialog(
                                 title: Text('Invalid Action'),
                                 content: Text(
-                                    'Sorry Compnay information doesn\'t exists'),
+                                    'Sorry Company information doesn\'t exist. Please complete your profile setup.'),
                                 actions: [
                                   TextButton(
                                     onPressed: () =>
@@ -482,6 +519,22 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                                 ],
                               );
                             },
+                          );
+                        }
+                        } catch (e) {
+                          // Close loading dialog on error
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Error purchasing phone number: ${e.toString()}',
+                                style: TextStyle(
+                                  color: FlutterFlowTheme.of(context).primaryBackground,
+                                ),
+                              ),
+                              duration: Duration(milliseconds: 4000),
+                              backgroundColor: Color(0xFFE6425D),
+                            ),
                           );
                         }
 

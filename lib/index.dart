@@ -70,3 +70,7 @@ export '/pages/professionals/call_fail/call_fail_widget.dart'
 export '/pages/billing/temp/temp_widget.dart' show TempWidget;
 export '/pages/dispatch/calls/update_agent/update_agent_widget.dart'
     show UpdateAgentWidget;
+export '/pages/scenarios/scenario_list/scenario_list_widget.dart'
+    show ScenarioListWidget;
+export '/pages/scenarios/scenario_editor/scenario_editor_widget.dart'
+    show ScenarioEditorWidget;

@@ -78,4 +78,26 @@ abstract class FFAppConstants {
 
   static const String synthesizeTtsEndpoint =
       '$cloudFunctionsBaseUrl/synthesizeTts';
+
+  // Scenario/Flow Builder Endpoints
+  static const String scenariosCreateEndpoint =
+      '$cloudFunctionsBaseUrl/scenariosCreate';
+
+  static const String scenariosUpdateEndpoint =
+      '$cloudFunctionsBaseUrl/scenariosUpdate';
+
+  static const String scenariosDeleteEndpoint =
+      '$cloudFunctionsBaseUrl/scenariosDelete';
+
+  static const String scenariosListEndpoint =
+      '$cloudFunctionsBaseUrl/scenariosList';
+
+  static const String scenariosGetEndpoint =
+      '$cloudFunctionsBaseUrl/scenariosGet';
+
+  static const String scenariosDuplicateEndpoint =
+      '$cloudFunctionsBaseUrl/scenariosDuplicate';
+
+  static const String scenariosNodeTypesEndpoint =
+      '$cloudFunctionsBaseUrl/scenariosNodeTypes';
 }

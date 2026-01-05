@@ -371,7 +371,24 @@ GoRouter createRouter(AppStateNotifier appStateNotifier) => GoRouter(
               path: UpdateAgentWidget.routePath,
               requireAuth: true,
               builder: (context, params) => UpdateAgentWidget(),
-            )
+            ),
+            FFRoute(
+              name: ScenarioListWidget.routeName,
+              path: ScenarioListWidget.routePath,
+              requireAuth: true,
+              builder: (context, params) => ScenarioListWidget(),
+            ),
+            FFRoute(
+              name: ScenarioEditorWidget.routeName,
+              path: ScenarioEditorWidget.routePath,
+              requireAuth: true,
+              builder: (context, params) => ScenarioEditorWidget(
+                scenarioId: params.getParam(
+                  'scenarioId',
+                  ParamType.String,
+                ),
+              ),
+            ),
           ].map((r) => r.toRoute(appStateNotifier)).toList(),
         ),
       ].map((r) => r.toRoute(appStateNotifier)).toList(),

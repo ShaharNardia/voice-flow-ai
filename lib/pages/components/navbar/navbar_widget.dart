@@ -1351,7 +1351,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                     text: 'Assistants',
                                                     icon: Icon(
                                                       Icons
-                                                          .people_outline_outlined,
+                                                          .smart_toy_outlined,
                                                       size: 20.0,
                                                     ),
                                                     options: FFButtonOptions(
@@ -1452,6 +1452,127 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                                   ),
                                                 ),
                                               ),
+                                            // Scenarios Flow Builder
+                                            Container(
+                                              width: double.infinity,
+                                              height: 40.0,
+                                              decoration: BoxDecoration(
+                                                color: FlutterFlowTheme.of(
+                                                        context)
+                                                    .secondaryBackground,
+                                              ),
+                                              child: FFButtonWidget(
+                                                onPressed: () async {
+                                                  if (widget!.pageNum !=
+                                                      1.2) {
+                                                    context.goNamed(
+                                                        ScenarioListWidget
+                                                            .routeName);
+                                                  }
+                                                },
+                                                text: 'Call Flows',
+                                                icon: Icon(
+                                                  Icons
+                                                      .account_tree_outlined,
+                                                  size: 20.0,
+                                                ),
+                                                options: FFButtonOptions(
+                                                  width: double.infinity,
+                                                  height: 35.0,
+                                                  padding:
+                                                      EdgeInsetsDirectional
+                                                          .fromSTEB(
+                                                              0.0,
+                                                              0.0,
+                                                              120.0,
+                                                              0.0),
+                                                  iconAlignment:
+                                                      IconAlignment.start,
+                                                  iconPadding:
+                                                      EdgeInsetsDirectional
+                                                          .fromSTEB(
+                                                              0.0,
+                                                              0.0,
+                                                              0.0,
+                                                              0.0),
+                                                  iconColor:
+                                                      valueOrDefault<Color>(
+                                                    widget!.pageNum == 1.2
+                                                        ? FlutterFlowTheme
+                                                                .of(context)
+                                                            .secondaryBackground
+                                                        : Color(0xFF919191),
+                                                    Color(0xFF919191),
+                                                  ),
+                                                  color:
+                                                      valueOrDefault<Color>(
+                                                    widget!.pageNum == 1.2
+                                                        ? FlutterFlowTheme
+                                                                .of(context)
+                                                            .primary
+                                                        : FlutterFlowTheme
+                                                                .of(context)
+                                                            .secondaryBackground,
+                                                    FlutterFlowTheme.of(
+                                                            context)
+                                                        .secondaryBackground,
+                                                  ),
+                                                  textStyle:
+                                                      FlutterFlowTheme.of(
+                                                              context)
+                                                          .titleSmall
+                                                          .override(
+                                                            font: GoogleFonts
+                                                                .interTight(
+                                                              fontWeight:
+                                                                  FontWeight
+                                                                      .normal,
+                                                              fontStyle: FlutterFlowTheme.of(
+                                                                      context)
+                                                                  .titleSmall
+                                                                  .fontStyle,
+                                                            ),
+                                                            color:
+                                                                valueOrDefault<
+                                                                    Color>(
+                                                              widget!.pageNum ==
+                                                                      1.2
+                                                                  ? FlutterFlowTheme.of(
+                                                                          context)
+                                                                      .secondaryBackground
+                                                                  : Color(
+                                                                      0xFF919191),
+                                                              Color(
+                                                                  0xFF919191),
+                                                            ),
+                                                            fontSize: 12.0,
+                                                            letterSpacing:
+                                                                0.0,
+                                                            fontWeight:
+                                                                FontWeight
+                                                                    .normal,
+                                                            fontStyle: FlutterFlowTheme.of(
+                                                                    context)
+                                                                .titleSmall
+                                                                .fontStyle,
+                                                          ),
+                                                  elevation: 0.0,
+                                                  borderRadius:
+                                                      BorderRadius.circular(
+                                                          8.0),
+                                                  hoverColor: widget!
+                                                              .pageNum ==
+                                                          1.2
+                                                      ? FlutterFlowTheme.of(
+                                                              context)
+                                                          .primary
+                                                      : FlutterFlowTheme.of(
+                                                              context)
+                                                          .primaryBackground,
+                                                ),
+                                                showLoadingIndicator: false,
+                                              ),
+                                            ),
                                           ].divide(SizedBox(height: 6.0)),
                                         ),
                                         expanded: Container(

@@ -1,0 +1,30 @@
+{
+  "name": "voiceflow-asterisk-bridge",
+  "version": "1.0.0",
+  "description": "Bridge service connecting VoiceFlow to Asterisk PBX",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "nodemon src/index.js",
+    "test": "echo \"No tests yet\" && exit 0"
+  },
+  "dependencies": {
+    "ari-client": "^2.2.0",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "express": "^4.18.2",
+    "firebase-admin": "^12.0.0",
+    "uuid": "^9.0.0",
+    "ws": "^8.14.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "author": "VoiceFlow AI",
+  "license": "MIT"
+}
+

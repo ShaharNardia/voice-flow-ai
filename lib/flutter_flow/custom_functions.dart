@@ -28,8 +28,14 @@ bool? filterAssistant(
   String? userId,
   String? searchKeyword,
 ) {
-  return searchItem?['metadata']?['userId'] == userId &&
-      searchItem?['name'].toLowerCase().contains(searchKeyword!.toLowerCase());
+  // Check both ownerId and userId for backwards compatibility
+  final metadata = searchItem?['metadata'];
+  final ownerId = metadata?['ownerId'];
+  final legacyUserId = metadata?['userId'];
+  final isUserMatch = ownerId == userId || legacyUserId == userId;
+  final name = searchItem?['name']?.toString() ?? '';
+  final keyword = searchKeyword?.toLowerCase() ?? '';
+  return isUserMatch && name.toLowerCase().contains(keyword);
 }
 
 String returnTwoText(
@@ -96,7 +102,11 @@ bool? getUserAssistants(
   dynamic searchItem,
   String? userId,
 ) {
-  return searchItem?['metadata']?['userId'] == userId;
+  // Check both ownerId and userId for backwards compatibility
+  final metadata = searchItem?['metadata'];
+  final ownerId = metadata?['ownerId'];
+  final legacyUserId = metadata?['userId'];
+  return ownerId == userId || legacyUserId == userId;
 }
 
 List<String> returnEmptyList(List<String>? selected) {
@@ -3065,12 +3075,12 @@ List<String> modelforvoices(String provider) {
     ];
   } else if (provider == "11labs") {
     models = [
-      "eleven_multilingual_v2",
-      "eleven_turbo_v2",
-      "eleven_turbo_v2_5",
-      "eleven_flash_v2",
+      "eleven_multilingual_v2",  // Hebrew support - recommended
       "eleven_flash_v2_5",
-      "eleven_monolingual_v1"
+      "eleven_flash_v2",
+      "eleven_turbo_v2_5",       // No Hebrew support
+      "eleven_turbo_v2",         // No Hebrew support
+      "eleven_monolingual_v1"    // English only
     ];
   } else if (provider == "rime-ai") {
     models = ["arcana", "mistv2", "mist"];
@@ -3114,12 +3124,12 @@ List<String> modelforvoicesoption(String provider) {
     ];
   } else if (provider == "11labs") {
     models = [
-      "eleven_multilingual_v2",
-      "eleven_turbo_v2",
-      "eleven_turbo_v2_5",
-      "eleven_flash_v2",
-      "eleven_flash_v2_5",
-      "eleven_monolingual_v1"
+      "Multilingual v2 (Hebrew)",  // Hebrew support - recommended
+      "Flash v2.5",
+      "Flash v2",
+      "Turbo v2.5 (English)",      // No Hebrew support
+      "Turbo v2 (English)",        // No Hebrew support
+      "Monolingual v1 (English)"   // English only
     ];
   } else if (provider == "rime-ai") {
     models = ["arcana", "mistv2", "mist"];
@@ -3243,21 +3253,31 @@ List<String> voiceforlabel(String provider) {
     voice = [];
   } else if (provider == "11labs") {
     voice = [
-      "burt",
-      "marissa",
-      "andrea",
-      "sarah",
-      "phillip",
-      "steve",
-      "joseph",
-      "myra",
-      "paula",
-      "ryan",
-      "drew",
-      "paul",
-      "mrb",
-      "matilda",
-      "mark",
+      // Hebrew-supporting voices (multilingual) - prioritized
+      "Rachel (Hebrew)",
+      "Adam (Hebrew)",
+      "Antoni (Hebrew)",
+      "Bella (Hebrew)",
+      "Josh (Hebrew)",
+      "Arnold (Hebrew)",
+      "Sam (Hebrew)",
+      "Elli (Hebrew)",
+      // Additional voices
+      "Burt",
+      "Marissa",
+      "Andrea",
+      "Sarah",
+      "Phillip",
+      "Steve",
+      "Joseph",
+      "Myra",
+      "Paula",
+      "Ryan",
+      "Drew",
+      "Paul",
+      "MrB",
+      "Matilda",
+      "Mark",
     ];
   } else if (provider == "rime-ai") {
     voice = [
@@ -3524,6 +3544,16 @@ List<String> voiceforlabelvalue(String provider) {
     voice = [];
   } else if (provider == "11labs") {
     voice = [
+      // Hebrew-supporting voices (multilingual) - prioritized
+      "rachel",
+      "adam",
+      "antoni",
+      "bella",
+      "josh",
+      "arnold",
+      "sam",
+      "elli",
+      // Additional voices
       "burt",
       "marissa",
       "andrea",

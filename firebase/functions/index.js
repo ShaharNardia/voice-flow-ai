@@ -24,7 +24,11 @@ exports.configurePhoneNumber = voiceService.configurePhoneNumber;
 exports.releasePhoneNumber = voiceService.releasePhoneNumber;
 exports.placeCall = voiceService.placeCall;
 exports.twilioVoiceWebhook = voiceService.twilioVoiceWebhook;
+exports.twilioGatherCallback = voiceService.twilioGatherCallback;
 exports.twilioStatusCallback = voiceService.twilioStatusCallback;
+exports.scenarioFlowExecute = voiceService.scenarioFlowExecute;
+exports.scenarioFlowCallback = voiceService.scenarioFlowCallback;
+exports.scenarioRecordingCallback = voiceService.scenarioRecordingCallback;
 const assignAssistant = require("./assign_assistant.js");
 exports.assignAssistant = assignAssistant.assignAssistant;
 const createReservation = require("./create_reservation.js");
@@ -45,3 +49,18 @@ exports.bootstrapAdminUser = setUserSubscription.bootstrapAdminUser;
 const ttsService = require("./tts_service.js");
 exports.listTtsVoices = ttsService.listTtsVoices;
 exports.synthesizeTts = ttsService.synthesizeTts;
+
+// Scenario Service - Visual Call Flow Builder
+const scenarioService = require("./scenario_service.js");
+exports.scenariosCreate = scenarioService.scenariosCreate;
+exports.scenariosUpdate = scenarioService.scenariosUpdate;
+exports.scenariosGet = scenarioService.scenariosGet;
+exports.scenariosList = scenarioService.scenariosList;
+exports.scenariosDelete = scenarioService.scenariosDelete;
+exports.scenariosDuplicate = scenarioService.scenariosDuplicate;
+exports.scenariosNodeTypes = scenarioService.scenariosNodeTypes;
+
+// Scenario AI Service - AI-powered scenario generation
+const scenarioAiService = require("./scenario_ai_service.js");
+exports.scenarioAiGenerate = scenarioAiService.generateScenario;
+exports.scenarioAiSuggest = scenarioAiService.suggestImprovements;

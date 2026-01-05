@@ -392,13 +392,23 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                   return;
                 }
 
-                // Use VoiceService (Firebase Cloud Functions + Twilio) instead of VAPI
+                // Use VoiceService (Firebase Cloud Functions + Twilio)
+                // Pass all data needed for placeholder replacement
                 _model.apiResultuoh = await VoiceServiceGroup.placeCallCall.call(
                   name: _model.textController1.text,
                   number: _model.textController2.text,
                   companyPhone: companyPhoneNumber,
                   companyId: company?.reference.id ?? '',
                   assistantId: company?.phoneNumberMap?.firstOrNull?.id ?? '',
+                  assistantJson: {
+                    'firstMessage': company?.outboundmessage ?? 'Hello, this is {{assistantName}} from {{companyName}}. How can I help you today?',
+                    'leadName': _model.textController1.text,
+                    'assistantName': company?.assistantname ?? 'your assistant',
+                    'companyName': company?.name ?? 'our company',
+                    'name': company?.assistantname ?? 'Assistant',
+                    'voice': company?.voice ?? 'Polly.Joanna',
+                    'language': company?.language ?? 'en-US',
+                  },
                   metadata: {
                     'company': company?.name,
                     'industry': company?.industry,

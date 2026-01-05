@@ -1,7 +1,11 @@
 const {onRequest} = require("firebase-functions/v2/https");
+const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const axios = require("axios");
 const {TextToSpeechClient} = require("@google-cloud/text-to-speech");
+
+// Define secrets for TTS providers
+const elevenLabsApiKey = defineSecret("ELEVENLABS_API_KEY");
 
 const googleTtsClient = new TextToSpeechClient();
 
@@ -133,26 +137,25 @@ async function listElevenLabsVoices() {
     },
   });
   const voicesRaw = response.data?.voices || response.data || [];
+  // Filter voices that support eleven_multilingual_v2 (which supports Hebrew)
   const voices = voicesRaw
     .filter((voice) => {
-      const languages = voice.available_languages || voice.languages || [];
-      return languages.some((lang) => {
-        const languageId = (lang.language_id || lang.id || lang).toLowerCase();
-        return languageId.startsWith("he");
-      });
+      const modelIds = voice.high_quality_base_model_ids || [];
+      return modelIds.includes("eleven_multilingual_v2");
     })
     .map((voice) => ({
       id: voice.voice_id,
       name: voice.name,
       languageCode: "he",
       category: voice.category || null,
+      gender: voice.labels?.gender || null,
+      accent: voice.labels?.accent || null,
       description:
         voice.description ||
-        (Array.isArray(voice.labels)
-          ? voice.labels.join(", ")
-          : voice.labels?.language || "ElevenLabs neural voice"),
+        (voice.labels ? `${voice.labels.gender || ""} ${voice.labels.accent || ""} ${voice.labels.age || ""}`.trim() : "ElevenLabs neural voice"),
       previewUrl: voice.preview_url || null,
       settings: voice.settings || null,
+      supportsHebrew: true,
     }));
   elevenVoicesCache = {
     value: voices,
@@ -236,7 +239,7 @@ async function synthesizeWithElevenLabs({text, voiceId, modelId, optimizeStreami
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
   const payload = {
     text,
-    model_id: modelId || "eleven_turbo_v2_5",
+    model_id: modelId || "eleven_multilingual_v2",
     optimize_streaming_latency: optimizeStreamingLatency ?? 1,
     voice_settings: voiceSettings || undefined,
     output_format: "mp3_22050_32",
@@ -256,7 +259,9 @@ async function synthesizeWithElevenLabs({text, voiceId, modelId, optimizeStreami
   };
 }
 
-exports.listTtsVoices = onRequest(async (req, res) => {
+exports.listTtsVoices = onRequest(
+  {secrets: [elevenLabsApiKey]},
+  async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") {
     res.status(204).end();
@@ -293,7 +298,9 @@ exports.listTtsVoices = onRequest(async (req, res) => {
   }
 });
 
-exports.synthesizeTts = onRequest(async (req, res) => {
+exports.synthesizeTts = onRequest(
+  {secrets: [elevenLabsApiKey]},
+  async (req, res) => {
   setCors(res);
   if (req.method === "OPTIONS") {
     res.status(204).end();

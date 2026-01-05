@@ -227,6 +227,36 @@ class CompanyRecord extends FirestoreRecord {
   String get modelvoice => _modelvoice ?? '';
   bool hasModelvoice() => _modelvoice != null;
 
+  // "telephonyProvider" field - 'twilio' or 'asterisk'
+  String? _telephonyProvider;
+  String get telephonyProvider => _telephonyProvider ?? 'twilio';
+  bool hasTelephonyProvider() => _telephonyProvider != null;
+
+  // "asteriskBridgeUrl" field - URL of Asterisk Bridge service
+  String? _asteriskBridgeUrl;
+  String get asteriskBridgeUrl => _asteriskBridgeUrl ?? '';
+  bool hasAsteriskBridgeUrl() => _asteriskBridgeUrl != null;
+
+  // "asteriskBridgeSecret" field - API secret for Asterisk Bridge
+  String? _asteriskBridgeSecret;
+  String get asteriskBridgeSecret => _asteriskBridgeSecret ?? '';
+  bool hasAsteriskBridgeSecret() => _asteriskBridgeSecret != null;
+
+  // "asteriskCallerId" field - Default caller ID for Asterisk calls
+  String? _asteriskCallerId;
+  String get asteriskCallerId => _asteriskCallerId ?? '';
+  bool hasAsteriskCallerId() => _asteriskCallerId != null;
+
+  // "sipTrunkName" field - SIP trunk name in Asterisk
+  String? _sipTrunkName;
+  String get sipTrunkName => _sipTrunkName ?? '';
+  bool hasSipTrunkName() => _sipTrunkName != null;
+
+  // "defaultDdi" field - Default DDI number
+  String? _defaultDdi;
+  String get defaultDdi => _defaultDdi ?? '';
+  bool hasDefaultDdi() => _defaultDdi != null;
+
   void _initializeFields() {
     _name = snapshotData['name'] as String?;
     _industry = snapshotData['industry'] as String?;
@@ -286,6 +316,12 @@ class CompanyRecord extends FirestoreRecord {
     _outboundmessage = snapshotData['outboundmessage'] as String?;
     _voice = snapshotData['voice'] as String?;
     _modelvoice = snapshotData['modelvoice'] as String?;
+    _telephonyProvider = snapshotData['telephonyProvider'] as String?;
+    _asteriskBridgeUrl = snapshotData['asteriskBridgeUrl'] as String?;
+    _asteriskBridgeSecret = snapshotData['asteriskBridgeSecret'] as String?;
+    _asteriskCallerId = snapshotData['asteriskCallerId'] as String?;
+    _sipTrunkName = snapshotData['sipTrunkName'] as String?;
+    _defaultDdi = snapshotData['defaultDdi'] as String?;
   }
 
   static CollectionReference get collection =>
@@ -360,6 +396,12 @@ Map<String, dynamic> createCompanyRecordData({
   String? outboundmessage,
   String? voice,
   String? modelvoice,
+  String? telephonyProvider,
+  String? asteriskBridgeUrl,
+  String? asteriskBridgeSecret,
+  String? asteriskCallerId,
+  String? sipTrunkName,
+  String? defaultDdi,
 }) {
   final firestoreData = mapToFirestore(
     <String, dynamic>{
@@ -400,6 +442,12 @@ Map<String, dynamic> createCompanyRecordData({
       'outboundmessage': outboundmessage,
       'voice': voice,
       'modelvoice': modelvoice,
+      'telephonyProvider': telephonyProvider,
+      'asteriskBridgeUrl': asteriskBridgeUrl,
+      'asteriskBridgeSecret': asteriskBridgeSecret,
+      'asteriskCallerId': asteriskCallerId,
+      'sipTrunkName': sipTrunkName,
+      'defaultDdi': defaultDdi,
     }.withoutNulls,
   );
 
@@ -456,7 +504,13 @@ class CompanyRecordDocumentEquality implements Equality<CompanyRecord> {
         e1?.inboundmessage == e2?.inboundmessage &&
         e1?.outboundmessage == e2?.outboundmessage &&
         e1?.voice == e2?.voice &&
-        e1?.modelvoice == e2?.modelvoice;
+        e1?.modelvoice == e2?.modelvoice &&
+        e1?.telephonyProvider == e2?.telephonyProvider &&
+        e1?.asteriskBridgeUrl == e2?.asteriskBridgeUrl &&
+        e1?.asteriskBridgeSecret == e2?.asteriskBridgeSecret &&
+        e1?.asteriskCallerId == e2?.asteriskCallerId &&
+        e1?.sipTrunkName == e2?.sipTrunkName &&
+        e1?.defaultDdi == e2?.defaultDdi;
   }
 
   @override
@@ -502,7 +556,13 @@ class CompanyRecordDocumentEquality implements Equality<CompanyRecord> {
         e?.inboundmessage,
         e?.outboundmessage,
         e?.voice,
-        e?.modelvoice
+        e?.modelvoice,
+        e?.telephonyProvider,
+        e?.asteriskBridgeUrl,
+        e?.asteriskBridgeSecret,
+        e?.asteriskCallerId,
+        e?.sipTrunkName,
+        e?.defaultDdi
       ]);
 
   @override

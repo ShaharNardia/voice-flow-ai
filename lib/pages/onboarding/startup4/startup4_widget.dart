@@ -2,6 +2,7 @@ import '/auth/firebase_auth/auth_util.dart';
 import '/backend/api_requests/api_calls.dart';
 import '/backend/backend.dart';
 import '/flutter_flow/flutter_flow_drop_down.dart';
+import '/flutter_flow/flutter_flow_icon_button.dart';
 import '/flutter_flow/flutter_flow_theme.dart';
 import '/flutter_flow/flutter_flow_util.dart';
 import '/flutter_flow/flutter_flow_widgets.dart';
@@ -136,12 +137,38 @@ class _Startup4WidgetState extends State<Startup4Widget>
                       mainAxisSize: MainAxisSize.max,
                       mainAxisAlignment: MainAxisAlignment.start,
                       children: [
+                        // Back button row when accessed from main page
+                        if (widget.mainpage)
+                          Padding(
+                            padding: const EdgeInsetsDirectional.fromSTEB(16.0, 0.0, 16.0, 16.0),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.start,
+                              children: [
+                                FlutterFlowIconButton(
+                                  borderColor: Colors.transparent,
+                                  borderRadius: 30,
+                                  buttonSize: 46,
+                                  icon: Icon(
+                                    Icons.arrow_back_rounded,
+                                    color: FlutterFlowTheme.of(context).primaryText,
+                                    size: 24,
+                                  ),
+                                  onPressed: () => context.safePop(),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'AI Assistant Settings',
+                                  style: FlutterFlowTheme.of(context).headlineSmall,
+                                ),
+                              ],
+                            ),
+                          ),
                         wrapWithModel(
                           model: _model.progressBarModel,
                           updateCallback: () => safeSetState(() {}),
                           child: ProgressBarWidget(
                             pageNo: 4,
-                            updated: widget!.update,
+                            updated: widget.update,
                           ),
                         ),
                         Expanded(

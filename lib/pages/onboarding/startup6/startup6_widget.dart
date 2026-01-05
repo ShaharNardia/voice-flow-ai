@@ -2896,6 +2896,43 @@ class _Startup6WidgetState extends State<Startup6Widget> {
                                                         ).then((s) =>
                                                                 s.firstOrNull);
                                                         _shouldSetState = true;
+                                                        
+                                                        // Validate customerId before proceeding
+                                                        if (_model.customerId == null || _model.customerId!.isEmpty) {
+                                                          ScaffoldMessenger.of(context).showSnackBar(
+                                                            SnackBar(
+                                                              content: Text(
+                                                                'Error: Customer ID not found. Please try again or contact support.',
+                                                                style: TextStyle(
+                                                                  color: FlutterFlowTheme.of(context).primaryBackground,
+                                                                ),
+                                                              ),
+                                                              duration: Duration(milliseconds: 4000),
+                                                              backgroundColor: Color(0xFFE6425D),
+                                                            ),
+                                                          );
+                                                          if (_shouldSetState) safeSetState(() {});
+                                                          return;
+                                                        }
+                                                        
+                                                        // Validate planType is set
+                                                        if (_model.planType == null) {
+                                                          ScaffoldMessenger.of(context).showSnackBar(
+                                                            SnackBar(
+                                                              content: Text(
+                                                                'Please select a plan first.',
+                                                                style: TextStyle(
+                                                                  color: FlutterFlowTheme.of(context).primaryBackground,
+                                                                ),
+                                                              ),
+                                                              duration: Duration(milliseconds: 4000),
+                                                              backgroundColor: Color(0xFFE6425D),
+                                                            ),
+                                                          );
+                                                          if (_shouldSetState) safeSetState(() {});
+                                                          return;
+                                                        }
+                                                        
                                                         _model.apiResultxjo =
                                                             await StripeGroup
                                                                 .createSessionCall
@@ -2926,13 +2963,39 @@ class _Startup6WidgetState extends State<Startup6Widget> {
                                                         if ((_model.apiResultxjo
                                                                 ?.succeeded ??
                                                             true)) {
-                                                          await launchURL(
-                                                              getJsonField(
-                                                            (_model.apiResultxjo
-                                                                    ?.jsonBody ??
-                                                                ''),
+                                                          final url = getJsonField(
+                                                            (_model.apiResultxjo?.jsonBody ?? ''),
                                                             r'''$.url''',
-                                                          ).toString());
+                                                          )?.toString();
+                                                          if (url != null && url.isNotEmpty) {
+                                                            await launchURL(url);
+                                                          } else {
+                                                            ScaffoldMessenger.of(context).showSnackBar(
+                                                              SnackBar(
+                                                                content: Text(
+                                                                  'Error: Could not get payment URL. Please try again.',
+                                                                  style: TextStyle(
+                                                                    color: FlutterFlowTheme.of(context).primaryBackground,
+                                                                  ),
+                                                                ),
+                                                                duration: Duration(milliseconds: 4000),
+                                                                backgroundColor: Color(0xFFE6425D),
+                                                              ),
+                                                            );
+                                                          }
+                                                        } else {
+                                                          ScaffoldMessenger.of(context).showSnackBar(
+                                                            SnackBar(
+                                                              content: Text(
+                                                                'Failed to create payment session. Please try again.',
+                                                                style: TextStyle(
+                                                                  color: FlutterFlowTheme.of(context).primaryBackground,
+                                                                ),
+                                                              ),
+                                                              duration: Duration(milliseconds: 4000),
+                                                              backgroundColor: Color(0xFFE6425D),
+                                                            ),
+                                                          );
                                                         }
                                                         if (_shouldSetState)
                                                           safeSetState(() {});

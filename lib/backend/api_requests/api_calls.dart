@@ -542,6 +542,7 @@ class VoiceServicePlaceCallCall {
     String? companyPhone = '',
     String? companyId = '',
     String? assistantId = '',
+    String? scenarioId,
     dynamic? assistantJson,
     Map<String, dynamic>? metadata,
   }) async {
@@ -556,6 +557,7 @@ class VoiceServicePlaceCallCall {
   "companyPhone": "${escapeStringForJson(companyPhone)}",
   "companyId": "${escapeStringForJson(companyId)}",
   "assistantId": "${escapeStringForJson(assistantId)}",
+  "scenarioId": ${scenarioId != null ? '"$scenarioId"' : 'null'},
   "assistantJson": ${assistant},
   "metadata": ${metadataStr}
 }''';
@@ -964,6 +966,239 @@ class VoiceServiceUpdateToolCall {
 }
 
 /// End VoiceService Group Code
+
+/// Start ScenarioService Group Code
+
+class ScenarioServiceGroup {
+  static String getBaseUrl() =>
+      'https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net';
+
+  static CreateScenariosCall createScenariosCall = CreateScenariosCall();
+  static UpdateScenariosCall updateScenariosCall = UpdateScenariosCall();
+  static DeleteScenariosCall deleteScenariosCall = DeleteScenariosCall();
+  static ListScenariosCall listScenariosCall = ListScenariosCall();
+  static GetScenariosCall getScenariosCall = GetScenariosCall();
+  static DuplicateScenariosCall duplicateScenariosCall = DuplicateScenariosCall();
+  static GenerateScenarioAiCall generateScenarioAiCall = GenerateScenarioAiCall();
+}
+
+class GenerateScenarioAiCall {
+  Future<ApiCallResponse> call({
+    required String description,
+  }) async {
+    final baseUrl = ScenarioServiceGroup.getBaseUrl();
+
+    final ffApiRequestBody = '''
+{
+  "description": "${escapeStringForJson(description)}"
+}''';
+
+    return ApiManager.instance.makeApiCall(
+      callName: 'AI Generate Scenario',
+      apiUrl: '$baseUrl/scenarioAiGenerate',
+      callType: ApiCallType.POST,
+      headers: {'Content-Type': 'application/json'},
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class CreateScenariosCall {
+  Future<ApiCallResponse> call({
+    String? name,
+    String? description,
+    bool? isActive,
+    List<dynamic>? nodes,
+    List<dynamic>? edges,
+    String? companyId,
+    String? ownerId,
+  }) async {
+    final baseUrl = ScenarioServiceGroup.getBaseUrl();
+
+    final ffApiRequestBody = '''
+{
+  "name": "${escapeStringForJson(name ?? 'New Scenario')}",
+  "description": "${escapeStringForJson(description ?? '')}",
+  "isActive": ${isActive ?? false},
+  "nodes": ${_serializeJson(nodes, true)},
+  "edges": ${_serializeJson(edges, true)},
+  "companyId": ${companyId != null ? '"$companyId"' : 'null'},
+  "ownerId": ${ownerId != null ? '"$ownerId"' : 'null'}
+}''';
+
+    return ApiManager.instance.makeApiCall(
+      callName: 'Scenario Create',
+      apiUrl: '$baseUrl/scenariosCreate',
+      callType: ApiCallType.POST,
+      headers: {'Content-Type': 'application/json'},
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class UpdateScenariosCall {
+  Future<ApiCallResponse> call({
+    String? scenarioId,
+    String? name,
+    String? description,
+    bool? isActive,
+    List<dynamic>? nodes,
+    List<dynamic>? edges,
+  }) async {
+    final baseUrl = ScenarioServiceGroup.getBaseUrl();
+
+    final Map<String, dynamic> body = {
+      'id': scenarioId,
+    };
+    if (name != null) body['name'] = name;
+    if (description != null) body['description'] = description;
+    if (isActive != null) body['isActive'] = isActive;
+    if (nodes != null) body['nodes'] = nodes;
+    if (edges != null) body['edges'] = edges;
+
+    return ApiManager.instance.makeApiCall(
+      callName: 'Scenario Update',
+      apiUrl: '$baseUrl/scenariosUpdate',
+      callType: ApiCallType.POST,
+      headers: {'Content-Type': 'application/json'},
+      params: {},
+      body: json.encode(body),
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class DeleteScenariosCall {
+  Future<ApiCallResponse> call({
+    String? scenarioId,
+  }) async {
+    final baseUrl = ScenarioServiceGroup.getBaseUrl();
+
+    return ApiManager.instance.makeApiCall(
+      callName: 'Scenario Delete',
+      apiUrl: '$baseUrl/scenariosDelete?id=$scenarioId',
+      callType: ApiCallType.DELETE,
+      headers: {'Content-Type': 'application/json'},
+      params: {},
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class ListScenariosCall {
+  Future<ApiCallResponse> call({
+    String? companyId,
+    String? ownerId,
+    bool? activeOnly,
+    int? limit,
+  }) async {
+    final baseUrl = ScenarioServiceGroup.getBaseUrl();
+
+    final queryParams = <String>[];
+    if (companyId != null) queryParams.add('companyId=$companyId');
+    if (ownerId != null) queryParams.add('ownerId=$ownerId');
+    if (activeOnly == true) queryParams.add('activeOnly=true');
+    if (limit != null) queryParams.add('limit=$limit');
+
+    final queryString = queryParams.isNotEmpty ? '?${queryParams.join('&')}' : '';
+
+    return ApiManager.instance.makeApiCall(
+      callName: 'Scenario List',
+      apiUrl: '$baseUrl/scenariosList$queryString',
+      callType: ApiCallType.GET,
+      headers: {'Content-Type': 'application/json'},
+      params: {},
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class GetScenariosCall {
+  Future<ApiCallResponse> call({
+    String? scenarioId,
+  }) async {
+    final baseUrl = ScenarioServiceGroup.getBaseUrl();
+
+    return ApiManager.instance.makeApiCall(
+      callName: 'Scenario Get',
+      apiUrl: '$baseUrl/scenariosGet?id=$scenarioId',
+      callType: ApiCallType.GET,
+      headers: {'Content-Type': 'application/json'},
+      params: {},
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+class DuplicateScenariosCall {
+  Future<ApiCallResponse> call({
+    String? scenarioId,
+    String? newName,
+  }) async {
+    final baseUrl = ScenarioServiceGroup.getBaseUrl();
+
+    final ffApiRequestBody = '''
+{
+  "id": "$scenarioId",
+  "name": ${newName != null ? '"${escapeStringForJson(newName)}"' : 'null'}
+}''';
+
+    return ApiManager.instance.makeApiCall(
+      callName: 'Scenario Duplicate',
+      apiUrl: '$baseUrl/scenariosDuplicate',
+      callType: ApiCallType.POST,
+      headers: {'Content-Type': 'application/json'},
+      params: {},
+      body: ffApiRequestBody,
+      bodyType: BodyType.JSON,
+      returnBody: true,
+      encodeBodyUtf8: false,
+      decodeUtf8: false,
+      cache: false,
+      isStreamingApi: false,
+      alwaysAllowBody: false,
+    );
+  }
+}
+
+/// End ScenarioService Group Code
 
 class SendASMSCall {
   static Future<ApiCallResponse> call({
