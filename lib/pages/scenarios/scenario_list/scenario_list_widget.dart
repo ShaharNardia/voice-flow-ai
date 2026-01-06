@@ -66,27 +66,29 @@ class _ScenarioListWidgetState extends State<ScenarioListWidget> {
         appBar: AppBar(
           backgroundColor: FlutterFlowTheme.of(context).primaryBackground,
           automaticallyImplyLeading: false,
-          leading: FlutterFlowIconButton(
-            borderColor: Colors.transparent,
-            borderRadius: 30,
-            buttonSize: 46,
-            icon: Icon(
-              Icons.arrow_back_rounded,
-              color: FlutterFlowTheme.of(context).primaryText,
-              size: 24,
-            ),
-            onPressed: () => context.safePop(),
-          ),
-          title: Text(
-            'Call Flow Scenarios',
-            style: FlutterFlowTheme.of(context).headlineMedium.override(
-                  font: GoogleFonts.interTight(
-                    fontWeight: FontWeight.w600,
-                  ),
+          title: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                icon: Icon(
+                  Icons.arrow_back_rounded,
                   color: FlutterFlowTheme.of(context).primaryText,
-                  fontSize: 22.0,
-                  letterSpacing: 0.0,
                 ),
+                onPressed: () => context.safePop(),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'Call Flow Scenarios',
+                style: FlutterFlowTheme.of(context).headlineMedium.override(
+                      font: GoogleFonts.interTight(
+                        fontWeight: FontWeight.w600,
+                      ),
+                      color: FlutterFlowTheme.of(context).primaryText,
+                      fontSize: 22.0,
+                      letterSpacing: 0.0,
+                    ),
+              ),
+            ],
           ),
           actions: [
             Padding(
