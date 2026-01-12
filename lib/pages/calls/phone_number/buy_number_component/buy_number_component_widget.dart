@@ -419,108 +419,201 @@ class _BuyNumberComponentWidgetState extends State<BuyNumberComponentWidget> {
                         try {
                           _model.comapny = await CompanyRecord.getDocumentOnce(
                               currentUserDocument!.company!);
-                        if (currentUserDocument?.company != null) {
-                          _model.apiResult73a =
-                              await VoiceServiceGroup.createPhoneNumberCall.call(
-                            number: _model.dropDownValue,
-                            name: _model.comapny?.name,
-                          );
-
-                          if (_model.apiResult73a?.succeeded == true || (_model.apiResult73a?.statusCode ?? 0) == 201) {
-                            await currentUserDocument!.company!.update({
-                              ...mapToFirestore(
-                                {
-                                  'companyPhoneNumbers': FieldValue.arrayUnion([
-                                    VoiceServiceGroup.createPhoneNumberCall.number(
-                                      (_model.apiResult73a?.jsonBody ?? ''),
-                                    )
-                                  ]),
-                                  'phoneNumberMap': FieldValue.arrayUnion([
-                                    getPhoneNumberFirestoreData(
-                                      updatePhoneNumberStruct(
-                                        PhoneNumberStruct(
-                                          id: VoiceServiceGroup.createPhoneNumberCall
-                                              .id(
-                                            (_model.apiResult73a?.jsonBody ??
-                                                ''),
-                                          ),
-                                          phoneNumber: VoiceServiceGroup
-                                              .createPhoneNumberCall
-                                              .number(
-                                            (_model.apiResult73a?.jsonBody ??
-                                                ''),
-                                          ),
-                                          forwardingNumber:
-                                              _model.textController.text,
-                                          label: Labels.inbound_outbound,
-                                        ),
-                                        clearUnsetFields: false,
-                                      ),
-                                      true,
-                                    )
-                                  ]),
-                                },
-                              ),
-                            });
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Phone Number purchased successfully',
-                                  style: TextStyle(
-                                    color: FlutterFlowTheme.of(context)
-                                        .primaryBackground,
-                                  ),
-                                ),
-                                duration: Duration(milliseconds: 4000),
-                                backgroundColor: Color(0xFF45A671),
-                              ),
+                              
+                          if (currentUserDocument?.company != null) {
+                            // STEP 1: Search for available phone numbers with the area code
+                            _model.searchResult = await TwillioGroup.searchNumberCall.call(
+                              areaCode: _model.dropDownValue,
                             );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  getJsonField(
-                                    (_model.apiResult73a?.jsonBody ?? ''),
-                                    r'''$.message''',
-                                  )?.toString() ?? 
-                                  _model.apiResult73a?.bodyText ?? 
-                                  'Failed to purchase phone number. Please try again.',
-                                  style: TextStyle(
-                                    color: FlutterFlowTheme.of(context)
-                                        .primaryBackground,
+                            
+                            if ((_model.searchResult?.statusCode ?? 0) == 200) {
+                              // Get available phone numbers from search result
+                              _model.availableNumbers = TwillioGroup.searchNumberCall.phoneNumbers(
+                                (_model.searchResult?.jsonBody ?? ''),
+                              );
+                              
+                              if (_model.availableNumbers != null && _model.availableNumbers!.isNotEmpty) {
+                                // STEP 2: Get the first available phone number
+                                _model.selectedPhoneNumber = getJsonField(
+                                  _model.availableNumbers!.first,
+                                  r'''$.phone_number''',
+                                )?.toString();
+                                
+                                if (_model.selectedPhoneNumber != null && _model.selectedPhoneNumber!.isNotEmpty) {
+                                  // STEP 3: Buy the phone number from Twilio
+                                  _model.buyResult = await TwillioGroup.buyPhoneNumberCall.call(
+                                    phonenNumber: _model.selectedPhoneNumber,
+                                    friendlyName: _model.comapny?.name,
+                                  );
+                                  
+                                  if ((_model.buyResult?.statusCode ?? 0) == 201) {
+                                    // Get the purchased phone number from the response
+                                    final purchasedNumber = getJsonField(
+                                      (_model.buyResult?.jsonBody ?? ''),
+                                      r'''$.phone_number''',
+                                    )?.toString();
+                                    
+                                    // STEP 4: Register the phone number in VoiceService
+                                    _model.apiResult73a = await VoiceServiceGroup.createPhoneNumberCall.call(
+                                      number: purchasedNumber,
+                                      name: _model.comapny?.name,
+                                    );
+
+                                    if (_model.apiResult73a?.succeeded == true || (_model.apiResult73a?.statusCode ?? 0) == 201) {
+                                      // Update company with the new phone number
+                                      await currentUserDocument!.company!.update({
+                                        ...mapToFirestore(
+                                          {
+                                            'companyPhoneNumbers': FieldValue.arrayUnion([
+                                              VoiceServiceGroup.createPhoneNumberCall.number(
+                                                (_model.apiResult73a?.jsonBody ?? ''),
+                                              )
+                                            ]),
+                                            'phoneNumberMap': FieldValue.arrayUnion([
+                                              getPhoneNumberFirestoreData(
+                                                updatePhoneNumberStruct(
+                                                  PhoneNumberStruct(
+                                                    id: VoiceServiceGroup.createPhoneNumberCall.id(
+                                                      (_model.apiResult73a?.jsonBody ?? ''),
+                                                    ),
+                                                    phoneNumber: VoiceServiceGroup.createPhoneNumberCall.number(
+                                                      (_model.apiResult73a?.jsonBody ?? ''),
+                                                    ),
+                                                    forwardingNumber: _model.textController.text,
+                                                    label: Labels.inbound_outbound,
+                                                  ),
+                                                  clearUnsetFields: false,
+                                                ),
+                                                true,
+                                              )
+                                            ]),
+                                          },
+                                        ),
+                                      });
+                                      
+                                      // Close loading dialog
+                                      Navigator.pop(context);
+                                      
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Phone Number ${purchasedNumber ?? ""} purchased successfully',
+                                            style: TextStyle(
+                                              color: FlutterFlowTheme.of(context).primaryBackground,
+                                            ),
+                                          ),
+                                          duration: Duration(milliseconds: 4000),
+                                          backgroundColor: Color(0xFF45A671),
+                                        ),
+                                      );
+                                      
+                                      // Close the buy number component
+                                      Navigator.pop(context);
+                                    } else {
+                                      // Close loading dialog
+                                      Navigator.pop(context);
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        SnackBar(
+                                          content: Text(
+                                            'Phone number purchased but failed to register. Please contact support.',
+                                            style: TextStyle(
+                                              color: FlutterFlowTheme.of(context).primaryBackground,
+                                            ),
+                                          ),
+                                          duration: Duration(milliseconds: 4000),
+                                          backgroundColor: Color(0xFFE6425D),
+                                        ),
+                                      );
+                                    }
+                                  } else {
+                                    // Close loading dialog
+                                    Navigator.pop(context);
+                                    ScaffoldMessenger.of(context).showSnackBar(
+                                      SnackBar(
+                                        content: Text(
+                                          getJsonField(
+                                            (_model.buyResult?.jsonBody ?? ''),
+                                            r'''$.message''',
+                                          )?.toString() ?? 
+                                          'Failed to purchase phone number from Twilio. Please try again.',
+                                          style: TextStyle(
+                                            color: FlutterFlowTheme.of(context).primaryBackground,
+                                          ),
+                                        ),
+                                        duration: Duration(milliseconds: 4000),
+                                        backgroundColor: Color(0xFFE6425D),
+                                      ),
+                                    );
+                                  }
+                                } else {
+                                  // Close loading dialog
+                                  Navigator.pop(context);
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Could not extract phone number from search results.',
+                                        style: TextStyle(
+                                          color: FlutterFlowTheme.of(context).primaryBackground,
+                                        ),
+                                      ),
+                                      duration: Duration(milliseconds: 4000),
+                                      backgroundColor: Color(0xFFE6425D),
+                                    ),
+                                  );
+                                }
+                              } else {
+                                // Close loading dialog
+                                Navigator.pop(context);
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'No phone numbers available for area code ${_model.dropDownValue}. Please try a different area code.',
+                                      style: TextStyle(
+                                        color: FlutterFlowTheme.of(context).primaryBackground,
+                                      ),
+                                    ),
+                                    duration: Duration(milliseconds: 4000),
+                                    backgroundColor: Color(0xFFE6425D),
                                   ),
+                                );
+                              }
+                            } else {
+                              // Close loading dialog
+                              Navigator.pop(context);
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    'Failed to search for available phone numbers. Please try again.',
+                                    style: TextStyle(
+                                      color: FlutterFlowTheme.of(context).primaryBackground,
+                                    ),
+                                  ),
+                                  duration: Duration(milliseconds: 4000),
+                                  backgroundColor: Color(0xFFE6425D),
                                 ),
-                                duration: Duration(milliseconds: 4000),
-                                backgroundColor: Color(0xFFE6425D),
-                              ),
+                              );
+                            }
+                          } else {
+                            // Close loading dialog
+                            Navigator.pop(context);
+                            await showDialog(
+                              context: context,
+                              builder: (alertDialogContext) {
+                                return AlertDialog(
+                                  title: Text('Invalid Action'),
+                                  content: Text(
+                                      'Sorry Company information doesn\'t exist. Please complete your profile setup.'),
+                                  actions: [
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.pop(alertDialogContext),
+                                      child: Text('Ok'),
+                                    ),
+                                  ],
+                                );
+                              },
                             );
                           }
-
-                          // Close loading dialog
-                          Navigator.pop(context);
-                          // Close the buy number component
-                          Navigator.pop(context);
-                        } else {
-                          // Close loading dialog
-                          Navigator.pop(context);
-                          await showDialog(
-                            context: context,
-                            builder: (alertDialogContext) {
-                              return AlertDialog(
-                                title: Text('Invalid Action'),
-                                content: Text(
-                                    'Sorry Company information doesn\'t exist. Please complete your profile setup.'),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.pop(alertDialogContext),
-                                    child: Text('Ok'),
-                                  ),
-                                ],
-                              );
-                            },
-                          );
-                        }
                         } catch (e) {
                           // Close loading dialog on error
                           Navigator.pop(context);

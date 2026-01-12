@@ -29,17 +29,22 @@ class BuyNumberComponentModel
   TextEditingController? textController;
   String? Function(BuildContext, String?)? textControllerValidator;
   String? _textControllerValidator(BuildContext context, String? val) {
-    if (val == null || val.isEmpty) {
-      return '+1234567890 is required';
-    }
-
+    // Forwarding number is optional, so no validation required
     return null;
   }
 
   // Stores action output result for [Backend Call - Read Document] action in SignInBtn widget.
   CompanyRecord? comapny;
+  // Stores action output result for [Backend Call - API (Search Number)] action in SignInBtn widget.
+  ApiCallResponse? searchResult;
+  // Stores action output result for [Backend Call - API (Buy Phone Number)] action in SignInBtn widget.
+  ApiCallResponse? buyResult;
   // Stores action output result for [Backend Call - API (Create Phone Number)] action in SignInBtn widget.
   ApiCallResponse? apiResult73a;
+  // Available phone numbers from search
+  List<dynamic>? availableNumbers;
+  // Selected phone number from available list
+  String? selectedPhoneNumber;
 
   @override
   void initState(BuildContext context) {
