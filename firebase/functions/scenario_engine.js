@@ -12,6 +12,84 @@ const REGION = "us-central1";
 const PROJECT_ID = process.env.GCLOUD_PROJECT;
 const BASE_FUNCTION_URL = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net`;
 
+// Default voices by language (Google Cloud TTS WaveNet via Twilio - highest quality)
+const DEFAULT_VOICES = {
+  "he": "Google.he-IL-Wavenet-A",
+  "he-IL": "Google.he-IL-Wavenet-A",
+  "en": "Polly.Joanna",
+  "en-US": "Polly.Joanna",
+  "en-GB": "Polly.Amy",
+  "ar": "Google.ar-XA-Wavenet-A",
+  "ar-XA": "Google.ar-XA-Wavenet-A",
+};
+
+// Default Hebrew voice (for backward compatibility)
+const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-A";
+// Default English voice (for backward compatibility)
+const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
+
+/**
+ * Resolve the best TTS voice for the given language.
+ *
+ * Twilio <Say> only supports Polly.* and Google.* voice IDs.
+ * Any other voice (OpenAI, ElevenLabs, Deepgram, etc.) is swapped to the
+ * best Twilio-compatible voice for the target language.
+ * For Hebrew → Google.he-IL-Wavenet-A (highest quality Hebrew TTS).
+ *
+ * @param {string} voiceId - The voice ID from the assistant definition
+ * @param {string} language - Language code (e.g., "he-IL", "en-US", "ar")
+ * @returns {string} Twilio-compatible voice ID
+ */
+function resolveVoiceForLanguage(voiceId, language) {
+  if (!language) {
+    language = "he-IL"; // Default to Hebrew
+  }
+
+  const lang = language.toLowerCase();
+  const isTwilioVoice =
+    voiceId && (voiceId.startsWith("Polly.") || voiceId.startsWith("Google."));
+
+  // Check if we have a default voice for this language
+  const defaultVoice = DEFAULT_VOICES[lang] || DEFAULT_VOICES[language] || null;
+
+  // If it's a valid Twilio voice and matches the language, keep it
+  if (isTwilioVoice) {
+    // For Hebrew: only keep Google.he-* voices
+    if (lang.startsWith("he") && voiceId.startsWith("Google.") && voiceId.includes("he-IL")) {
+      return voiceId;
+    }
+    // For English: keep Polly or Google.en-* voices
+    if (lang.startsWith("en") && (voiceId.startsWith("Polly.") || (voiceId.startsWith("Google.") && voiceId.includes("en-")))) {
+      return voiceId;
+    }
+    // For Arabic: keep Google.ar-* voices
+    if (lang.startsWith("ar") && voiceId.startsWith("Google.") && voiceId.includes("ar-")) {
+      return voiceId;
+    }
+    // For other languages, if it's a valid Twilio voice, keep it
+    if (!lang.startsWith("he") && !lang.startsWith("en") && !lang.startsWith("ar")) {
+      return voiceId;
+    }
+  }
+
+  // Use default voice for the language, or fallback
+  if (defaultVoice) {
+    return defaultVoice;
+  }
+
+  // Fallback based on language
+  if (lang.startsWith("he")) {
+    return DEFAULT_HEBREW_VOICE;
+  } else if (lang.startsWith("en")) {
+    return DEFAULT_ENGLISH_VOICE;
+  } else if (lang.startsWith("ar")) {
+    return DEFAULT_VOICES["ar"] || DEFAULT_VOICES["ar-XA"] || DEFAULT_ENGLISH_VOICE;
+  }
+
+  // Ultimate fallback to English
+  return DEFAULT_ENGLISH_VOICE;
+}
+
 /**
  * Replace {{placeholder}} tokens with actual values from context
  */
@@ -97,8 +175,8 @@ function processStartNode(node, context, scenario) {
 function processSayNode(node, context, scenario, twimlResponse) {
   const data = node.data || {};
   const text = replacePlaceholders(data.text || "", context);
-  const voice = data.voice || context.defaultVoice || "Polly.Joanna";
-  const language = data.language || context.defaultLanguage || "en-US";
+  const language = data.language || context.defaultLanguage || "he-IL";
+  const voice = resolveVoiceForLanguage(data.voice || context.defaultVoice, language);
 
   if (text) {
     twimlResponse.say({voice, language}, text);
@@ -117,8 +195,8 @@ function processSayNode(node, context, scenario, twimlResponse) {
 function processGatherNode(node, context, scenario, twimlResponse, callSessionId) {
   const data = node.data || {};
   const prompt = replacePlaceholders(data.prompt || "", context);
-  const voice = data.voice || context.defaultVoice || "Polly.Joanna";
-  const language = data.language || context.defaultLanguage || "en-US";
+  const language = data.language || context.defaultLanguage || "he-IL";
+  const voice = resolveVoiceForLanguage(data.voice || context.defaultVoice, language);
   const timeout = data.timeout || 5;
   const inputType = data.inputType || "speech";
 
@@ -351,11 +429,12 @@ function processTransferNode(node, context, scenario, twimlResponse) {
   const data = node.data || {};
   const destination = replacePlaceholders(data.destination || "", context);
   const announcement = replacePlaceholders(data.announcement || "", context);
-  const voice = data.voice || context.defaultVoice || "Polly.Joanna";
+  const language = data.language || context.defaultLanguage || "he-IL";
+  const voice = resolveVoiceForLanguage(data.voice || context.defaultVoice, language);
   const timeout = data.timeout || 30;
 
   if (announcement) {
-    twimlResponse.say({voice}, announcement);
+    twimlResponse.say({voice, language}, announcement);
   }
 
   const dial = twimlResponse.dial({
@@ -381,7 +460,8 @@ function processTransferNode(node, context, scenario, twimlResponse) {
 function processRecordNode(node, context, scenario, twimlResponse, callSessionId) {
   const data = node.data || {};
   const action = data.action || "start";
-  const voice = context.defaultVoice || "Polly.Joanna";
+  const language = context.defaultLanguage || "he-IL";
+  const voice = resolveVoiceForLanguage(context.defaultVoice, language);
 
   if (action === "start") {
     const nextNode = findDefaultNextNode(scenario, node.id);
@@ -501,10 +581,11 @@ async function processUpdateLeadNode(node, context, scenario) {
 function processEndNode(node, context, scenario, twimlResponse) {
   const data = node.data || {};
   const message = replacePlaceholders(data.message || "תודה. להתראות!", context);
-  const voice = data.voice || context.defaultVoice || "Polly.Joanna";
+  const language = data.language || context.defaultLanguage || "he-IL";
+  const voice = resolveVoiceForLanguage(data.voice || context.defaultVoice, language);
 
   if (message) {
-    twimlResponse.say({voice}, message);
+    twimlResponse.say({voice, language}, message);
   }
   twimlResponse.hangup();
 
@@ -524,7 +605,7 @@ async function processNode(nodeId, scenario, context, callSessionId) {
 
   if (!node) {
     logger.error(`Node ${nodeId} not found in scenario ${scenario.id}`);
-    twimlResponse.say({voice: "Polly.Joanna"}, "An error occurred. Please try again later.");
+    twimlResponse.say({voice: DEFAULT_HEBREW_VOICE, language: "he-IL"}, "אירעה שגיאה. אנא נסה שוב מאוחר יותר.");
     twimlResponse.hangup();
     return {twiml: twimlResponse.toString(), finalStatus: "error"};
   }
@@ -598,7 +679,7 @@ async function processNode(nodeId, scenario, context, callSessionId) {
 
   if (iterations >= MAX_ITERATIONS) {
     logger.error(`Max iterations reached in scenario ${scenario.id}`);
-    twimlResponse.say({voice: "Polly.Joanna", language: "he-IL"}, "אירעה שגיאה. להתראות.");
+    twimlResponse.say({voice: DEFAULT_HEBREW_VOICE, language: "he-IL"}, "אירעה שגיאה. להתראות.");
     twimlResponse.hangup();
   }
 
@@ -679,8 +760,8 @@ async function initializeScenarioSession(callSessionId, scenarioId, initialConte
     scenarioContext: {
       variables: {},
       ...initialContext,
-      defaultVoice: scenario.settings?.defaultVoice || "Polly.Joanna",
-      defaultLanguage: scenario.settings?.defaultLanguage || "en-US",
+      defaultVoice: scenario.settings?.defaultVoice || DEFAULT_HEBREW_VOICE,
+      defaultLanguage: scenario.settings?.defaultLanguage || "he-IL",
     },
     scenarioStartedAt: FieldValue.serverTimestamp(),
   }, {merge: true});

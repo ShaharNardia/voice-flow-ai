@@ -63,27 +63,31 @@ function escapeSsml(text = "") {
     .replace(/'/g, "&apos;");
 }
 
-async function listGoogleVoices() {
-  if (googleVoicesCache && googleVoicesCache.expiresAt > now()) {
+async function listGoogleVoices(languageCode) {
+  const lang = languageCode || "he-IL";
+  // Use cache only when requesting default he-IL
+  if (lang === "he-IL" && googleVoicesCache && googleVoicesCache.expiresAt > now()) {
     return googleVoicesCache.value;
   }
   const [response] = await googleTtsClient.listVoices();
   const voices = (response.voices || [])
-    .filter((voice) => (voice.languageCodes || []).includes("he-IL"))
+    .filter((voice) => (voice.languageCodes || []).includes(lang))
     .map((voice) => ({
       id: voice.name,
       name: voice.name,
-      languageCode: "he-IL",
+      languageCode: lang,
       gender: voice.ssmlGender || "NEUTRAL",
       naturalSampleRateHertz: voice.naturalSampleRateHertz || null,
       description: voice.name.includes("Wavenet")
         ? "Google Neural Wavenet voice"
         : "Google standard neural voice",
     }));
-  googleVoicesCache = {
-    value: voices,
-    expiresAt: now() + CACHE_TTL_MS,
-  };
+  if (lang === "he-IL") {
+    googleVoicesCache = {
+      value: voices,
+      expiresAt: now() + CACHE_TTL_MS,
+    };
+  }
   return voices;
 }
 
@@ -164,15 +168,22 @@ async function listElevenLabsVoices() {
   return voices;
 }
 
-async function synthesizeWithGoogle({text, voiceId, speakingRate, pitch}) {
-  if (!voiceId) {
-    throw new Error("voiceId is required for Google TTS synthesize.");
-  }
+// Default Hebrew voice IDs per provider
+const DEFAULT_VOICE_IDS = {
+  google: "he-IL-Wavenet-A",
+  azure: "he-IL-HilaNeural",
+  elevenlabs: null, // Uses first available voice from API
+};
+
+async function synthesizeWithGoogle({text, voiceId, languageCode, speakingRate, pitch}) {
+  const resolvedVoiceId = voiceId || DEFAULT_VOICE_IDS.google;
+  // Infer language code from voice name if not provided (e.g. "he-IL-Wavenet-A" → "he-IL")
+  const resolvedLanguage = languageCode || (resolvedVoiceId.match(/^([a-z]{2}-[A-Z]{2})/)?.[1]) || "he-IL";
   const request = {
     input: {text},
     voice: {
-      languageCode: "he-IL",
-      name: voiceId,
+      languageCode: resolvedLanguage,
+      name: resolvedVoiceId,
     },
     audioConfig: {
       audioEncoding: "MP3",
@@ -188,7 +199,7 @@ async function synthesizeWithGoogle({text, voiceId, speakingRate, pitch}) {
   };
 }
 
-async function synthesizeWithAzure({text, voiceId, speakingRate, style}) {
+async function synthesizeWithAzure({text, voiceId, languageCode, speakingRate, style}) {
   const apiKey = process.env.AZURE_TTS_KEY;
   const region = process.env.AZURE_TTS_REGION;
   if (!apiKey || !region) {
@@ -196,9 +207,9 @@ async function synthesizeWithAzure({text, voiceId, speakingRate, style}) {
       "Azure Text-to-Speech configuration missing. Set AZURE_TTS_KEY and AZURE_TTS_REGION.",
     );
   }
-  if (!voiceId) {
-    throw new Error("voiceId is required for Azure TTS synthesize.");
-  }
+  const resolvedVoiceId = voiceId || DEFAULT_VOICE_IDS.azure;
+  // Infer language from voice name (e.g. "he-IL-HilaNeural" → "he-IL")
+  const resolvedLanguage = languageCode || (resolvedVoiceId.match(/^([a-z]{2}-[A-Z]{2})/)?.[1]) || "he-IL";
   const url = `https://${region}.tts.speech.microsoft.com/cognitiveservices/v1`;
   const prosodyAttrs = [];
   if (speakingRate) {
@@ -207,8 +218,8 @@ async function synthesizeWithAzure({text, voiceId, speakingRate, style}) {
   const styleOpen = style ? `<mstts:express-as style='${style}'>` : "";
   const styleClose = style ? "</mstts:express-as>" : "";
   const ssml =
-    "<speak version='1.0' xml:lang='he-IL' xmlns:mstts='https://www.w3.org/2001/mstts'>" +
-    `<voice xml:lang='he-IL' name='${voiceId}'>` +
+    `<speak version='1.0' xml:lang='${resolvedLanguage}' xmlns:mstts='https://www.w3.org/2001/mstts'>` +
+    `<voice xml:lang='${resolvedLanguage}' name='${resolvedVoiceId}'>` +
     (prosodyAttrs.length > 0
       ? `<prosody ${prosodyAttrs.join(" ")}>${styleOpen}${escapeSsml(text)}${styleClose}</prosody>`
       : `${styleOpen}${escapeSsml(text)}${styleClose}`) +
@@ -270,11 +281,12 @@ exports.listTtsVoices = onRequest(
   try {
     const body = parseBody(req);
     const provider = validateProvider((body.provider || body.providerId || "").toLowerCase());
+    const languageCode = body.languageCode || body.language || null;
     let voices;
     let cached = false;
     if (provider === "google") {
       cached = !!(googleVoicesCache && googleVoicesCache.expiresAt > now());
-      voices = await listGoogleVoices();
+      voices = await listGoogleVoices(languageCode);
     } else if (provider === "azure") {
       cached = !!(azureVoicesCache && azureVoicesCache.expiresAt > now());
       voices = await listAzureVoices();
@@ -320,6 +332,7 @@ exports.synthesizeTts = onRequest(
     const provider = validateProvider((body.provider || body.providerId || "").toLowerCase());
     const voiceId = body.voiceId || body.voice || null;
     const text = body.text || "שלום! זהו קטע הדגמה של מערכת הטקסט לדיבור שלנו.";
+    const languageCode = body.languageCode || body.language || null;
     const options = body.options || {};
 
     let result;
@@ -327,6 +340,7 @@ exports.synthesizeTts = onRequest(
       result = await synthesizeWithGoogle({
         text,
         voiceId,
+        languageCode,
         speakingRate: body.speakingRate || options.speakingRate,
         pitch: body.pitch || options.pitch,
       });
@@ -334,6 +348,7 @@ exports.synthesizeTts = onRequest(
       result = await synthesizeWithAzure({
         text,
         voiceId,
+        languageCode,
         speakingRate: body.speakingRate || options.speakingRate,
         style: body.style || options.style,
       });

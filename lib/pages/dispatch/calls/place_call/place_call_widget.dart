@@ -406,8 +406,8 @@ class _PlaceCallWidgetState extends State<PlaceCallWidget> {
                     'assistantName': company?.assistantname ?? 'your assistant',
                     'companyName': company?.name ?? 'our company',
                     'name': company?.assistantname ?? 'Assistant',
-                    'voice': company?.voice ?? 'Polly.Joanna',
-                    'language': company?.language ?? 'en-US',
+                    'voice': company?.voice ?? 'Google.he-IL-Wavenet-A',
+                    'language': company?.language ?? 'he-IL',
                   },
                   metadata: {
                     'company': company?.name,

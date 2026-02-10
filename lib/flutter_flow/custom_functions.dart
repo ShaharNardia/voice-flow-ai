@@ -640,8 +640,17 @@ $service
 [Style]  
 Maintain a professional yet approachable tone suitable for the industry. Adapt your personality to fit the company's brand, being friendly for home services or formal for legal services. Use clear and concise language with natural contractions. Display confidence when discussing industry-specific topics while being patient and attentive, with a hint of wit to create a friendly atmosphere.
 
+[Natural Conversation Flow - CRITICAL]
+You MUST sound like a real human customer service representative, NOT a robot. Follow these rules:
+- When you need a moment to think or process, use natural Hebrew filler phrases like: "רגע אחד...", "בוא נראה...", "אממ...", "כן, אני בודק את זה...", "שנייה, אני מסתכל...", "בסדר גמור, תן לי רגע..."
+- NEVER leave silence longer than 1 second without saying something. If processing takes time, immediately say a filler phrase.
+- Use warm acknowledgment phrases: "מצוין!", "נהדר!", "בטח!", "בשמחה!", "אין בעיה!", "אני מבין..."
+- Mirror the caller's energy and pace. If they speak fast, respond promptly. If they are relaxed, match that tone.
+- Use "אני" (I) not "אנחנו" (we) when referring to yourself. Use "אנחנו" only when referring to the company.
+- Add brief verbal nods during the caller's speech: "כן", "נכון", "מבין", "אוקיי"
+
 [Response Guidelines]  
-Use "first," "second," "third," etc., when presenting multiple options. Allow the caller to respond fully before moving on, and prompt if there's a pause longer than 5 seconds by asking, "Are you still there?" Immediately disconnect spam or advertisement calls. Verify email addresses by spelling them out and confirming correct spelling.
+Use "ראשית," "שנית," "שלישית," etc., when presenting multiple options in Hebrew. Allow the caller to respond fully before moving on, and prompt if there's a pause longer than 5 seconds by asking, "אתה עדיין איתי?" or "Are you still there?" depending on the language. Immediately disconnect spam or advertisement calls. Verify email addresses by spelling them out and confirming correct spelling.
 
 [Task & Goals]  
 1. Answer incoming calls with: "Thank you for calling $companyName. This is $agentName, your AI dispatcher. How may I help you today?"
@@ -654,11 +663,11 @@ Use "first," "second," "third," etc., when presenting multiple options. Allow th
 7. Call the "createJob" function only once with [userName], [userEmail], [title] (generate this title yourself from the {{summary}} analysis), [jobDescription], [userPhoneNumber] (the phone number of the user calling {{customer.number}}), [address] (user address where the job needs to be done), [requestedTime] (the time when user needs the job to be done). Once the information is stored and server returns successful message, politely end the conversation by saying "Your appointment has been scheduled successfully at [requestedTime]. Goodbye (end the call).
 
 [Error Handling / Fallback]  
-If the input is unclear, request clarification politely. Should you encounter any issues, inform the customer and ask them to repeat. For off-topic inquiries, gently redirect to industry-related topics. Use humor to maintain a light atmosphere if necessary: “Well, I'm a super-smart AI focusing on $industry! For anything else, I might have to take a robot nap!”
+If the input is unclear, request clarification politely with warmth: "סליחה, לא שמעתי טוב. אפשר לחזור על זה?" or "I didn't quite catch that, could you repeat?" Should you encounter any issues, inform the customer and ask them to repeat. For off-topic inquiries, gently redirect to industry-related topics.
 If any time in the call user want to talk to human call "transfer_call_tool" with $fallbackNumber
 
 [Call Closing]  
-If the customer says goodbye, reciprocate and hang up. Offer additional assistance: "Is there anything else I can help you with today?" Thank the customer: "Thank you for choosing $companyName. Have a fantastic day!"
+If the customer says goodbye, reciprocate warmly and hang up. Offer additional assistance: "Is there anything else I can help you with today?" or "יש עוד משהו שאני יכול לעזור בו?" Thank the customer: "Thank you for choosing $companyName. Have a fantastic day!" or "תודה שבחרת ב-$companyName. יום מצוין!"
 ''';
 
   // Return the final prompt template
@@ -832,21 +841,30 @@ $service
 [Style]  
 Maintain a professional yet approachable tone suitable for the industry. Adapt your personality to fit the company's brand, being friendly for home services or formal for legal services. Use clear and concise language with natural contractions. Display confidence when discussing industry-specific topics while being patient and attentive, with a hint of wit to create a friendly atmosphere.
 
+[Natural Conversation Flow - CRITICAL]
+You MUST sound like a real human customer service representative, NOT a robot. Follow these rules:
+- When you need a moment to think or process, use natural Hebrew filler phrases like: "רגע אחד...", "בוא נראה...", "אממ...", "כן, אני בודק את זה...", "שנייה, אני מסתכל...", "בסדר גמור, תן לי רגע..."
+- NEVER leave silence longer than 1 second without saying something. If processing takes time, immediately say a filler phrase.
+- Use warm acknowledgment phrases: "מצוין!", "נהדר!", "בטח!", "בשמחה!", "אין בעיה!", "אני מבין..."
+- Mirror the caller's energy and pace. If they speak fast, respond promptly. If they are relaxed, match that tone.
+- Use "אני" (I) not "אנחנו" (we) when referring to yourself. Use "אנחנו" only when referring to the company.
+- Add brief verbal nods during the caller's speech: "כן", "נכון", "מבין", "אוקיי"
+
 [Response Guidelines]  
-Use "first," "second," "third," etc., when presenting multiple options. Allow the caller to respond fully before moving on, and prompt if there's a pause longer than 5 seconds by asking, "Are you still there?" Immediately disconnect spam or advertisement calls. Verify email addresses by spelling them out and confirming correct spelling.
+Use "ראשית," "שנית," "שלישית," etc., when presenting multiple options in Hebrew. Allow the caller to respond fully before moving on, and prompt if there's a pause longer than 5 seconds by asking, "אתה עדיין איתי?" or "Are you still there?" depending on the language. Immediately disconnect spam or advertisement calls. Verify email addresses by spelling them out and confirming correct spelling.
 
 [Task & Goals]  
 1. Reach out to customer with: "Hey {{full_name}} this is James from $companyName. I came to know that you have {{service}} issue. Please provide the necessary information so I can book an appointment. Start with collection the following information for customer"   
 4. Ask for the preferred service time: "When would you like the service to be done?" Convert relative times to exact datetime using the {{now}} as reference, formatted in RFC 3339.  
 5. Collect user details one by one: Ask for full name, then email address, then job address. Confirm the email by spelling it back.  
 6. Confirm the appointment details: "Thank you! Just to confirm, we have collected your details for a [jobTitle] on [datetime] at [address]. I am booking your appointment."  
-7. Call the "createJob" function only once with [userName], [userEmail], [title] (generate this title yourself from the {{summary}} analysis), [jobDescription], [userPhoneNumber] (the phone number of the user calling {{customer.number}}), [address] (user address where the job needs to be done), [requestedTime] (the time when user needs the job to be done). Once the information is stored and server returns successful message, politely end the conversation by saying "Your appointment has been scheduled successfully at [requestedTime]. Goodby (end the call).
+7. Call the "createJob" function only once with [userName], [userEmail], [title] (generate this title yourself from the {{summary}} analysis), [jobDescription], [userPhoneNumber] (the phone number of the user calling {{customer.number}}), [address] (user address where the job needs to be done), [requestedTime] (the time when user needs the job to be done). Once the information is stored and server returns successful message, politely end the conversation by saying "Your appointment has been scheduled successfully at [requestedTime]. Goodbye (end the call).
 
 [Error Handling / Fallback]  
-If the input is unclear, request clarification politely. Should you encounter any issues, inform the customer and ask them to repeat. For off-topic inquiries, gently redirect to industry-related topics. Use humor to maintain a light atmosphere if necessary: “Well, I’m a super-smart AI focusing on [specific industry]! For anything else, I might have to take a robot nap!”
+If the input is unclear, request clarification politely with warmth: "סליחה, לא שמעתי טוב. אפשר לחזור על זה?" or "I didn't quite catch that, could you repeat?" Should you encounter any issues, inform the customer and ask them to repeat. For off-topic inquiries, gently redirect to industry-related topics.
 
 [Call Closing]  
-If the customer says goodbye, reciprocate and hang up. Offer additional assistance: "Is there anything else I can help you with today?" Thank the customer: "Thank you for choosing AI Dispatch. Have a fantastic day!"
+If the customer says goodbye, reciprocate warmly and hang up. Offer additional assistance: "Is there anything else I can help you with today?" or "יש עוד משהו שאני יכול לעזור בו?" Thank the customer: "Thank you for choosing AI Dispatch. Have a fantastic day!" or "תודה שבחרת ב-AI Dispatch. יום מצוין!"
 ''';
 
   // Return the final prompt template
@@ -1247,6 +1265,21 @@ dynamic assistantBody(
   updatedJson['transcriber']['language'] = company.language;
   updatedJson['transcriber']['provider'] = company.provider;
   updatedJson['firstMessage'] = company.outboundmessage;
+  
+  // Enable natural conversation features for lowest latency & human-like behavior
+  updatedJson['backchannelingEnabled'] = true;
+  updatedJson['backgroundDenoisingEnabled'] = true;
+  updatedJson['silenceTimeoutSeconds'] = 30;
+  updatedJson['responseDelaySeconds'] = 0.4;
+  updatedJson['llmRequestDelaySeconds'] = 0.1;
+  updatedJson['numWordsToInterruptAssistant'] = 2;
+  updatedJson['maxDurationSeconds'] = 600;
+  
+  // Hebrew-specific filler injection for natural conversation
+  if (company.language != null && company.language!.startsWith('he')) {
+    updatedJson['fillerInjectionEnabled'] = true;
+  }
+  
   updatedJson.remove('id');
   updatedJson.remove('orgId');
   updatedJson.remove('isServerUrlSecretSet');
@@ -1481,6 +1514,8 @@ List<String> getlanguagesfor(String provider) {
       "De",
       "De-CH",
       "El",
+      "He",
+      "He-IL",  // Hebrew (Israel) - added for better Hebrew support
       "Hi",
       "Hu",
       "Id",
@@ -2219,6 +2254,8 @@ List<String> getlanguagesforoptions(String provider) {
       "fi",
       "fr",
       "fr-CA",
+      "he",
+      "he-IL",  // Hebrew (Israel) - added for better Hebrew support
       "hi",
       "hi-Latn",
       "hu",
@@ -3075,11 +3112,11 @@ List<String> modelforvoices(String provider) {
     ];
   } else if (provider == "11labs") {
     models = [
-      "eleven_multilingual_v2",  // Hebrew support - recommended
-      "eleven_flash_v2_5",
-      "eleven_flash_v2",
-      "eleven_turbo_v2_5",       // No Hebrew support
-      "eleven_turbo_v2",         // No Hebrew support
+      "eleven_flash_v2_5",       // Hebrew + low latency - RECOMMENDED
+      "eleven_flash_v2",         // Hebrew + low latency
+      "eleven_multilingual_v2",  // Hebrew - highest quality, slower
+      "eleven_turbo_v2_5",       // English only - fastest
+      "eleven_turbo_v2",         // English only
       "eleven_monolingual_v1"    // English only
     ];
   } else if (provider == "rime-ai") {
@@ -3124,12 +3161,12 @@ List<String> modelforvoicesoption(String provider) {
     ];
   } else if (provider == "11labs") {
     models = [
-      "Multilingual v2 (Hebrew)",  // Hebrew support - recommended
-      "Flash v2.5",
-      "Flash v2",
-      "Turbo v2.5 (English)",      // No Hebrew support
-      "Turbo v2 (English)",        // No Hebrew support
-      "Monolingual v1 (English)"   // English only
+      "Flash v2.5 (Hebrew, Fast ⚡)",      // Hebrew + low latency - RECOMMENDED
+      "Flash v2 (Hebrew)",                   // Hebrew + low latency
+      "Multilingual v2 (Hebrew, Best Quality)", // Hebrew - highest quality, slower
+      "Turbo v2.5 (English Only)",           // English only - fastest
+      "Turbo v2 (English Only)",             // English only
+      "Monolingual v1 (English Only)"        // English only
     ];
   } else if (provider == "rime-ai") {
     models = ["arcana", "mistv2", "mist"];
@@ -3842,5 +3879,61 @@ List<String>? providervalues() {
     'speechmaticsa',
     'talkscriber',
     'cartesia'
+  ];
+}
+
+/// Returns the recommended configuration for high-quality Hebrew phone bots.
+/// Includes best TTS provider/voice/model and best STT provider for Hebrew.
+Map<String, String> getHebrewRecommendedConfig() {
+  return {
+    // TTS (Text-to-Speech) - best Hebrew quality
+    'ttsProvider': '11labs',
+    'ttsModel': 'eleven_multilingual_v2',
+    'ttsVoice': 'rachel',
+    'ttsVoiceLabel': 'Rachel (Hebrew)',
+    // Alternative: Google Cloud TTS via Twilio
+    'ttsProviderAlt': 'google',
+    'ttsVoiceAlt': 'Google.he-IL-Wavenet-A',
+    'ttsVoiceLabelAlt': 'Google Wavenet Female A (Hebrew)',
+    // STT (Speech-to-Text) - best Hebrew quality
+    'sttProvider': 'google',
+    'sttLanguage': 'he-IL',
+    // Alternative STT
+    'sttProviderAlt': 'azure',
+    'sttLanguageAlt': 'he-IL',
+    // Language
+    'languageCode': 'he',
+    'languageLocale': 'he-IL',
+  };
+}
+
+/// Checks whether a given STT provider supports Hebrew.
+/// Returns false for providers known to NOT support Hebrew.
+/// Note: Deepgram DOES support Hebrew (he, he-IL) - updated 2025
+bool isProviderHebrewSupported(String provider) {
+  const unsupportedForHebrew = [
+    'assembly-ai',  // Does not support Hebrew
+    // Deepgram removed - it DOES support Hebrew
+  ];
+  return !unsupportedForHebrew.contains(provider.toLowerCase());
+}
+
+/// Returns the list of Google Hebrew Wavenet voices available via Twilio <Say>.
+List<String> googleHebrewVoiceLabels() {
+  return [
+    'Google Wavenet Female A (Hebrew)',
+    'Google Wavenet Male B (Hebrew)',
+    'Google Wavenet Female C (Hebrew)',
+    'Google Wavenet Male D (Hebrew)',
+  ];
+}
+
+/// Returns the corresponding voice IDs for Google Hebrew Wavenet voices.
+List<String> googleHebrewVoiceValues() {
+  return [
+    'Google.he-IL-Wavenet-A',
+    'Google.he-IL-Wavenet-B',
+    'Google.he-IL-Wavenet-C',
+    'Google.he-IL-Wavenet-D',
   ];
 }

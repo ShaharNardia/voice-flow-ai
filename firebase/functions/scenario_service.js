@@ -33,7 +33,7 @@ const NODE_TYPES = {
     label: "Say",
     color: "#2196F3",
     maxOutputs: 1,
-    defaultData: {text: "", voice: "Polly.Joanna", language: "en-US"},
+    defaultData: {text: "", voice: "Google.he-IL-Wavenet-A", language: "he-IL"},
   },
   gather: {
     label: "Gather Input",
@@ -231,8 +231,8 @@ exports.scenariosCreate = onRequest(corsOptions, async (req, res) => {
       edges: payload.edges || [],
       variables: payload.variables || {},
       settings: {
-        defaultVoice: payload.settings?.defaultVoice || "Polly.Joanna",
-        defaultLanguage: payload.settings?.defaultLanguage || "en-US",
+        defaultVoice: payload.settings?.defaultVoice || "Google.he-IL-Wavenet-A",
+        defaultLanguage: payload.settings?.defaultLanguage || "he-IL",
         recordCalls: payload.settings?.recordCalls || false,
         transcribeCalls: payload.settings?.transcribeCalls || false,
         maxDuration: payload.settings?.maxDuration || 600,

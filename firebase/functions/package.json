@@ -2,6 +2,8 @@
   "name": "cloud-functions",
   "description": "Firebase Cloud Functions",
   "dependencies": {
+    "@deepgram/sdk": "^3.13.0",
+    "@google-cloud/text-to-speech": "^5.7.0",
     "@sendgrid/mail": "^8.1.0",
     "axios": "1.8.2",
     "firebase-admin": "^11.11.0",
@@ -10,7 +12,7 @@
     "stripe": "^8.0.1",
     "twilio": "^4.22.0",
     "uuid": "^9.0.1",
-    "@google-cloud/text-to-speech": "^5.7.0"
+    "ws": "^8.19.0"
   },
   "devDependencies": {
     "eslint": "^8.57.0",

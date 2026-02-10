@@ -614,6 +614,77 @@ class _Startup4WidgetState extends State<Startup4Widget>
                                                                         width:
                                                                             10.0)),
                                                                   ),
+                                                                  // Button to set optimal Hebrew defaults
+                                                                  Padding(
+                                                                    padding: EdgeInsetsDirectional.fromSTEB(0.0, 10.0, 0.0, 10.0),
+                                                                    child: FFButtonWidget(
+                                                                      onPressed: () async {
+                                                                        // Set optimal Hebrew defaults
+                                                                        safeSetState(() {
+                                                                          // TTS Provider
+                                                                          _model.dropDownagentValue = '11labs';
+                                                                          _model.dropDownagentValueController?.value = '11labs';
+                                                                          
+                                                                          // Voice
+                                                                          _model.dropDownValue1 = 'rachel';
+                                                                          _model.dropDownValueController1?.value = 'rachel';
+                                                                          
+                                                                          // TTS Model
+                                                                          _model.dropDownValue2 = 'eleven_flash_v2_5';
+                                                                          _model.dropDownValueController2?.value = 'eleven_flash_v2_5';
+                                                                          
+                                                                          // STT Provider
+                                                                          _model.dropDownproviderValue = 'deepgram';
+                                                                          _model.dropDownproviderValueController?.value = 'deepgram';
+                                                                          
+                                                                          // Language
+                                                                          _model.dropDownlanguageValue = 'he';
+                                                                          _model.dropDownlanguageValueController?.value = 'he';
+                                                                          
+                                                                          // STT Model
+                                                                          _model.dropDownValue3 = 'nova-2';
+                                                                          _model.dropDownValueController3?.value = 'nova-2';
+                                                                          
+                                                                          // Inbound Message
+                                                                          _model.textController2?.text = 'שלום, כאן {{assistantName}} מחברת {{companyName}}. איך אפשר לעזור לך היום?';
+                                                                          
+                                                                          // Outbound Message
+                                                                          _model.textController3?.text = 'שלום {{clientName}}, כאן {{assistantName}} מחברת {{companyName}}. רציתי לדבר איתך על השירותים שלנו. יש לך רגע?';
+                                                                        });
+                                                                        
+                                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                                          SnackBar(
+                                                                            content: Text('✅ הוגדרו ערכים מומלצים לעברית: 11labs + rachel + Flash v2.5, Deepgram + nova-2'),
+                                                                            backgroundColor: FlutterFlowTheme.of(context).success,
+                                                                            duration: Duration(seconds: 3),
+                                                                          ),
+                                                                        );
+                                                                      },
+                                                                      text: 'הגדר ערכים מומלצים לעברית',
+                                                                      icon: Icon(
+                                                                        Icons.auto_awesome,
+                                                                        size: 16.0,
+                                                                      ),
+                                                                      options: FFButtonOptions(
+                                                                        height: 40.0,
+                                                                        padding: EdgeInsetsDirectional.fromSTEB(16.0, 0.0, 16.0, 0.0),
+                                                                        iconPadding: EdgeInsetsDirectional.fromSTEB(0.0, 0.0, 0.0, 0.0),
+                                                                        color: FlutterFlowTheme.of(context).primary,
+                                                                        textStyle: FlutterFlowTheme.of(context).titleSmall.override(
+                                                                          fontFamily: 'Inter Tight',
+                                                                          color: Colors.white,
+                                                                          fontSize: 14.0,
+                                                                          letterSpacing: 0.0,
+                                                                        ),
+                                                                        elevation: 2.0,
+                                                                        borderSide: BorderSide(
+                                                                          color: Colors.transparent,
+                                                                          width: 1.0,
+                                                                        ),
+                                                                        borderRadius: BorderRadius.circular(8.0),
+                                                                      ),
+                                                                    ),
+                                                                  ),
                                                                   Row(
                                                                     mainAxisSize:
                                                                         MainAxisSize
@@ -656,7 +727,7 @@ class _Startup4WidgetState extends State<Startup4Widget>
                                                                             child:
                                                                                 FlutterFlowDropDown<String>(
                                                                               controller: _model.dropDownagentValueController ??= FormFieldController<String>(
-                                                                                _model.dropDownagentValue ??= startup4CompanyRecord.agent != null && startup4CompanyRecord.agent != '' ? startup4CompanyRecord.agent : 'Paige',
+                                                                                _model.dropDownagentValue ??= startup4CompanyRecord.agent != null && startup4CompanyRecord.agent != '' ? startup4CompanyRecord.agent : '11labs',
                                                                               ),
                                                                               options: List<String>.from([
                                                                                 'vapi',
@@ -751,7 +822,7 @@ class _Startup4WidgetState extends State<Startup4Widget>
                                                                             ),
                                                                             FlutterFlowDropDown<String>(
                                                                               controller: _model.dropDownValueController1 ??= FormFieldController<String>(
-                                                                                _model.dropDownValue1 ??= startup4CompanyRecord.voice != null && startup4CompanyRecord.voice != '' ? startup4CompanyRecord.voice : '',
+                                                                                _model.dropDownValue1 ??= startup4CompanyRecord.voice != null && startup4CompanyRecord.voice != '' ? startup4CompanyRecord.voice : 'rachel',
                                                                               ),
                                                                               options: List<String>.from(functions.voiceforlabel(_model.dropDownagentValue!)),
                                                                               optionLabels: functions.voiceforlabelvalue(_model.dropDownagentValue!),
@@ -855,7 +926,7 @@ class _Startup4WidgetState extends State<Startup4Widget>
                                                                               FormFieldController<String>(
                                                                             _model.dropDownValue2 ??= startup4CompanyRecord.modelvoice != null && startup4CompanyRecord.modelvoice != ''
                                                                                 ? startup4CompanyRecord.modelvoice
-                                                                                : '',
+                                                                                : 'eleven_flash_v2_5',
                                                                           ),
                                                                           options:
                                                                               List<String>.from(functions.modelforvoices(_model.dropDownagentValue!)),
@@ -1075,7 +1146,7 @@ class _Startup4WidgetState extends State<Startup4Widget>
                                                                               .dropDownproviderValue ??= startup4CompanyRecord.provider != null &&
                                                                                   startup4CompanyRecord.provider != ''
                                                                               ? startup4CompanyRecord.provider
-                                                                              : '',
+                                                                              : 'deepgram',
                                                                         ),
                                                                         options:
                                                                             List<String>.from([
@@ -1189,7 +1260,7 @@ class _Startup4WidgetState extends State<Startup4Widget>
                                                                               FormFieldController<String>(
                                                                             _model.dropDownlanguageValue ??= startup4CompanyRecord.language != null && startup4CompanyRecord.language != ''
                                                                                 ? startup4CompanyRecord.language
-                                                                                : '',
+                                                                                : 'he',
                                                                           ),
                                                                           options:
                                                                               functions.getlanguagesforoptions(_model.dropDownproviderValue!),
@@ -1316,7 +1387,7 @@ class _Startup4WidgetState extends State<Startup4Widget>
                                                                               FormFieldController<String>(
                                                                             _model.dropDownValue3 ??= startup4CompanyRecord.modelname != null && startup4CompanyRecord.modelname != ''
                                                                                 ? startup4CompanyRecord.modelname
-                                                                                : '',
+                                                                                : 'nova-2',
                                                                           ),
                                                                           options:
                                                                               List<String>.from(functions.getmodelforoption(_model.dropDownproviderValue!)),
@@ -1488,7 +1559,7 @@ class _Startup4WidgetState extends State<Startup4Widget>
                                                                 text: widget!
                                                                             .update ==
                                                                         false
-                                                                    ? 'Hi, this is {{assistantName}} from {{companyName}}. How can I help you today.'
+                                                                    ? 'שלום, כאן {{assistantName}} מחברת {{companyName}}. איך אפשר לעזור לך היום?'
                                                                     : startup4CompanyRecord
                                                                         .inboundmessage,
                                                               ),
@@ -1758,7 +1829,7 @@ class _Startup4WidgetState extends State<Startup4Widget>
                                                                 text: widget!
                                                                             .update ==
                                                                         false
-                                                                    ? 'Hi {{clientName}}, this is {{assistantName}} from {{companyName}}. We offer an amazing dining experience, and I wanted to help you secure a reservation with us. Are you available for a reservation in the coming days?'
+                                                                    ? 'שלום {{clientName}}, כאן {{assistantName}} מחברת {{companyName}}. רציתי לדבר איתך על השירותים שלנו. יש לך רגע?'
                                                                     : startup4CompanyRecord
                                                                         .outboundmessage,
                                                               ),

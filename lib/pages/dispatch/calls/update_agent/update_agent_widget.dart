@@ -424,7 +424,7 @@ class _UpdateAgentWidgetState extends State<UpdateAgentWidget> {
                                                                             .dropDownValue ??= containerCompanyRecord.agent != null &&
                                                                                 containerCompanyRecord.agent != ''
                                                                             ? containerCompanyRecord.agent
-                                                                            : 'Paige',
+                                                                            : '11labs',
                                                                       ),
                                                                       options: List<
                                                                           String>.from([
@@ -637,7 +637,7 @@ class _UpdateAgentWidgetState extends State<UpdateAgentWidget> {
                                                                               String>(
                                                                             controller: _model.providerDropdownValueController ??=
                                                                                 FormFieldController<String>(
-                                                                              _model.providerDropdownValue ??= containerCompanyRecord.provider != null && containerCompanyRecord.provider != '' ? containerCompanyRecord.provider : '',
+                                                                              _model.providerDropdownValue ??= containerCompanyRecord.provider != null && containerCompanyRecord.provider != '' ? containerCompanyRecord.provider : 'deepgram',
                                                                             ),
                                                                             options:
                                                                                 List<String>.from(functions.providervalues()!),
@@ -717,7 +717,7 @@ class _UpdateAgentWidgetState extends State<UpdateAgentWidget> {
                                                                             ),
                                                                             FlutterFlowDropDown<String>(
                                                                               controller: _model.languageDropdownValueController ??= FormFieldController<String>(
-                                                                                _model.languageDropdownValue ??= containerCompanyRecord.language != null && containerCompanyRecord.language != '' ? containerCompanyRecord.language : '',
+                                                                                _model.languageDropdownValue ??= containerCompanyRecord.language != null && containerCompanyRecord.language != '' ? containerCompanyRecord.language : 'he',
                                                                               ),
                                                                               options: List<String>.from(functions.getlanguagesforoptions(_model.providerDropdownValue!)),
                                                                               optionLabels: functions.getlanguagesfor(_model.providerDropdownValue!),

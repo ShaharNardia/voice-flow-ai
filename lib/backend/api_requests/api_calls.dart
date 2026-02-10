@@ -697,13 +697,15 @@ class VoiceServiceConfigureNumberCall {
   Future<ApiCallResponse> call({
     String? phoneNumber = '',
     String? friendlyName = '',
+    String? companyId = '',
   }) async {
     final baseUrl = VoiceServiceGroup.getBaseUrl();
 
     final ffApiRequestBody = '''
 {
   "number": "${escapeStringForJson(phoneNumber)}",
-  "friendlyName": "${escapeStringForJson(friendlyName)}"
+  "friendlyName": "${escapeStringForJson(friendlyName)}",
+  "companyId": "${escapeStringForJson(companyId)}"
 }''';
     return ApiManager.instance.makeApiCall(
       callName: 'VoiceService Configure Number',
@@ -723,6 +725,15 @@ class VoiceServiceConfigureNumberCall {
       alwaysAllowBody: false,
     );
   }
+
+  String? id(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.id''',
+      ));
+  String? number(dynamic response) => castToType<String>(getJsonField(
+        response,
+        r'''$.number''',
+      ));
 }
 
 class VoiceServiceReleaseNumberCall {

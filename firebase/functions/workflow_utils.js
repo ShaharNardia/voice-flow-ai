@@ -179,13 +179,13 @@ function getAssistantConfigFromDocuments({companyDoc, leadDoc}) {
   const assistantConfig = {
     assistantId,
     name: assistantName,
-    voice: companyData?.voice || "en-US",
-    language: companyData?.language || "en",
+    voice: companyData?.voice || "Google.he-IL-Wavenet-A",
+    language: companyData?.language || "he-IL",
     systemPrompt:
       companyData?.inboundmessage ||
       companyData?.outboundmessage ||
-      "You are a helpful virtual assistant.",
-    firstMessage: companyData?.outboundmessage || "Hello, how can I help you today?",
+      "אתה עוזר וירטואלי מועיל.",
+    firstMessage: companyData?.outboundmessage || companyData?.inboundmessage || "שלום, איך אני יכול לעזור לך היום?",
     metadata: {
       companyId: companyDoc ? companyDoc.id : null,
       leadId: leadDoc ? leadDoc.id : null,

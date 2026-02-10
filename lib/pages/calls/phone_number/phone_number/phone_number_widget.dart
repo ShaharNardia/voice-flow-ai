@@ -227,70 +227,74 @@ class _PhoneNumberWidgetState extends State<PhoneNumberWidget> {
                                                                       .buyvonagenumberresponse
                                                                       ?.succeeded ??
                                                                   true)) {
-                                                                _model.vapiPhoneNumber =
-                                                                    await VoiceServiceGroup
-                                                                        .createPhoneNumberCall
-                                                                        .call(
-                                                                  number:
-                                                                      getJsonField(
-                                                                    TwillioGroup
-                                                                        .searchNumberCall
-                                                                        .phoneNumbers(
-                                                                          (_model.checkPhoneNumber?.jsonBody ??
-                                                                              ''),
-                                                                        )
-                                                                        ?.firstOrNull,
-                                                                    r'''$.phone_number''',
-                                                                  ).toString(),
-                                                                  name: _model
-                                                                      .comapny
-                                                                      ?.name,
-                                                                );
+                                                                // Get the purchased phone number from Twilio response
+                                                                final purchasedNumber = getJsonField(
+                                                                  (_model.buyvonagenumberresponse?.jsonBody ?? ''),
+                                                                  r'''$.phone_number''',
+                                                                )?.toString();
+                                                                
+                                                                if (purchasedNumber != null && purchasedNumber.isNotEmpty) {
+                                                                  // Use configureNumberCall since the number is already purchased in Twilio
+                                                                  _model.vapiPhoneNumber =
+                                                                      await VoiceServiceGroup
+                                                                          .configureNumberCall
+                                                                          .call(
+                                                                    phoneNumber: purchasedNumber,
+                                                                    friendlyName: _model
+                                                                        .comapny
+                                                                        ?.name,
+                                                                    companyId: currentUserDocument!
+                                                                        .company!
+                                                                        .id,
+                                                                  );
 
-                                                                if ((_model.vapiPhoneNumber
-                                                                            ?.statusCode ??
-                                                                        200) ==
-                                                                    201) {
-                                                                  await currentUserDocument!
-                                                                      .company!
-                                                                      .update({
-                                                                    ...mapToFirestore(
-                                                                      {
-                                                                        'companyPhoneNumbers':
-                                                                            FieldValue.arrayUnion([
-                                                                          VoiceServiceGroup
-                                                                              .createPhoneNumberCall
-                                                                              .number(
-                                                                            (_model.vapiPhoneNumber?.jsonBody ??
-                                                                                ''),
-                                                                          )
-                                                                        ]),
-                                                                        'phoneNumberMap':
-                                                                            FieldValue.arrayUnion([
-                                                                          getPhoneNumberFirestoreData(
-                                                                            updatePhoneNumberStruct(
-                                                                              PhoneNumberStruct(
-                                                                                id: VoiceServiceGroup.createPhoneNumberCall.id(
-                                                                                  (_model.vapiPhoneNumber?.jsonBody ?? ''),
+                                                                  if ((_model.vapiPhoneNumber
+                                                                              ?.statusCode ??
+                                                                          200) ==
+                                                                      201) {
+                                                                    // The configureNumberCall already updates Firestore if companyId is provided
+                                                                    // But we'll also update manually as a backup
+                                                                    await currentUserDocument!
+                                                                        .company!
+                                                                        .update({
+                                                                      ...mapToFirestore(
+                                                                        {
+                                                                          'companyPhoneNumbers':
+                                                                              FieldValue.arrayUnion([
+                                                                            VoiceServiceGroup
+                                                                                .configureNumberCall
+                                                                                .number(
+                                                                              (_model.vapiPhoneNumber?.jsonBody ??
+                                                                                  ''),
+                                                                            )
+                                                                          ]),
+                                                                          'phoneNumberMap':
+                                                                              FieldValue.arrayUnion([
+                                                                            getPhoneNumberFirestoreData(
+                                                                              updatePhoneNumberStruct(
+                                                                                PhoneNumberStruct(
+                                                                                  id: VoiceServiceGroup.configureNumberCall.id(
+                                                                                    (_model.vapiPhoneNumber?.jsonBody ?? ''),
+                                                                                  ),
+                                                                                  label: Labels.inbound_outbound,
+                                                                                  phoneNumber: VoiceServiceGroup.configureNumberCall.number(
+                                                                                    (_model.vapiPhoneNumber?.jsonBody ?? ''),
+                                                                                  ),
                                                                                 ),
-                                                                                label: Labels.inbound_outbound,
-                                                                                phoneNumber: VoiceServiceGroup.createPhoneNumberCall.number(
-                                                                                  (_model.vapiPhoneNumber?.jsonBody ?? ''),
-                                                                                ),
+                                                                                clearUnsetFields: false,
                                                                               ),
-                                                                              clearUnsetFields: false,
-                                                                            ),
-                                                                            true,
-                                                                          )
-                                                                        ]),
-                                                                      },
-                                                                    ),
-                                                                  });
-                                                                  _model.codeCheck =
-                                                                      _model.codeCheck! +
-                                                                          1;
-                                                                  safeSetState(
-                                                                      () {});
+                                                                              true,
+                                                                            )
+                                                                          ]),
+                                                                        },
+                                                                      ),
+                                                                    });
+                                                                    _model.codeCheck =
+                                                                        _model.codeCheck! +
+                                                                            1;
+                                                                    safeSetState(
+                                                                        () {});
+                                                                  }
                                                                 }
                                                               }
                                                             }
@@ -881,80 +885,85 @@ class _PhoneNumberWidgetState extends State<PhoneNumberWidget> {
                                                                                     .buyvonagenumberresponse
                                                                                     ?.succeeded ??
                                                                                 true)) {
-                                                                              _model.vapiPhoneNumber =
-                                                                                  await VoiceServiceGroup
-                                                                                      .createPhoneNumberCall
-                                                                                      .call(
-                                                                                number:
-                                                                                    getJsonField(
-                                                                                  TwillioGroup
-                                                                                      .searchNumberCall
-                                                                                      .phoneNumbers(
-                                                                                        (_model.checkPhoneNumber?.jsonBody ??
-                                                                                            ''),
-                                                                                      )
-                                                                                      ?.firstOrNull,
-                                                                                  r'''$.phone_number''',
-                                                                                ).toString(),
-                                                                                name: _model
-                                                                                    .comapny
-                                                                                    ?.name,
-                                                                              );
+                                                                              // Get the purchased phone number from Twilio response
+                                                                              final purchasedNumber = getJsonField(
+                                                                                (_model.buyvonagenumberresponse?.jsonBody ?? ''),
+                                                                                r'''$.phone_number''',
+                                                                              )?.toString();
+                                                                              
+                                                                              if (purchasedNumber != null && purchasedNumber.isNotEmpty) {
+                                                                                // Use configureNumberCall since the number is already purchased in Twilio
+                                                                                _model.vapiPhoneNumber =
+                                                                                    await VoiceServiceGroup
+                                                                                        .configureNumberCall
+                                                                                        .call(
+                                                                                  phoneNumber: purchasedNumber,
+                                                                                  friendlyName: _model
+                                                                                      .comapny
+                                                                                      ?.name,
+                                                                                  companyId: currentUserDocument!
+                                                                                      .company!
+                                                                                      .id,
+                                                                                );
 
-                                                                              if (_model.vapiPhoneNumber?.succeeded == true) {
-                                                                                await currentUserDocument!.company!.update({
-                                                                                  ...mapToFirestore(
-                                                                                    {
-                                                                                      'companyPhoneNumbers': FieldValue.arrayUnion([
-                                                                                        VoiceServiceGroup.createPhoneNumberCall.number(
-                                                                                          (_model.vapiPhoneNumber?.jsonBody ?? ''),
-                                                                                        )
-                                                                                      ]),
-                                                                                      'phoneNumberMap': FieldValue.arrayUnion([
-                                                                                        getPhoneNumberFirestoreData(
-                                                                                          updatePhoneNumberStruct(
-                                                                                            PhoneNumberStruct(
-                                                                                              id: VoiceServiceGroup.createPhoneNumberCall
-                                                                                                  .id(
-                                                                                                (_model.vapiPhoneNumber?.jsonBody ?? ''),
+                                                                                if ((_model.vapiPhoneNumber?.statusCode ?? 200) == 201 || _model.vapiPhoneNumber?.succeeded == true) {
+                                                                                  // The configureNumberCall already updates Firestore if companyId is provided
+                                                                                  // But we'll also update manually as a backup
+                                                                                  await currentUserDocument!.company!.update({
+                                                                                    ...mapToFirestore(
+                                                                                      {
+                                                                                        'companyPhoneNumbers': FieldValue.arrayUnion([
+                                                                                          VoiceServiceGroup.configureNumberCall.number(
+                                                                                            (_model.vapiPhoneNumber?.jsonBody ?? ''),
+                                                                                          )
+                                                                                        ]),
+                                                                                        'phoneNumberMap': FieldValue.arrayUnion([
+                                                                                          getPhoneNumberFirestoreData(
+                                                                                            updatePhoneNumberStruct(
+                                                                                              PhoneNumberStruct(
+                                                                                                id: VoiceServiceGroup.configureNumberCall
+                                                                                                    .id(
+                                                                                                  (_model.vapiPhoneNumber?.jsonBody ?? ''),
+                                                                                                ),
+                                                                                                phoneNumber: VoiceServiceGroup.configureNumberCall
+                                                                                                    .number(
+                                                                                                  (_model.vapiPhoneNumber?.jsonBody ?? ''),
+                                                                                                ),
+                                                                                                assistant: '',
+                                                                                                forwardingNumber: '',
+                                                                                                label: Labels.inbound_outbound,
+                                                                                                primary: true,
                                                                                               ),
-                                                                                              phoneNumber: VoiceServiceGroup.createPhoneNumberCall
-                                                                                                  .number(
-                                                                                                (_model.vapiPhoneNumber?.jsonBody ?? ''),
-                                                                                              ),
-                                                                                              assistant: '',
-                                                                                              forwardingNumber: '',
-                                                                                              label: Labels.inbound_outbound,
-                                                                                              primary: true,
                                                                                             ),
                                                                                           ),
-                                                                                        ),
-                                                                                      ]),
-                                                                                    },
-                                                                                  ),
-                                                                                });
+                                                                                        ]),
+                                                                                      },
+                                                                                    ),
+                                                                                  });
 
-                                                                                Navigator.pop(context);
-                                                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                                                  SnackBar(
-                                                                                    content: Text(
-                                                                                      'Phone number purchased successfully!',
+                                                                                  Navigator.pop(context);
+                                                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                                                    SnackBar(
+                                                                                      content: Text(
+                                                                                        'Phone number purchased successfully!',
+                                                                                      ),
+                                                                                      duration: Duration(milliseconds: 4000),
+                                                                                      backgroundColor: Color(0xFF4CAF50),
                                                                                     ),
-                                                                                    duration: Duration(milliseconds: 4000),
-                                                                                    backgroundColor: Color(0xFF4CAF50),
-                                                                                  ),
-                                                                                );
-                                                                              } else {
-                                                                                ScaffoldMessenger.of(context).showSnackBar(
-                                                                                  SnackBar(
-                                                                                    content: Text(
-                                                                                      _model.vapiPhoneNumber?.bodyText ?? 
-                                                                                      'Failed to purchase phone number. Please try again.',
+                                                                                  );
+                                                                                } else {
+                                                                                  Navigator.pop(context);
+                                                                                  ScaffoldMessenger.of(context).showSnackBar(
+                                                                                    SnackBar(
+                                                                                      content: Text(
+                                                                                        _model.vapiPhoneNumber?.bodyText ?? 
+                                                                                        'Failed to register phone number. Please try again.',
+                                                                                      ),
+                                                                                      duration: Duration(milliseconds: 4000),
+                                                                                      backgroundColor: Color(0xFFBB6E7B),
                                                                                     ),
-                                                                                    duration: Duration(milliseconds: 4000),
-                                                                                    backgroundColor: Color(0xFFBB6E7B),
-                                                                                  ),
-                                                                                );
+                                                                                  );
+                                                                                }
                                                                               }
                                                                             }
                                                                           }

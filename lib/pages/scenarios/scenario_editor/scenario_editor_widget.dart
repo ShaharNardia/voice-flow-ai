@@ -1218,23 +1218,29 @@ class _ScenarioEditorWidgetState extends State<ScenarioEditorWidget> {
         const SizedBox(height: 16),
         _buildPropertyLabel('Voice'),
         DropdownButtonFormField<String>(
-          value: node.data['voice'] as String? ?? 'rachel',
+          value: node.data['voice'] as String? ?? 'Google.he-IL-Wavenet-A',
           decoration: _inputDecoration(''),
           items: const [
+            // ─── Hebrew Voices (Best Quality) ───
+            // Google Cloud TTS WaveNet Hebrew (via Twilio <Say>)
+            DropdownMenuItem(value: 'Google.he-IL-Wavenet-A', child: Text('Google Wavenet Female A (Hebrew)')),
+            DropdownMenuItem(value: 'Google.he-IL-Wavenet-B', child: Text('Google Wavenet Male B (Hebrew)')),
+            DropdownMenuItem(value: 'Google.he-IL-Wavenet-C', child: Text('Google Wavenet Female C (Hebrew)')),
+            DropdownMenuItem(value: 'Google.he-IL-Wavenet-D', child: Text('Google Wavenet Male D (Hebrew)')),
             // ElevenLabs Hebrew-supporting voices (multilingual)
-            DropdownMenuItem(value: 'rachel', child: Text('Rachel (Hebrew)')),
-            DropdownMenuItem(value: 'adam', child: Text('Adam (Hebrew)')),
-            DropdownMenuItem(value: 'antoni', child: Text('Antoni (Hebrew)')),
-            DropdownMenuItem(value: 'bella', child: Text('Bella (Hebrew)')),
-            DropdownMenuItem(value: 'josh', child: Text('Josh (Hebrew)')),
-            DropdownMenuItem(value: 'arnold', child: Text('Arnold (Hebrew)')),
-            DropdownMenuItem(value: 'sam', child: Text('Sam (Hebrew)')),
-            DropdownMenuItem(value: 'elli', child: Text('Elli (Hebrew)')),
-            // AWS Polly voices (English)
-            DropdownMenuItem(value: 'Polly.Joanna', child: Text('Joanna (English)')),
-            DropdownMenuItem(value: 'Polly.Matthew', child: Text('Matthew (English)')),
-            DropdownMenuItem(value: 'Polly.Amy', child: Text('Amy (British)')),
-            DropdownMenuItem(value: 'Polly.Brian', child: Text('Brian (British)')),
+            DropdownMenuItem(value: 'rachel', child: Text('Rachel - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'adam', child: Text('Adam - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'antoni', child: Text('Antoni - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'bella', child: Text('Bella - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'josh', child: Text('Josh - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'arnold', child: Text('Arnold - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'sam', child: Text('Sam - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'elli', child: Text('Elli - ElevenLabs (Hebrew)')),
+            // ─── English Voices ───
+            DropdownMenuItem(value: 'Polly.Joanna', child: Text('Joanna - Polly (English)')),
+            DropdownMenuItem(value: 'Polly.Matthew', child: Text('Matthew - Polly (English)')),
+            DropdownMenuItem(value: 'Polly.Amy', child: Text('Amy - Polly (British)')),
+            DropdownMenuItem(value: 'Polly.Brian', child: Text('Brian - Polly (British)')),
           ],
           onChanged: (value) {
             setState(() {
@@ -1334,18 +1340,28 @@ class _ScenarioEditorWidgetState extends State<ScenarioEditorWidget> {
         const SizedBox(height: 16),
         _buildPropertyLabel('Voice'),
         DropdownButtonFormField<String>(
-          value: node.data['voice'] as String? ?? 'rachel',
+          value: node.data['voice'] as String? ?? 'Google.he-IL-Wavenet-A',
           decoration: _inputDecoration(''),
           items: const [
+            // ─── Hebrew Voices (Best Quality) ───
+            // Google Cloud TTS WaveNet Hebrew (via Twilio <Say>)
+            DropdownMenuItem(value: 'Google.he-IL-Wavenet-A', child: Text('Google Wavenet Female A (Hebrew)')),
+            DropdownMenuItem(value: 'Google.he-IL-Wavenet-B', child: Text('Google Wavenet Male B (Hebrew)')),
+            DropdownMenuItem(value: 'Google.he-IL-Wavenet-C', child: Text('Google Wavenet Female C (Hebrew)')),
+            DropdownMenuItem(value: 'Google.he-IL-Wavenet-D', child: Text('Google Wavenet Male D (Hebrew)')),
             // ElevenLabs Hebrew-supporting voices (multilingual)
-            DropdownMenuItem(value: 'rachel', child: Text('Rachel (Hebrew)')),
-            DropdownMenuItem(value: 'adam', child: Text('Adam (Hebrew)')),
-            DropdownMenuItem(value: 'bella', child: Text('Bella (Hebrew)')),
-            DropdownMenuItem(value: 'josh', child: Text('Josh (Hebrew)')),
-            // AWS Polly voices (English)
-            DropdownMenuItem(value: 'Polly.Joanna', child: Text('Joanna (English)')),
-            DropdownMenuItem(value: 'Polly.Matthew', child: Text('Matthew (English)')),
-            DropdownMenuItem(value: 'Polly.Amy', child: Text('Amy (British)')),
+            DropdownMenuItem(value: 'rachel', child: Text('Rachel - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'adam', child: Text('Adam - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'bella', child: Text('Bella - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'josh', child: Text('Josh - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'antoni', child: Text('Antoni - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'arnold', child: Text('Arnold - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'sam', child: Text('Sam - ElevenLabs (Hebrew)')),
+            DropdownMenuItem(value: 'elli', child: Text('Elli - ElevenLabs (Hebrew)')),
+            // ─── English Voices ───
+            DropdownMenuItem(value: 'Polly.Joanna', child: Text('Joanna - Polly (English)')),
+            DropdownMenuItem(value: 'Polly.Matthew', child: Text('Matthew - Polly (English)')),
+            DropdownMenuItem(value: 'Polly.Amy', child: Text('Amy - Polly (British)')),
           ],
           onChanged: (value) {
             setState(() {

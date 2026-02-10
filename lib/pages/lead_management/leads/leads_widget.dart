@@ -1895,8 +1895,8 @@ class _LeadsWidgetState extends State<LeadsWidget> {
                                                                                 'assistantName': _model.company?.assistantname ?? 'your assistant',
                                                                                 'companyName': _model.company?.name ?? 'our company',
                                                                                 'name': _model.company?.assistantname ?? 'Assistant',
-                                                                                'voice': _model.company?.voice ?? 'Polly.Joanna',
-                                                                                'language': _model.company?.language ?? 'en-US',
+                                                                                'voice': _model.company?.voice ?? 'Google.he-IL-Wavenet-A',
+                                                                                'language': _model.company?.language ?? 'he-IL',
                                                                               },
                                                                               metadata: {
                                                                                 'leadId': leadsItem.reference.id,

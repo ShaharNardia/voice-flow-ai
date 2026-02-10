@@ -23,7 +23,7 @@ const corsOptions = {
 const NODE_TYPES_INFO = `
 Available node types:
 - start: Beginning of the call flow. Data: { trigger: "outbound" | "inbound" }
-- say: Speak text to caller. Data: { text: string, voice: "Polly.Joanna", language: "en-US" }
+- say: Speak text to caller. Data: { text: string, voice: "Google.he-IL-Wavenet-A", language: "he-IL" }
 - gather: Collect input from caller. Data: { prompt: string, inputType: "speech" | "dtmf" | "both", timeout: number }
 - condition: Branch based on conditions. Data: { conditionType: "keywords" | "variable", keywords: { positive: string[], negative: string[] } }
 - setVariable: Set a variable. Data: { variableName: string, value: string }
