@@ -66,3 +66,8 @@ exports.scenariosNodeTypes = scenarioService.scenariosNodeTypes;
 const scenarioAiService = require("./scenario_ai_service.js");
 exports.scenarioAiGenerate = scenarioAiService.generateScenario;
 exports.scenarioAiSuggest = scenarioAiService.suggestImprovements;
+
+// Setup Israeli Phone Number
+const setupIsraeliPhone = require("./setup_israeli_phone_function.js");
+exports.setupIsraeliPhone = setupIsraeliPhone.setupIsraeliPhone;
+exports.setupIsraeliPhoneHttp = setupIsraeliPhone.setupIsraeliPhoneHttp;

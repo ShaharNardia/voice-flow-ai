@@ -95,17 +95,20 @@ function buildSystemPrompt(assistant, companyData = {}, language = "he-IL") {
   const legalRestriction = companyData.legalRestriction || false;
   const medicalRestriction = companyData.medicalRestriction || false;
 
+  // Additional instructions (note: field name has typo - additionalInsturctions)
+  const additionalInstructions = companyData.additionalInsturctions || companyData.additionalInstructions || "";
+
   // Build prompt based on language
   if (lang === "he") {
-    return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction);
+    return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
   } else if (lang === "en") {
-    return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction);
+    return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
   } else if (lang === "ar") {
-    return buildArabicPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction);
+    return buildArabicPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
   }
   
   // Default to Hebrew
-  return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction);
+  return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
 }
 
 /**
@@ -147,7 +150,7 @@ function getDefaultTimeZone(lang) {
 /**
  * Build Hebrew system prompt
  */
-function buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction) {
+function buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "") {
   // Format services
   const servicesText = services.length > 0
     ? services.map((s) => {
@@ -235,13 +238,13 @@ ${servicesText}
 - תגובות קצרות (2-3 משפטים מקסימום)
 - תמיד לעניין - לא לסטות
 - טון מקצועי אך נגיש ואנושי
-`;
+${additionalInstructions ? `\n[הוראות נוספות - חשוב מאוד]\n${additionalInstructions}\n` : ""}`;
 }
 
 /**
  * Build English system prompt
  */
-function buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction) {
+function buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "") {
   // Format services
   const servicesText = services.length > 0
     ? services.map((s) => {
@@ -329,13 +332,13 @@ End the conversation politely if the customer says:
 - Short responses (maximum 2-3 sentences)
 - Always on topic - don't deviate
 - Professional yet accessible and human tone
-`;
+${additionalInstructions ? `\n[Additional Instructions - Very Important]\n${additionalInstructions}\n` : ""}`;
 }
 
 /**
  * Build Arabic system prompt
  */
-function buildArabicPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction) {
+function buildArabicPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "") {
   // Format services
   const servicesText = services.length > 0
     ? services.map((s) => {
@@ -423,7 +426,7 @@ ${servicesText}
 - ردود قصيرة (حد أقصى 2-3 جمل)
 - دائماً على الموضوع - لا تنحرف
 - نبرة احترافية ولكن قابلة للوصول وبشرية
-`;
+${additionalInstructions ? `\n[تعليمات إضافية - مهم جداً]\n${additionalInstructions}\n` : ""}`;
 }
 
 /**
