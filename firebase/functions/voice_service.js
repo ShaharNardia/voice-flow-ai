@@ -1746,14 +1746,25 @@ exports.twilioVoiceWebhook = onRequest(async (req, res) => {
     }
     
     // Check if this session uses a scenario flow
-    if (data.scenarioId) {
-      // Redirect to scenario flow execution
+    // IMPORTANT: Inbound calls ALWAYS use dynamic LLM, never scenario flow
+    // Only outbound calls with explicit scenarioId should use scenario flow
+    const isInboundCall = data.callType === "inbound" || !callSessionId;
+    if (data.scenarioId && !isInboundCall) {
+      // Redirect to scenario flow execution (only for outbound calls with scenario)
+      console.log("[twilioVoiceWebhook] Using scenario flow for outbound call", {scenarioId: data.scenarioId, sessionId});
+      logger.info("Using scenario flow for outbound call", {scenarioId: data.scenarioId, sessionId});
       response.redirect(
         `${BASE_FUNCTION_URL}/scenarioFlowExecute?callSessionId=${sessionId}`
       );
       res.set("Content-Type", "text/xml");
       res.status(200).send(response.toString());
       return;
+    }
+    
+    // For inbound calls, always use dynamic LLM (even if scenarioId exists)
+    if (isInboundCall) {
+      console.log("[twilioVoiceWebhook] Using dynamic LLM for inbound call", {sessionId, hasScenarioId: !!data.scenarioId});
+      logger.info("Using dynamic LLM for inbound call", {sessionId, hasScenarioId: !!data.scenarioId});
     }
     
     const assistant = data.assistantDefinition || {};
@@ -1838,40 +1849,60 @@ exports.twilioVoiceWebhook = onRequest(async (req, res) => {
     const finalSessionId = sessionId || callSessionId;
     
     // Check if we should use Deepgram STT (via Media Streams) or Twilio Gather
-    // For now, we'll use Deepgram if transcriber provider is set to "deepgram"
+    // Use Deepgram if:
+    // 1. transcriber provider is explicitly set to "deepgram", OR
+    // 2. sttProvider is explicitly set to "deepgram", OR
+    // 3. DEEPGRAM_API_KEY is available (default to Deepgram for better Hebrew STT)
+    const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
     const useDeepgram = assistant.transcriber?.provider === "deepgram" || 
                         assistant.sttProvider === "deepgram" ||
-                        false; // Default to false for now (use Gather)
+                        !!DEEPGRAM_API_KEY; // Default to Deepgram if API key is available
     
     if (useDeepgram) {
-      // Use Twilio Media Streams with Deepgram STT
-      // Note: Twilio Media Streams requires WebSocket, but Firebase Functions doesn't support WebSocket
-      // For now, we'll use HTTP endpoint that handles Media Streams
-      // The URL should be wss:// for WebSocket, but we'll use https:// and handle it in the endpoint
-      const streamUrl = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/twilioMediaStream?callSid=${callSid}&callSessionId=${finalSessionId}`;
-      
-      response.stream({
-        url: streamUrl,
-        track: "both_tracks", // Send both inbound and outbound audio
-      });
-      
-      logger.info("Using Deepgram STT via Media Streams", {
-        callSid,
-        callSessionId,
-        streamUrl,
-      });
-    } else {
+      try {
+        // Use Twilio Media Streams with Deepgram STT
+        // Note: Twilio Media Streams requires WebSocket, but Firebase Functions doesn't support WebSocket
+        // For now, we'll use HTTP endpoint that handles Media Streams
+        // The URL should be wss:// for WebSocket, but we'll use https:// and handle it in the endpoint
+        const streamUrl = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/twilioMediaStream?callSid=${callSid}&callSessionId=${finalSessionId}`;
+        
+        response.stream({
+          url: streamUrl,
+          track: "both_tracks", // Send both inbound and outbound audio
+          // Note: startOnEnter is not a valid parameter for Stream verb
+          // Barge-in will be handled via Twilio REST API in twilioMediaStream
+        });
+        
+        logger.info("Using Deepgram STT via Media Streams", {
+          callSid,
+          callSessionId: finalSessionId,
+          streamUrl,
+        });
+      } catch (deepgramError) {
+        // If Deepgram setup fails, fallback to Twilio Gather
+        logger.error("Failed to setup Deepgram, falling back to Twilio Gather", {
+          error: deepgramError.message,
+          stack: deepgramError.stack,
+          callSid,
+          callSessionId: finalSessionId,
+        });
+        // Continue to Twilio Gather fallback below
+        useDeepgram = false; // Force fallback
+      }
+    }
+    
+    if (!useDeepgram) {
       // Use Twilio Gather (default - Twilio STT)
       // Twilio Gather requires full language code (he-IL) not just (he)
-      const gatherLanguage = language === "he" ? "he-IL" : language;
+      const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
       
       try {
         const gather = response.gather({
           input: "speech",
           action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`,
           method: "POST",
-          timeout: 10, // Increased from 5 to 10 seconds for better Hebrew recognition
-          speechTimeout: "auto",
+          timeout: 10, // 10 seconds for speech recognition
+          speechTimeout: "auto", // Twilio auto-detects end of speech
           language: gatherLanguage,
           hints: "", // Empty hints - Twilio will auto-detect Hebrew
           profanityFilter: false,
@@ -2023,10 +2054,21 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
 
     const data = snapshot.data();
     const assistant = data.assistantDefinition || {};
-    const language = assistant.language || "he-IL";
+    // Ensure language is always set to he-IL for Hebrew (not just "he")
+    let language = assistant.language || "he-IL";
+    if (language === "he") {
+      language = "he-IL";
+    }
     const voiceId = resolveVoiceForLanguage(assistant.voice, language);
     const leadId = data.metadata?.leadId || null;
     const companyId = data.companyId || null;
+    
+    // Log language settings for debugging
+    console.log("[twilioGatherCallback] Language settings", {
+      originalLanguage: assistant.language,
+      normalizedLanguage: language,
+      callSessionId,
+    });
     
     // Get company data for context
     let companyData = {};
@@ -2057,8 +2099,8 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       });
       
       // If no speech detected, ask user to repeat
-      const sayLanguage = language === "he" ? "he-IL" : language;
-      const gatherLanguage = language === "he" ? "he-IL" : language;
+      const sayLanguage = language === "he" ? "he-IL" : (language || "he-IL");
+      const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
       
       // Get appropriate message based on language
       const repeatMessage = getMessage("noResponse", language) || 
@@ -2344,8 +2386,8 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
         method: "POST",
-        timeout: 10, // Increased from 5 to 10 seconds for better Hebrew recognition
-        speechTimeout: "auto",
+        timeout: 10, // 10 seconds for speech recognition
+        speechTimeout: "auto", // Twilio auto-detects end of speech
         language: gatherLanguage,
         hints: "", // Empty hints - Twilio will auto-detect Hebrew
         profanityFilter: false,

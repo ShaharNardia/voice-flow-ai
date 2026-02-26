@@ -45,14 +45,17 @@ function createDeepgramConnection(language = "he", model = "nova-2", onTranscrip
 
   const deepgram = createClient(DEEPGRAM_API_KEY);
 
-  // Create WebSocket connection
+  // Create WebSocket connection with optimized settings for low latency and barge-in
   const connection = deepgram.listen.live({
     model: model,
     language: deepgramLanguage,
     smart_format: true,
     interim_results: true,
-    endpointing: 300, // End of speech detection (ms)
-    vad_events: true, // Voice activity detection
+    endpointing: 300, // End of speech detection (ms) - lower = faster detection
+    vad_events: true, // Voice activity detection - enables barge-in detection
+    punctuate: true, // Add punctuation for better accuracy
+    diarize: false, // Speaker diarization not needed for single speaker
+    multichannel: false, // Single channel audio
   });
 
   logger.info("Deepgram connection created", {
