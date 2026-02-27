@@ -19,10 +19,13 @@ const {
   validateRequired,
 } = require("./security_utils");
 
+const axios = require("axios");
 const asteriskService = require("./asterisk_service");
 const scenarioEngine = require("./scenario_engine");
 const llmService = require("./llm_service");
 const deepgramService = require("./deepgram_service");
+
+const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
 
 const REGION = "us-central1";
 const PROJECT_ID = process.env.GCLOUD_PROJECT;
@@ -143,11 +146,11 @@ const MESSAGES = {
   },
 };
 
-// Default voices by language (Google Cloud TTS WaveNet via Twilio - highest quality)
-// Hebrew voices: Wavenet-A=female, Wavenet-B=male, Wavenet-C=female, Wavenet-D=male
+// Default voices by language (Google Cloud TTS via Twilio)
+// Neural2 > WaveNet > Standard in quality. Hebrew male voices: B, D
 const DEFAULT_VOICES = {
-  "he": "Google.he-IL-Wavenet-D",
-  "he-IL": "Google.he-IL-Wavenet-D",
+  "he": "Google.he-IL-Neural2-D",
+  "he-IL": "Google.he-IL-Neural2-D",
   "en": "Polly.Joanna",
   "en-US": "Polly.Joanna",
   "en-GB": "Polly.Amy",
@@ -155,8 +158,8 @@ const DEFAULT_VOICES = {
   "ar-XA": "Google.ar-XA-Wavenet-A",
 };
 
-// Default Hebrew voice (male - Wavenet-D)
-const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-D";
+// Default Hebrew voice (male Neural2-D - higher quality than WaveNet)
+const DEFAULT_HEBREW_VOICE = "Google.he-IL-Neural2-D";
 // Default English voice (for backward compatibility)
 const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
 
@@ -171,7 +174,7 @@ const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
  * "aura-asteria-en", etc.) is NOT a valid Twilio voice and must be replaced
  * with the best available Twilio-compatible voice for the target language.
  *
- * For Hebrew the best quality is Google WaveNet (he-IL-Wavenet-A).
+ * For Hebrew the best quality is Google Neural2 (he-IL-Neural2-D = male).
  * Polly has NO Hebrew voices, so Polly voices are also swapped when Hebrew.
  *
  * @param {string} voiceId - The voice ID from the assistant definition
@@ -1384,7 +1387,7 @@ exports.twilioVoiceWebhook = onRequest(
       } catch (twilioError) {
         console.error("[twilioVoiceWebhook] Failed to create Twilio response", twilioError);
         res.set("Content-Type", "text/xml");
-        res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
+        res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Neural2-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
         return;
       }
     }
@@ -1403,7 +1406,7 @@ exports.twilioVoiceWebhook = onRequest(
       });
       console.error("[twilioVoiceWebhook] Failed to create TwiML response", twimlError);
       res.set("Content-Type", "text/xml");
-      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
+      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Neural2-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
       return;
     }
     
@@ -1732,7 +1735,7 @@ exports.twilioVoiceWebhook = onRequest(
           console.error("[twilioVoiceWebhook] Failed to send error response", responseError);
           // Last resort: send raw XML
           res.set("Content-Type", "text/xml");
-          res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
+          res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Neural2-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
         }
         return;
       }
@@ -1875,36 +1878,50 @@ exports.twilioVoiceWebhook = onRequest(
 
     try {
       const greetingToSay = greeting || getMessage("defaultGreeting", language);
+      const isHebrew = gatherLanguage?.startsWith("he");
+      const callbackUrl = `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`;
 
-      // CRITICAL: Greeting is INSIDE Gather to enable barge-in (interruption).
-      // Simplest possible config - let Twilio auto-select the best STT model.
-      // Removed: speechModel, hints, profanityFilter - may interfere with Hebrew STT.
-      const gather = response.gather({
-        input: "speech",
-        action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`,
-        method: "POST",
-        timeout: 10,
-        speechTimeout: 2,
-        language: gatherLanguage,
-      });
+      if (isHebrew) {
+        // HEBREW: Twilio STT does NOT support Hebrew reliably.
+        // Use <Say> + <Record> → download recording → Deepgram REST API for transcription.
+        // No barge-in with Record, but at least Hebrew is correctly recognized.
+        response.say({voice: voiceId, language: sayLanguage}, greetingToSay);
+        response.record({
+          action: `${callbackUrl}&source=record`,
+          method: "POST",
+          maxLength: 30,
+          timeout: 3,
+          playBeep: false,
+          trim: "trim-silence",
+          transcribe: false,
+        });
+      } else {
+        // NON-HEBREW: Use Gather with nested Say for barge-in
+        const gather = response.gather({
+          input: "speech",
+          action: callbackUrl,
+          method: "POST",
+          timeout: 10,
+          speechTimeout: 2,
+          language: gatherLanguage,
+        });
+        gather.say({voice: voiceId, language: sayLanguage}, greetingToSay);
+      }
 
-      // Say greeting INSIDE Gather → enables barge-in!
-      gather.say({voice: voiceId, language: sayLanguage}, greetingToSay);
-
-      logger.info("Gather with barge-in greeting set up", {
+      logger.info("Voice webhook greeting set up", {
         callSid: callSid || "unknown",
         callSessionId: finalSessionId,
         language: gatherLanguage,
+        mode: isHebrew ? "record+deepgram" : "gather",
         greetingLength: greetingToSay.length,
-        hasHints: !!hebrewHints,
       });
     } catch (gatherError) {
-      console.error("[twilioVoiceWebhook] Failed to create Gather with greeting", gatherError);
-      logger.error("Failed to create Gather with greeting", {
+      console.error("[twilioVoiceWebhook] Failed to create greeting", gatherError);
+      logger.error("Failed to create greeting", {
         error: gatherError.message,
         callSessionId: finalSessionId,
       });
-      // Fallback: Say greeting without Gather (no barge-in, but at least plays)
+      // Fallback: Say greeting without interaction
       try {
         response.say(
           {voice: voiceId || DEFAULT_HEBREW_VOICE, language: sayLanguage || "he-IL"},
@@ -1915,13 +1932,9 @@ exports.twilioVoiceWebhook = onRequest(
       }
     }
 
-    // Safety net: If Gather times out or callback fails, redirect back to keep alive
+    // Safety net: If Record/Gather times out or callback fails, redirect back
     response.redirect({method: "POST"},
       `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`);
-
-    // Note: No need to add say/hangup here - Twilio Gather will wait for user input
-    // If no response is received (timeout), Twilio will call twilioGatherCallback with empty SpeechResult
-    // and twilioGatherCallback will handle it appropriately (ask user to repeat)
 
     // Update session status
     try {
@@ -1981,7 +1994,7 @@ exports.twilioVoiceWebhook = onRequest(
       console.error("[twilioVoiceWebhook] Failed to create Twilio response in error handler", twilioError);
       // Fallback: return simple XML
       res.set("Content-Type", "text/xml");
-      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
+      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Neural2-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
       return;
     }
     
@@ -1996,47 +2009,95 @@ exports.twilioVoiceWebhook = onRequest(
 });
 
 /**
- * Handle speech recognition results from Twilio Gather
- * Processes lead responses and updates their status accordingly
+ * Handle speech results from Twilio Gather OR Record+Deepgram
+ * When source=record (Hebrew), downloads recording and transcribes via Deepgram API.
+ * When source is not set (non-Hebrew), uses Twilio's built-in STT result.
  */
 exports.twilioGatherCallback = onRequest(async (req, res) => {
   const startTime = Date.now();
-  
+
   try {
     const callSessionId = req.query.callSessionId || req.body?.callSessionId;
-    const speechResult = req.body?.SpeechResult || "";
-    const speechConfidence = req.body?.Confidence || 0;
-    
-    // Log STT results for debugging - include Language field from Twilio
-    const twilioLanguage = req.body?.Language || "NOT_SET";
+    const isRecordSource = req.query?.source === "record" || !!req.body?.RecordingUrl;
+    let speechResult = req.body?.SpeechResult || "";
+    let speechConfidence = req.body?.Confidence || 0;
+
+    // ── DEEPGRAM TRANSCRIPTION (Hebrew Record mode) ─────────────────────
+    if (isRecordSource && req.body?.RecordingUrl) {
+      const recordingUrl = req.body.RecordingUrl;
+      const recordingSid = req.body?.RecordingSid || "unknown";
+      const recordingDuration = req.body?.RecordingDuration || 0;
+
+      logger.info("Record callback - transcribing with Deepgram", {
+        callSessionId, recordingSid, recordingDuration, recordingUrl,
+      });
+
+      if (parseInt(recordingDuration) === 0) {
+        // No speech detected in recording
+        speechResult = "";
+        speechConfidence = 0;
+      } else {
+        try {
+          // Small delay to ensure recording is available on Twilio's servers
+          await new Promise((resolve) => setTimeout(resolve, 300));
+
+          // Download recording from Twilio
+          const audioResponse = await axios.get(`${recordingUrl}.mp3`, {
+            auth: {username: TWILIO_ACCOUNT_SID, password: TWILIO_AUTH_TOKEN},
+            responseType: "arraybuffer",
+            timeout: 8000,
+          });
+
+          // Transcribe with Deepgram REST API (nova-3 supports Hebrew natively)
+          const dgResponse = await axios.post(
+            "https://api.deepgram.com/v1/listen?language=he&model=nova-3&smart_format=true&punctuate=true",
+            audioResponse.data,
+            {
+              headers: {
+                "Authorization": `Token ${DEEPGRAM_API_KEY}`,
+                "Content-Type": "audio/mpeg",
+              },
+              timeout: 10000,
+            },
+          );
+
+          speechResult = dgResponse.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+          speechConfidence = dgResponse.data?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
+
+          logger.info("Deepgram transcription success", {
+            callSessionId,
+            transcript: speechResult,
+            confidence: speechConfidence,
+            deepgramTimeMs: Date.now() - startTime,
+          });
+        } catch (dgError) {
+          logger.error("Deepgram transcription failed", {
+            callSessionId,
+            error: dgError.message,
+            status: dgError.response?.status,
+          });
+          speechResult = "";
+          speechConfidence = 0;
+        }
+      }
+    }
+    // ── END DEEPGRAM TRANSCRIPTION ──────────────────────────────────────
+
     console.log("=== twilioGatherCallback CALLED ===");
     console.log("callSessionId:", callSessionId);
+    console.log("source:", isRecordSource ? "record+deepgram" : "gather+twilio");
     console.log("speechResult:", speechResult || "(empty)");
     console.log("speechConfidence:", speechConfidence);
-    console.log("twilioLanguage:", twilioLanguage);
 
-    logger.info("Twilio Gather callback received", {
+    logger.info("Speech callback processed", {
       callSessionId,
+      source: isRecordSource ? "record+deepgram" : "gather+twilio",
       speechResult: speechResult || "(empty)",
       speechResultLength: speechResult?.length || 0,
       speechConfidence,
-      twilioLanguage, // CRITICAL: What language did Twilio ACTUALLY use?
       hasSpeechResult: !!speechResult && speechResult.trim().length > 0,
+      processingTimeMs: Date.now() - startTime,
     });
-
-    // Detect if Hebrew speech was misrecognized as English
-    const hebrewRegex = /[\u0590-\u05FF]/;
-    const isHebrewText = hebrewRegex.test(speechResult);
-    const isLowConfidence = parseFloat(speechConfidence) < 0.5;
-    if (speechResult && speechResult.trim() && !isHebrewText) {
-      logger.warn("HEBREW STT ISSUE: Speech result contains NO Hebrew characters!", {
-        callSessionId,
-        speechResult,
-        speechConfidence,
-        twilioLanguage,
-        possiblyMisrecognized: true,
-      });
-    }
     
     const response = new twilio.twiml.VoiceResponse();
 
@@ -2105,30 +2166,36 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
                              ? "סליחה, לא שמעתי אותך. תוכל לחזור בבקשה?"
                              : "Sorry, I didn't hear you. Could you repeat please?");
 
-      // NOTE: repeatMessage is said INSIDE Gather below for barge-in support.
-      // Do NOT add response.say() here - it would play without barge-in.
+      const isHebrew = language?.startsWith("he");
+      const callbackUrl = `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`;
 
-      // Continue gathering input with Hebrew hints
-      const hebrewHints = language?.startsWith("he")
-        ? "שלום,כן,לא,תודה,אני,מעוניין,לא מעוניין,בבקשה,מה,איך,מתי,למה,עזרה,שירות,מידע,להתראות,טוב,בסדר,נכון,אוקיי,רגע,שנייה"
-        : "";
+      if (isHebrew) {
+        // Hebrew: Say message then Record for Deepgram transcription
+        response.say({voice: voiceId, language: sayLanguage}, repeatMessage);
+        response.record({
+          action: `${callbackUrl}&source=record`,
+          method: "POST",
+          maxLength: 30,
+          timeout: 3,
+          playBeep: false,
+          trim: "trim-silence",
+          transcribe: false,
+        });
+      } else {
+        // Non-Hebrew: Gather with barge-in
+        const gather = response.gather({
+          input: "speech",
+          action: callbackUrl,
+          method: "POST",
+          timeout: 10,
+          speechTimeout: 2,
+          language: gatherLanguage,
+        });
+        gather.say({voice: voiceId, language: sayLanguage}, repeatMessage);
+      }
 
-      const gather = response.gather({
-        input: "speech",
-        action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
-        method: "POST",
-        timeout: 10,
-        speechTimeout: 2,
-        language: gatherLanguage,
-      });
-
-      // Say the repeat message inside Gather for barge-in support
-      gather.say({voice: voiceId, language: sayLanguage}, repeatMessage);
-
-      // Safety fallback: redirect back to callback instead of goodbye
-      // This keeps the conversation alive instead of hanging up
-      response.redirect({method: "POST"},
-        `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`);
+      // Safety fallback
+      response.redirect({method: "POST"}, callbackUrl);
 
       res.set("Content-Type", "text/xml");
       res.status(200).send(response.toString());
@@ -2404,39 +2471,47 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       logger.info("Ending call", {callSessionId, reason: "shouldHangup=true"});
       response.hangup();
     } else {
-      // Continue conversation: AI response is INSIDE Gather for barge-in support
-      // This means the caller can interrupt the AI's response by speaking!
-      console.log("Continuing conversation, setting up Gather with barge-in", {callSessionId});
+      const isHebrew = language?.startsWith("he");
+      const callbackUrl = `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`;
 
-      const hebrewHints = language?.startsWith("he")
-        ? "שלום,כן,לא,תודה,אני,מעוניין,לא מעוניין,בבקשה,מה,איך,מתי,למה,עזרה,שירות,מידע,להתראות,טוב,בסדר,נכון,אוקיי,רגע,שנייה"
-        : "";
-
-      logger.info("Continuing conversation with barge-in Gather", {
+      logger.info("Continuing conversation", {
         callSessionId,
-        nextGatherTimeout: 15,
+        mode: isHebrew ? "record+deepgram" : "gather",
         language: gatherLanguage,
-        hasHints: !!hebrewHints,
         aiResponseLength: aiResponse?.length || 0,
       });
 
-      const gather = response.gather({
-        input: "speech",
-        action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
-        method: "POST",
-        timeout: 10,
-        speechTimeout: 2,
-        language: gatherLanguage,
-      });
-
-      // AI response INSIDE Gather → enables barge-in during AI speech!
-      if (aiResponse) {
-        gather.say({voice: voiceId, language: sayLanguage}, aiResponse);
+      if (isHebrew) {
+        // Hebrew: Say response then Record (Deepgram STT)
+        if (aiResponse) {
+          response.say({voice: voiceId, language: sayLanguage}, aiResponse);
+        }
+        response.record({
+          action: `${callbackUrl}&source=record`,
+          method: "POST",
+          maxLength: 30,
+          timeout: 3,
+          playBeep: false,
+          trim: "trim-silence",
+          transcribe: false,
+        });
+      } else {
+        // Non-Hebrew: Gather with barge-in
+        const gather = response.gather({
+          input: "speech",
+          action: callbackUrl,
+          method: "POST",
+          timeout: 10,
+          speechTimeout: 2,
+          language: gatherLanguage,
+        });
+        if (aiResponse) {
+          gather.say({voice: voiceId, language: sayLanguage}, aiResponse);
+        }
       }
 
       // Safety net: redirect back to keep conversation alive
-      response.redirect({method: "POST"},
-        `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`);
+      response.redirect({method: "POST"}, callbackUrl);
     }
 
     res.set("Content-Type", "text/xml");
