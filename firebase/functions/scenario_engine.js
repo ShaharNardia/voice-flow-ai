@@ -12,10 +12,11 @@ const REGION = "us-central1";
 const PROJECT_ID = process.env.GCLOUD_PROJECT;
 const BASE_FUNCTION_URL = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net`;
 
-// Default voices by language (Google Cloud TTS WaveNet via Twilio - highest quality)
+// Default voices by language (Google Cloud TTS via Twilio)
+// Neural2 > WaveNet > Standard in quality. Hebrew male voices: B, D
 const DEFAULT_VOICES = {
-  "he": "Google.he-IL-Wavenet-A",
-  "he-IL": "Google.he-IL-Wavenet-A",
+  "he": "Google.he-IL-Neural2-D",
+  "he-IL": "Google.he-IL-Neural2-D",
   "en": "Polly.Joanna",
   "en-US": "Polly.Joanna",
   "en-GB": "Polly.Amy",
@@ -23,8 +24,8 @@ const DEFAULT_VOICES = {
   "ar-XA": "Google.ar-XA-Wavenet-A",
 };
 
-// Default Hebrew voice (for backward compatibility)
-const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-A";
+// Default Hebrew voice (male Neural2-D - higher quality than WaveNet)
+const DEFAULT_HEBREW_VOICE = "Google.he-IL-Neural2-D";
 // Default English voice (for backward compatibility)
 const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
 
