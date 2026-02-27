@@ -1885,9 +1885,10 @@ exports.twilioVoiceWebhook = onRequest(
         timeout: 15, // 15 seconds to wait for speech after greeting finishes
         speechTimeout: "auto", // Twilio auto-detects end of speech
         language: gatherLanguage,
+        speechModel: "experimental_conversations", // Best for Hebrew conversational STT
         hints: hebrewHints,
         profanityFilter: false,
-        enhanced: true, // Use enhanced speech recognition
+        // NOTE: enhanced=true only supports 8 languages (NOT Hebrew). Removed.
       });
 
       // Say greeting INSIDE Gather → enables barge-in!
@@ -2061,27 +2062,16 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
     const leadId = data.metadata?.leadId || null;
     const companyId = data.companyId || null;
     
-    // Log language settings for debugging
-    console.log("[twilioGatherCallback] Language settings", {
-      originalLanguage: assistant.language,
-      normalizedLanguage: language,
-      callSessionId,
-    });
-    
-    // Get company data for context
-    let companyData = {};
-    if (companyId) {
-      try {
-        const companyDoc = await db.collection("Company").doc(companyId).get();
-        if (companyDoc.exists) {
-          companyData = companyDoc.data();
-        }
-      } catch (companyError) {
-        logger.warn(`Could not fetch company data for ${companyId}:`, companyError);
-      }
-    }
-    
-    // Initialize conversation history if not exists
+    // Start company data fetch EARLY (non-blocking) - runs in parallel
+    // while we process speech and check for empty results
+    const companyDataPromise = companyId
+      ? db.collection("Company").doc(companyId).get().catch((err) => {
+          logger.warn(`Could not fetch company data for ${companyId}:`, err);
+          return null;
+        })
+      : Promise.resolve(null);
+
+    // Initialize conversation history
     const conversationHistory = data.conversationHistory || [];
     const isFirstMessage = conversationHistory.length === 0;
     
@@ -2121,9 +2111,9 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         timeout: 15,
         speechTimeout: "auto",
         language: gatherLanguage,
+        speechModel: "experimental_conversations",
         hints: hebrewHints,
         profanityFilter: false,
-        enhanced: true,
       });
 
       // Say the repeat message inside Gather for barge-in support
@@ -2152,11 +2142,15 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
     let shouldContinue = true;
     let shouldHangup = false;
     
-    const MAX_RETRIES = 3;
+    // Resolve company data (was fetched in parallel earlier)
+    const companySnapshot = await companyDataPromise;
+    const companyData = companySnapshot?.exists ? companySnapshot.data() : {};
+
+    const MAX_RETRIES = 2; // Reduced from 3 for faster voice response
     let retryCount = 0;
     let llmSuccess = false;
     let lastError = null;
-    
+
     while (retryCount < MAX_RETRIES && !llmSuccess) {
       try {
         // Build system prompt with company context and language
@@ -2180,8 +2174,8 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
             llmHistory,
             {
               model: "gpt-4o-mini", // Fastest and most cost-effective for real-time
-              maxTokens: 150, // Keep responses very short for voice (2-3 sentences max)
-              temperature: 0.8, // Slightly higher for more natural, human-like responses
+              maxTokens: 100, // Voice: 1-2 sentences max (shorter = faster response)
+              temperature: 0.7, // Balanced natural + accurate
             },
         );
         
@@ -2195,24 +2189,45 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
           tokensUsed: llmResult.tokensUsed,
         });
         
-        // Check if conversation should end - improved detection
-        const endKeywords = [
-          "להתראות", "תודה רבה", "תודה", "ביי", "bye", "goodbye", 
-          "סיום", "סיימתי", "זה הכל", "זהו", "נהניתי", "יום נעים",
-          "יום נפלא", "נקבע בהצלחה", "תודה שבחרת"
-        ];
+        // Check if conversation should end - CONSERVATIVE detection
+        // Only end when it's clearly a goodbye, not mid-conversation "תודה"
         const responseLower = aiResponse.toLowerCase();
-        const userMessageLower = speechResult.toLowerCase();
-        
-        // Check if user wants to end
-        const userWantsToEnd = endKeywords.some((kw) => userMessageLower.includes(kw));
-        
-        // Check if AI is ending the conversation
-        const aiIsEnding = endKeywords.some((kw) => responseLower.includes(kw)) ||
-                          (responseLower.includes("יום") && (responseLower.includes("נעים") || responseLower.includes("נפלא"))) ||
-                          responseLower.includes("נקבע בהצלחה");
-        
+        const userMessageLower = speechResult.toLowerCase().trim();
+
+        // User explicitly wants to end (strict matching - short farewell messages only)
+        const userExplicitEnd = [
+          "להתראות", "ביי", "bye", "goodbye", "סיימתי", "זה הכל",
+        ];
+        // "תודה" alone (not part of longer message) = might be ending
+        const userThanksOnly = ["תודה רבה", "תודה", "thanks", "thank you"];
+
+        // User wants to end ONLY if:
+        // 1. They said an explicit farewell word, OR
+        // 2. They ONLY said "תודה" (short message, < 15 chars) without asking anything else
+        const isExplicitEnd = userExplicitEnd.some((kw) => userMessageLower.includes(kw));
+        const isThanksOnly = userThanksOnly.some((kw) => userMessageLower.includes(kw)) &&
+                             userMessageLower.length < 15 &&
+                             !userMessageLower.includes("?") &&
+                             !userMessageLower.includes("רוצה") &&
+                             !userMessageLower.includes("אני") &&
+                             !userMessageLower.includes("עוד");
+        const userWantsToEnd = isExplicitEnd || isThanksOnly;
+
+        // AI is ending ONLY if it says farewell phrases (not just "תודה" mid-sentence)
+        const aiEndPhrases = ["להתראות", "יום נעים", "יום נפלא", "נקבע בהצלחה", "תודה שבחרת"];
+        const aiIsEnding = aiEndPhrases.some((kw) => responseLower.includes(kw));
+
         shouldHangup = userWantsToEnd || aiIsEnding;
+
+        logger.info("End-of-call detection", {
+          callSessionId,
+          userWantsToEnd,
+          aiIsEnding,
+          shouldHangup,
+          userMessageLength: userMessageLower.length,
+          isExplicitEnd,
+          isThanksOnly,
+        });
         
         // Add AI response to history
         // Note: Cannot use FieldValue.serverTimestamp() inside array, use Date instead
@@ -2304,10 +2319,9 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
           : "I understand. How else can I help you?";
       }
       
-      // Don't always hangup on fallback - try to continue conversation
-      // Only hangup if user explicitly wants to end
-      const endKeywords = ["להתראות", "תודה", "ביי", "bye", "goodbye"];
-      const userWantsToEnd = endKeywords.some((kw) => speechLower.includes(kw));
+      // Don't hangup on fallback - only if user explicitly says farewell
+      const farewellWords = ["להתראות", "ביי", "bye", "goodbye", "סיימתי"];
+      const userWantsToEnd = farewellWords.some((kw) => speechLower.includes(kw));
       shouldHangup = userWantsToEnd;
       
       logger.info("Fallback response generated", {
@@ -2328,32 +2342,38 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       updatedAt: FieldValue.serverTimestamp(),
     };
     
-    // Update Lead record if we have a leadId
+    // LATENCY OPTIMIZATION: Write Firestore and Lead updates as fire-and-forget
+    // This saves ~80-150ms by not waiting for write confirmations before responding
+    const writePromises = [];
+
+    writePromises.push(
+      sessionRef.set(updateData, {merge: true}).catch((err) => {
+        logger.warn("Failed to update session", {callSessionId, error: err.message});
+      }),
+    );
+
     if (leadId && shouldHangup) {
-      try {
-        // Determine lead status from conversation
-        const conversationText = conversationHistory.map((m) => m.content).join(" ");
-        const textLower = conversationText.toLowerCase();
-        let leadStatus = "Contacted";
-        
-        if (textLower.includes("כן") || textLower.includes("מתאים") || textLower.includes("yes")) {
-          leadStatus = "Interested";
-        } else if (textLower.includes("לא") || textLower.includes("no") || textLower.includes("לא מעוניין")) {
-          leadStatus = "Not Interested";
-        }
-        
-        await db.collection("Lead").doc(leadId).update({
+      const conversationText = conversationHistory.map((m) => m.content).join(" ");
+      const textLower = conversationText.toLowerCase();
+      let leadStatus = "Contacted";
+      if (textLower.includes("כן") || textLower.includes("מתאים") || textLower.includes("yes")) {
+        leadStatus = "Interested";
+      } else if (textLower.includes("לא") || textLower.includes("no") || textLower.includes("לא מעוניין")) {
+        leadStatus = "Not Interested";
+      }
+      writePromises.push(
+        db.collection("Lead").doc(leadId).update({
           callStatus: leadStatus,
           lastContactDate: FieldValue.serverTimestamp(),
           callNotes: `Conversation: ${conversationText.substring(0, 500)}`,
-        });
-      } catch (leadError) {
-        logger.warn(`Could not update Lead ${leadId}:`, leadError);
-      }
+        }).catch((err) => logger.warn(`Could not update Lead ${leadId}:`, err)),
+      );
     }
-    
-    await sessionRef.set(updateData, {merge: true});
-    
+
+    // Don't await writes - respond to Twilio immediately!
+    // Writes happen in background
+    Promise.all(writePromises).catch(() => {});
+
     const processingTime = Date.now() - startTime;
     logger.info("twilioGatherCallback processing complete", {
       callSessionId,
@@ -2402,9 +2422,9 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         timeout: 15, // 15 seconds for speech after AI response finishes
         speechTimeout: "auto", // Twilio auto-detects end of speech
         language: gatherLanguage,
+        speechModel: "experimental_conversations",
         hints: hebrewHints,
         profanityFilter: false,
-        enhanced: true, // Use enhanced speech recognition
       });
 
       // AI response INSIDE Gather → enables barge-in during AI speech!
