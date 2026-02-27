@@ -129,27 +129,32 @@ exports.twilioMediaStream = onRequest(
     const streamUrl = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/twilioMediaStream?callSid=${callSid}&callSessionId=${callSessionId}`;
 
     // Helper function to create TwiML for Say
+    // NOTE: Uses <Start><Stream> (correct Twilio SDK method) for Media Streams.
+    // This requires a wss:// WebSocket endpoint, not https://.
+    // Firebase Cloud Functions cannot handle WebSocket; planned for Cloud Run.
     const createSayTwiML = (text) => {
-      const response = new twilio.twiml.VoiceResponse();
-      response.say({voice: finalVoiceId, language: sayLanguage}, text);
-      // Continue streaming after saying
-      response.stream({
+      const twimlResponse = new twilio.twiml.VoiceResponse();
+      twimlResponse.say({voice: finalVoiceId, language: sayLanguage}, text);
+      // Continue streaming after saying using correct TwiML verb
+      const start = twimlResponse.start();
+      start.stream({
         url: streamUrl,
         track: "both_tracks",
       });
-      return response.toString();
+      return twimlResponse.toString();
     };
 
     // Helper function to create TwiML for barge-in (stop current Say)
     const createBargeInTwiML = () => {
-      const response = new twilio.twiml.VoiceResponse();
+      const twimlResponse = new twilio.twiml.VoiceResponse();
       // Minimal pause to stop current Say, then continue streaming
-      response.pause({length: 0.05});
-      response.stream({
+      twimlResponse.pause({length: 0.05});
+      const start = twimlResponse.start();
+      start.stream({
         url: streamUrl,
         track: "both_tracks",
       });
-      return response.toString();
+      return twimlResponse.toString();
     };
 
     // Track state

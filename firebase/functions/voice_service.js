@@ -59,6 +59,7 @@ const MESSAGES = {
   "he-IL": {
     defaultGreeting: "שלום, כאן העוזר הווירטואלי שלכם. תודה שענית לשיחה.",
     askAvailability: "האם את/ה זמין/ה לשיחה? אנא אמור/י כן או לא.",
+    didNotHear: "סליחה, לא שמעתי אותך. תוכל לחזור בבקשה?",
     noResponse: "אין בעיה. ניצור איתך קשר בהקדם. יום נעים!",
     positiveResponse: "מצוין! תודה על ההתעניינות. אחד מאנשי הצוות שלנו יחזור אליך בהקדם. יום נפלא!",
     negativeResponse: "אני מבין/ה. תודה על הזמן. אם תשנה/י דעתך, אל תהסס/י ליצור איתנו קשר. יום נעים!",
@@ -75,6 +76,7 @@ const MESSAGES = {
   "he": {
     defaultGreeting: "שלום, כאן העוזר הווירטואלי שלכם. תודה שענית לשיחה.",
     askAvailability: "האם את/ה זמין/ה לשיחה? אנא אמור/י כן או לא.",
+    didNotHear: "סליחה, לא שמעתי אותך. תוכל לחזור בבקשה?",
     noResponse: "אין בעיה. ניצור איתך קשר בהקדם. יום נעים!",
     positiveResponse: "מצוין! תודה על ההתעניינות. אחד מאנשי הצוות שלנו יחזור אליך בהקדם. יום נפלא!",
     negativeResponse: "אני מבין/ה. תודה על הזמן. אם תשנה/י דעתך, אל תהסס/י ליצור איתנו קשר. יום נעים!",
@@ -91,6 +93,7 @@ const MESSAGES = {
   "en-US": {
     defaultGreeting: "Hello, this is your virtual assistant. Thank you for taking our call.",
     askAvailability: "Are you available to speak with us? Please say yes or no.",
+    didNotHear: "Sorry, I didn't catch that. Could you please repeat?",
     noResponse: "No problem. We will contact you again soon. Have a great day!",
     positiveResponse: "Great! Thank you for your interest. One of our team members will call you back shortly to assist you further. Have a wonderful day!",
     negativeResponse: "I understand. Thank you for your time. If you change your mind, feel free to reach out to us. Have a great day!",
@@ -107,6 +110,7 @@ const MESSAGES = {
   "en": {
     defaultGreeting: "Hello, this is your virtual assistant. Thank you for taking our call.",
     askAvailability: "Are you available to speak with us? Please say yes or no.",
+    didNotHear: "Sorry, I didn't catch that. Could you please repeat?",
     noResponse: "No problem. We will contact you again soon. Have a great day!",
     positiveResponse: "Great! Thank you for your interest. One of our team members will call you back shortly to assist you further. Have a wonderful day!",
     negativeResponse: "I understand. Thank you for your time. If you change your mind, feel free to reach out to us. Have a great day!",
@@ -123,6 +127,7 @@ const MESSAGES = {
   "ar": {
     defaultGreeting: "مرحباً، هذا هو المساعد الافتراضي الخاص بك. شكراً لردك على المكالمة.",
     askAvailability: "هل أنت متاح للتحدث معنا؟ يرجى قول نعم أو لا.",
+    didNotHear: "عذراً، لم أسمعك. هل يمكنك التكرار من فضلك؟",
     noResponse: "لا مشكلة. سنتواصل معك قريباً. يوم سعيد!",
     positiveResponse: "رائع! شكراً لاهتمامك. أحد أعضاء فريقنا سيتصل بك قريباً لمساعدتك أكثر. يوم رائع!",
     negativeResponse: "أفهم. شكراً لوقتك. إذا غيرت رأيك، لا تتردد في التواصل معنا. يوم سعيد!",
@@ -1847,100 +1852,76 @@ exports.twilioVoiceWebhook = onRequest(
       console.log("[twilioVoiceWebhook] Conversation history saved");
     }
 
-    // Speak the personalized greeting
     // Ensure language is full code (he-IL) for Twilio Say
     const sayLanguage = language === "he" ? "he-IL" : language;
     console.log("[twilioVoiceWebhook] Saying greeting with voice:", voiceId, "language:", sayLanguage);
-    
-    try {
-      const greetingToSay = greeting || getMessage("defaultGreeting", language);
-      response.say({voice: voiceId, language: sayLanguage}, greetingToSay);
-    } catch (sayError) {
-      console.error("[twilioVoiceWebhook] Failed to add Say to response", sayError);
-      logger.error("Failed to add Say to response", {error: sayError.message, voiceId, sayLanguage});
-      // Fallback to default greeting
-      response.say({voice: DEFAULT_HEBREW_VOICE, language: "he-IL"}, getMessage("defaultGreeting", "he-IL"));
-    }
 
     // Use sessionId (which is either callSessionId for outbound or newly created for inbound)
     const finalSessionId = sessionId || callSessionId;
-    
-    // Check if we should use Deepgram STT (via Media Streams) or Twilio Gather
-    // Use Deepgram if:
-    // 1. transcriber provider is explicitly set to "deepgram", OR
-    // 2. sttProvider is explicitly set to "deepgram", OR
-    // 3. DEEPGRAM_API_KEY is available (default to Deepgram for better Hebrew STT)
-    const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
-    let useDeepgram = assistant.transcriber?.provider === "deepgram" ||
-                      assistant.sttProvider === "deepgram" ||
-                      !!DEEPGRAM_API_KEY; // Default to Deepgram if API key is available
-    
-    if (useDeepgram) {
+
+    // ── Speech Recognition Setup ─────────────────────────────────────────
+    // NOTE: Twilio Media Streams (Deepgram) requires WebSocket (wss://) which
+    // Firebase Cloud Functions (onRequest) cannot handle. WebSocket support
+    // requires a separate Cloud Run service deployment.
+    // Using Twilio Gather as the primary STT provider.
+    // Gather with nested <Say> provides automatic barge-in (interruption).
+    const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
+
+    // Hebrew speech hints for improved recognition quality
+    const hebrewHints = language?.startsWith("he")
+      ? "שלום,כן,לא,תודה,אני,מעוניין,לא מעוניין,בבקשה,מה,איך,מתי,למה,עזרה,שירות,מידע,להתראות,טוב,בסדר,נכון,אוקיי,רגע,שנייה"
+      : "";
+
+    try {
+      const greetingToSay = greeting || getMessage("defaultGreeting", language);
+
+      // CRITICAL: Greeting is INSIDE Gather to enable barge-in (interruption).
+      // When <Say> is nested inside <Gather>, Twilio automatically stops the
+      // Say and begins capturing speech if the caller speaks during playback.
+      const gather = response.gather({
+        input: "speech",
+        action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`,
+        method: "POST",
+        timeout: 15, // 15 seconds to wait for speech after greeting finishes
+        speechTimeout: "auto", // Twilio auto-detects end of speech
+        language: gatherLanguage,
+        hints: hebrewHints,
+        profanityFilter: false,
+        enhanced: true, // Use enhanced speech recognition
+      });
+
+      // Say greeting INSIDE Gather → enables barge-in!
+      gather.say({voice: voiceId, language: sayLanguage}, greetingToSay);
+
+      logger.info("Gather with barge-in greeting set up", {
+        callSid: callSid || "unknown",
+        callSessionId: finalSessionId,
+        language: gatherLanguage,
+        greetingLength: greetingToSay.length,
+        hasHints: !!hebrewHints,
+      });
+    } catch (gatherError) {
+      console.error("[twilioVoiceWebhook] Failed to create Gather with greeting", gatherError);
+      logger.error("Failed to create Gather with greeting", {
+        error: gatherError.message,
+        callSessionId: finalSessionId,
+      });
+      // Fallback: Say greeting without Gather (no barge-in, but at least plays)
       try {
-        // Use Twilio Media Streams with Deepgram STT
-        // Note: Twilio Media Streams requires WebSocket, but Firebase Functions doesn't support WebSocket
-        // For now, we'll use HTTP endpoint that handles Media Streams
-        // The URL should be wss:// for WebSocket, but we'll use https:// and handle it in the endpoint
-        const streamUrl = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/twilioMediaStream?callSid=${callSid}&callSessionId=${finalSessionId}`;
-        
-        response.stream({
-          url: streamUrl,
-          track: "both_tracks", // Send both inbound and outbound audio
-          // Note: startOnEnter is not a valid parameter for Stream verb
-          // Barge-in will be handled via Twilio REST API in twilioMediaStream
-        });
-        
-        logger.info("Using Deepgram STT via Media Streams", {
-          callSid,
-          callSessionId: finalSessionId,
-          streamUrl,
-        });
-      } catch (deepgramError) {
-        // If Deepgram setup fails, fallback to Twilio Gather
-        logger.error("Failed to setup Deepgram, falling back to Twilio Gather", {
-          error: deepgramError.message,
-          stack: deepgramError.stack,
-          callSid,
-          callSessionId: finalSessionId,
-        });
-        // Continue to Twilio Gather fallback below
-        useDeepgram = false; // Force fallback
+        response.say(
+          {voice: voiceId || DEFAULT_HEBREW_VOICE, language: sayLanguage || "he-IL"},
+          greeting || getMessage("defaultGreeting", "he-IL"),
+        );
+      } catch (fallbackSayError) {
+        response.say({voice: DEFAULT_HEBREW_VOICE, language: "he-IL"}, getMessage("defaultGreeting", "he-IL"));
       }
     }
-    
-    if (!useDeepgram) {
-      // Use Twilio Gather (default - Twilio STT)
-      // Twilio Gather requires full language code (he-IL) not just (he)
-      const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
-      
-      try {
-        const gather = response.gather({
-          input: "speech",
-          action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`,
-          method: "POST",
-          timeout: 10, // 10 seconds for speech recognition
-          speechTimeout: "auto", // Twilio auto-detects end of speech
-          language: gatherLanguage,
-          hints: "", // Empty hints - Twilio will auto-detect Hebrew
-          profanityFilter: false,
-          enhanced: true, // Use enhanced speech recognition
-        });
-        
-        // Optional subtle prompt (empty to just listen)
-        gather.say({voice: voiceId, language: sayLanguage}, "");
-        
-        logger.info("Using Twilio Gather STT", {
-          callSid: callSid || "unknown",
-          callSessionId: finalSessionId,
-          language: gatherLanguage,
-        });
-      } catch (gatherError) {
-        console.error("[twilioVoiceWebhook] Failed to create Gather", gatherError);
-        logger.error("Failed to create Gather", {error: gatherError.message, callSessionId: finalSessionId});
-        // Continue without Gather - will just say greeting and hangup
-        // This is not ideal but better than crashing
-      }
-    }
+
+    // Safety net: If Gather times out or callback fails, Twilio falls through here
+    response.say(
+      {voice: voiceId || DEFAULT_HEBREW_VOICE, language: sayLanguage || "he-IL"},
+      getMessage("noResponse", language) || "סליחה, לא שמעתי. אנא התקשר שוב.",
+    );
 
     // Note: No need to add say/hangup here - Twilio Gather will wait for user input
     // If no response is received (timeout), Twilio will call twilioGatherCallback with empty SpeechResult
@@ -2119,37 +2100,46 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       const sayLanguage = language === "he" ? "he-IL" : (language || "he-IL");
       const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
       
-      // Get appropriate message based on language
-      const repeatMessage = getMessage("noResponse", language) || 
-                           (language?.startsWith("he") 
-                             ? "סליחה, לא שמעתי אותך. תוכל לחזור בבקשה?" 
+      // Get appropriate "didn't hear you" message
+      const repeatMessage = getMessage("didNotHear", language) ||
+                           (language?.startsWith("he")
+                             ? "סליחה, לא שמעתי אותך. תוכל לחזור בבקשה?"
                              : "Sorry, I didn't hear you. Could you repeat please?");
-      
-      response.say(
-        {voice: voiceId, language: sayLanguage},
-        repeatMessage,
-      );
-      
-      // Continue gathering input
+
+      // NOTE: repeatMessage is said INSIDE Gather below for barge-in support.
+      // Do NOT add response.say() here - it would play without barge-in.
+
+      // Continue gathering input with Hebrew hints
+      const hebrewHints = language?.startsWith("he")
+        ? "שלום,כן,לא,תודה,אני,מעוניין,לא מעוניין,בבקשה,מה,איך,מתי,למה,עזרה,שירות,מידע,להתראות,טוב,בסדר,נכון,אוקיי,רגע,שנייה"
+        : "";
+
       const gather = response.gather({
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
         method: "POST",
-        timeout: 10,
+        timeout: 15,
         speechTimeout: "auto",
         language: gatherLanguage,
-        hints: "",
+        hints: hebrewHints,
         profanityFilter: false,
         enhanced: true,
       });
-      
-      gather.say({voice: voiceId, language: sayLanguage}, "");
-      
+
+      // Say the repeat message inside Gather for barge-in support
+      gather.say({voice: voiceId, language: sayLanguage}, repeatMessage);
+
+      // Safety fallback after Gather
+      response.say(
+        {voice: voiceId, language: sayLanguage},
+        getMessage("thankYouGoodbye", language) || "תודה, להתראות.",
+      );
+
       res.set("Content-Type", "text/xml");
       res.status(200).send(response.toString());
       return;
     }
-    
+
     // Add user message to history
     conversationHistory.push({
       role: "user",
@@ -2378,43 +2368,57 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
     const sayLanguage = language === "he" ? "he-IL" : language;
     const gatherLanguage = language === "he" ? "he-IL" : language;
     
-    if (aiResponse) {
-      console.log("Saying AI response:", aiResponse.substring(0, 100) + "...");
-      response.say({voice: voiceId, language: sayLanguage}, aiResponse);
-    } else {
-      logger.warn("No AI response to say", {callSessionId});
-    }
-    
     // Continue conversation or hang up
     if (shouldHangup) {
+      // Say the final AI response and hang up
+      if (aiResponse) {
+        console.log("Saying final AI response:", aiResponse.substring(0, 100) + "...");
+        response.say({voice: voiceId, language: sayLanguage}, aiResponse);
+      }
       console.log("Hanging up call", {callSessionId, reason: "shouldHangup=true"});
       logger.info("Ending call", {callSessionId, reason: "shouldHangup=true"});
       response.hangup();
     } else {
-      // Continue gathering input for next turn
-      console.log("Continuing conversation, setting up Gather", {callSessionId});
-      logger.info("Continuing conversation", {
+      // Continue conversation: AI response is INSIDE Gather for barge-in support
+      // This means the caller can interrupt the AI's response by speaking!
+      console.log("Continuing conversation, setting up Gather with barge-in", {callSessionId});
+
+      const hebrewHints = language?.startsWith("he")
+        ? "שלום,כן,לא,תודה,אני,מעוניין,לא מעוניין,בבקשה,מה,איך,מתי,למה,עזרה,שירות,מידע,להתראות,טוב,בסדר,נכון,אוקיי,רגע,שנייה"
+        : "";
+
+      logger.info("Continuing conversation with barge-in Gather", {
         callSessionId,
-        nextGatherTimeout: 10,
+        nextGatherTimeout: 15,
         language: gatherLanguage,
+        hasHints: !!hebrewHints,
+        aiResponseLength: aiResponse?.length || 0,
       });
-      
+
       const gather = response.gather({
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
         method: "POST",
-        timeout: 10, // 10 seconds for speech recognition
+        timeout: 15, // 15 seconds for speech after AI response finishes
         speechTimeout: "auto", // Twilio auto-detects end of speech
         language: gatherLanguage,
-        hints: "", // Empty hints - Twilio will auto-detect Hebrew
+        hints: hebrewHints,
         profanityFilter: false,
         enhanced: true, // Use enhanced speech recognition
       });
-      
-      // Optional: Add a subtle prompt (can be empty to just listen)
-      gather.say({voice: voiceId, language: sayLanguage}, "");
+
+      // AI response INSIDE Gather → enables barge-in during AI speech!
+      if (aiResponse) {
+        gather.say({voice: voiceId, language: sayLanguage}, aiResponse);
+      }
+
+      // Safety net: If Gather times out and callback fails, say goodbye
+      response.say(
+        {voice: voiceId, language: sayLanguage},
+        getMessage("thankYouGoodbye", language) || "תודה, להתראות.",
+      );
     }
-    
+
     res.set("Content-Type", "text/xml");
     res.status(200).send(response.toString());
     
