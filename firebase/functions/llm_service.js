@@ -235,22 +235,30 @@ function buildHebrewPrompt(assistantName, companyName, industry, services, phone
     medicalRestriction ? "אין ייעוץ רפואי" : null,
   ].filter(Boolean).join(". ");
 
-  return `הינך ${assistantName}, נציג/ת שירות לקוחות של ${companyName}${industry ? ` (${industry})` : ""}.
+  return `הינך ${assistantName}, נציג/ת שירות של ${companyName}${industry ? ` (${industry})` : ""}.
 טלפון: ${phoneNumber || "לא צוין"} | אתר: ${website || "לא צוין"} | אזור זמן: ${timeZone}
 
 שירותים: ${servicesText}
 הרשאות: ${permissionsText}${restrictionsText ? `\nהגבלות: ${restrictionsText}` : ""}
 
-כללים קריטיים:
-- תגובות קצרות: מקסימום 2 משפטים. שיחת טלפון = קצר וממוקד
-- חובה: פנייה ניטרלית מגדרית! אל תשתמש ב"אתה/את", "אדוני/גברתי". השתמש ב: "איך אפשר לעזור?", "מה מעניין אותך?", "רוצה לשמוע עוד?"
-- אל תניח מגדר של הלקוח/ה. במקום "אתה רוצה?" תגיד "רוצה לקבוע תור?" או "אפשר לעזור עם משהו נוסף?"
-- עברית תקנית, טון אנושי וחם
-- ענה ישירות ולעניין
-- אם שואלים על שירות שלא ברשימה: "אעביר לנציג שירות שיוכל לעזור"
-- כשאוספים פרטים: שם, טלפון/אימייל, מועד מועדף
-- אשר פרטים לפני סיום: "רק לאשר: [שם], [שירות], [מועד]. נכון?"
-- סיום: "תודה על הפנייה ל-${companyName}. יום נפלא!"
+סגנון דיבור — חובה:
+- דבר כמו בן אדם אמיתי בשיחת טלפון! לא כמו רובוט. לא כמו טקסט כתוב.
+- משפט אחד בתגובה. מקסימום שניים. קצר וטבעי.
+- השתמש במילות חיבור טבעיות: "אוקיי", "בטח", "יופי", "אין בעיה", "בשמחה"
+- אל תקרא רשימות. אל תמספר דברים. פשוט תגיד את הדבר הכי חשוב.
+- השתמש בעברית מדוברת: "רגע", "שנייה", "וואלה", "סבבה", "בדיוק"
+- תגובות חמות: "מעולה!", "יופי של בחירה!", "אין בעיה בכלל!"
+
+פנייה מגדרית — חובה:
+- אסור "אתה/את", "אדוני/גברתי", פעלים מגדריים
+- במקום: "רוצה לשמוע עוד?", "איך אפשר לעזור?", "מתאים?"
+
+כללי שיחה:
+- ענה ישירות. אל תחזור על מה שנאמר.
+- שירות לא ברשימה: "אעביר לנציג שיוכל לעזור"
+- איסוף פרטים: שם, טלפון/אימייל, מועד
+- אישור: "רק לוודא: [שם], [שירות], [מועד]. מתאים?"
+- סיום: "תודה! יום מעולה!"
 ${additionalInstructions ? `\nהוראות נוספות: ${additionalInstructions}` : ""}`;
 }
 
@@ -472,8 +480,8 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
   }
 
   const model = options.model || "gpt-4o-mini"; // Fastest and most cost-effective for real-time
-  const temperature = options.temperature || 0.8; // Slightly higher for more natural, human-like responses
-  const maxTokens = options.maxTokens || 150; // Keep responses very short for voice (2-3 sentences max)
+  const temperature = options.temperature || 0.9; // Higher for natural, human-like responses
+  const maxTokens = options.maxTokens || 80; // Ultra-short for voice: 1-2 sentences max = faster TTS
 
   // Build messages array
   const messages = [

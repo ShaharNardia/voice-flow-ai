@@ -165,6 +165,27 @@ const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-D";
 const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
 
 /**
+ * Wrap text in SSML prosody for more natural Hebrew speech.
+ * Slightly faster rate + lower pitch = confident human agent tone.
+ * Twilio <Say> supports SSML when the text starts with <speak>.
+ *
+ * @param {string} text - Plain text to wrap
+ * @param {string} language - Language code
+ * @returns {string} SSML-wrapped text (or plain text for non-Hebrew)
+ */
+function wrapSSML(text, language) {
+  if (!text) return text;
+  // Only apply SSML for Hebrew WaveNet voices (Google TTS supports SSML)
+  if (!language || !language.startsWith("he")) return text;
+  // Escape XML special characters in text
+  const escaped = text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+  return `<speak><prosody rate="105%" pitch="-2st">${escaped}</prosody></speak>`;
+}
+
+/**
  * Resolve the best TTS voice for the given language.
  *
  * Twilio <Say> only supports two voice families:
@@ -1886,12 +1907,12 @@ exports.twilioVoiceWebhook = onRequest(
         // HEBREW: Twilio STT does NOT support Hebrew reliably.
         // Use <Say> + <Record> → download recording → Deepgram REST API for transcription.
         // No barge-in with Record, but at least Hebrew is correctly recognized.
-        response.say({voice: voiceId, language: sayLanguage}, greetingToSay);
+        response.say({voice: voiceId, language: sayLanguage}, wrapSSML(greetingToSay, language));
         response.record({
           action: `${callbackUrl}&source=record`,
           method: "POST",
-          maxLength: 30,
-          timeout: 3,
+          maxLength: 15,
+          timeout: 2,
           playBeep: false,
           trim: "trim-silence",
           transcribe: false,
@@ -2039,14 +2060,11 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         speechConfidence = 0;
       } else {
         try {
-          // Small delay to ensure recording is available on Twilio's servers
-          await new Promise((resolve) => setTimeout(resolve, 300));
-
-          // Download recording from Twilio
+          // Download recording from Twilio (no delay - recording is ready when callback fires)
           const audioResponse = await axios.get(`${recordingUrl}.mp3`, {
             auth: {username: TWILIO_ACCOUNT_SID, password: TWILIO_AUTH_TOKEN},
             responseType: "arraybuffer",
-            timeout: 8000,
+            timeout: 5000,
           });
 
           // Transcribe with Deepgram REST API (nova-3 supports Hebrew natively)
@@ -2058,7 +2076,7 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
                 "Authorization": `Token ${DEEPGRAM_API_KEY}`,
                 "Content-Type": "audio/mpeg",
               },
-              timeout: 10000,
+              timeout: 5000,
             },
           );
 
@@ -2172,12 +2190,12 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
 
       if (isHebrew) {
         // Hebrew: Say message then Record for Deepgram transcription
-        response.say({voice: voiceId, language: sayLanguage}, repeatMessage);
+        response.say({voice: voiceId, language: sayLanguage}, wrapSSML(repeatMessage, language));
         response.record({
           action: `${callbackUrl}&source=record`,
           method: "POST",
-          maxLength: 30,
-          timeout: 3,
+          maxLength: 15,
+          timeout: 2,
           playBeep: false,
           trim: "trim-silence",
           transcribe: false,
@@ -2343,8 +2361,8 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         
         // If retryable and haven't exceeded max retries, wait and retry
         if (isRetryable && retryCount < MAX_RETRIES) {
-          // Exponential backoff: 200ms, 400ms, 800ms
-          const delayMs = Math.min(200 * Math.pow(2, retryCount - 1), 1000);
+          // Fast backoff: 100ms, 200ms (voice latency is critical)
+          const delayMs = Math.min(100 * Math.pow(2, retryCount - 1), 500);
           logger.info("Retrying LLM call after delay", {
             callSessionId,
             delayMs,
@@ -2466,7 +2484,7 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       // Say the final AI response and hang up
       if (aiResponse) {
         console.log("Saying final AI response:", aiResponse.substring(0, 100) + "...");
-        response.say({voice: voiceId, language: sayLanguage}, aiResponse);
+        response.say({voice: voiceId, language: sayLanguage}, wrapSSML(aiResponse, language));
       }
       console.log("Hanging up call", {callSessionId, reason: "shouldHangup=true"});
       logger.info("Ending call", {callSessionId, reason: "shouldHangup=true"});
@@ -2485,13 +2503,13 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       if (isHebrew) {
         // Hebrew: Say response then Record (Deepgram STT)
         if (aiResponse) {
-          response.say({voice: voiceId, language: sayLanguage}, aiResponse);
+          response.say({voice: voiceId, language: sayLanguage}, wrapSSML(aiResponse, language));
         }
         response.record({
           action: `${callbackUrl}&source=record`,
           method: "POST",
-          maxLength: 30,
-          timeout: 3,
+          maxLength: 15,
+          timeout: 2,
           playBeep: false,
           trim: "trim-silence",
           transcribe: false,
