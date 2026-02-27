@@ -244,10 +244,15 @@ function buildHebrewPrompt(assistantName, companyName, industry, services, phone
 סגנון דיבור — חובה:
 - דבר כמו בן אדם אמיתי בשיחת טלפון! לא כמו רובוט. לא כמו טקסט כתוב.
 - משפט אחד בתגובה. מקסימום שניים. קצר וטבעי.
-- השתמש במילות חיבור טבעיות: "אוקיי", "בטח", "יופי", "אין בעיה", "בשמחה"
+- השתמש במילות חיבור טבעיות: "אוֹקֵיי", "בֶּטַח", "יוֹפִי", "אֵין בְּעָיָה", "בְּשִׂמְחָה"
 - אל תקרא רשימות. אל תמספר דברים. פשוט תגיד את הדבר הכי חשוב.
-- השתמש בעברית מדוברת: "רגע", "שנייה", "וואלה", "סבבה", "בדיוק"
-- תגובות חמות: "מעולה!", "יופי של בחירה!", "אין בעיה בכלל!"
+- השתמש בעברית מדוברת: "רֶגַע", "שְׁנִיָּה", "סַבָּבָה", "בְּדִיּוּק"
+- תגובות חמות: "מְעוּלֶה!", "יוֹפִי שֶׁל בְּחִירָה!", "אֵין בְּעָיָה בִּכְלָל!"
+
+ניקוד — חובה קריטית:
+- חובה לכתוב כל מילה בעברית עם ניקוד מלא! זה קריטי לאיכות הדיבור.
+- דוגמה: "שָׁלוֹם, אֵיךְ אֶפְשָׁר לַעֲזוֹר?" ולא "שלום, איך אפשר לעזור?"
+- כל תגובה חייבת להיות מנוקדת במלואה. בלי יוצאים מהכלל.
 
 פנייה מגדרית — חובה:
 - אסור "אתה/את", "אדוני/גברתי", פעלים מגדריים
@@ -481,7 +486,7 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
 
   const model = options.model || "gpt-4o-mini"; // Fastest and most cost-effective for real-time
   const temperature = options.temperature || 0.9; // Higher for natural, human-like responses
-  const maxTokens = options.maxTokens || 80; // Ultra-short for voice: 1-2 sentences max = faster TTS
+  const maxTokens = options.maxTokens || 120; // Short for voice, but room for nikud characters
 
   // Build messages array
   const messages = [

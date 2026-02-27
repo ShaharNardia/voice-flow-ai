@@ -1914,7 +1914,7 @@ exports.twilioVoiceWebhook = onRequest(
           maxLength: 15,
           timeout: 2,
           playBeep: false,
-          trim: "trim-silence",
+          trim: "do-not-trim",
           transcribe: false,
         });
       } else {
@@ -2054,50 +2054,47 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         callSessionId, recordingSid, recordingDuration, recordingUrl,
       });
 
-      if (parseInt(recordingDuration) === 0) {
-        // No speech detected in recording
+      // ALWAYS try to transcribe — even duration=0 recordings may contain
+      // short words like "כן" / "לא" that Twilio rounds down to 0 seconds
+      try {
+        // Download recording from Twilio
+        const audioResponse = await axios.get(`${recordingUrl}.mp3`, {
+          auth: {username: TWILIO_ACCOUNT_SID, password: TWILIO_AUTH_TOKEN},
+          responseType: "arraybuffer",
+          timeout: 5000,
+        });
+
+        // Transcribe with Deepgram REST API (nova-3 supports Hebrew natively)
+        const dgResponse = await axios.post(
+          "https://api.deepgram.com/v1/listen?language=he&model=nova-3&smart_format=true&punctuate=true",
+          audioResponse.data,
+          {
+            headers: {
+              "Authorization": `Token ${DEEPGRAM_API_KEY}`,
+              "Content-Type": "audio/mpeg",
+            },
+            timeout: 5000,
+          },
+        );
+
+        speechResult = dgResponse.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
+        speechConfidence = dgResponse.data?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
+
+        logger.info("Deepgram transcription success", {
+          callSessionId,
+          transcript: speechResult,
+          confidence: speechConfidence,
+          recordingDuration,
+          deepgramTimeMs: Date.now() - startTime,
+        });
+      } catch (dgError) {
+        logger.error("Deepgram transcription failed", {
+          callSessionId,
+          error: dgError.message,
+          status: dgError.response?.status,
+        });
         speechResult = "";
         speechConfidence = 0;
-      } else {
-        try {
-          // Download recording from Twilio (no delay - recording is ready when callback fires)
-          const audioResponse = await axios.get(`${recordingUrl}.mp3`, {
-            auth: {username: TWILIO_ACCOUNT_SID, password: TWILIO_AUTH_TOKEN},
-            responseType: "arraybuffer",
-            timeout: 5000,
-          });
-
-          // Transcribe with Deepgram REST API (nova-3 supports Hebrew natively)
-          const dgResponse = await axios.post(
-            "https://api.deepgram.com/v1/listen?language=he&model=nova-3&smart_format=true&punctuate=true",
-            audioResponse.data,
-            {
-              headers: {
-                "Authorization": `Token ${DEEPGRAM_API_KEY}`,
-                "Content-Type": "audio/mpeg",
-              },
-              timeout: 5000,
-            },
-          );
-
-          speechResult = dgResponse.data?.results?.channels?.[0]?.alternatives?.[0]?.transcript || "";
-          speechConfidence = dgResponse.data?.results?.channels?.[0]?.alternatives?.[0]?.confidence || 0;
-
-          logger.info("Deepgram transcription success", {
-            callSessionId,
-            transcript: speechResult,
-            confidence: speechConfidence,
-            deepgramTimeMs: Date.now() - startTime,
-          });
-        } catch (dgError) {
-          logger.error("Deepgram transcription failed", {
-            callSessionId,
-            error: dgError.message,
-            status: dgError.response?.status,
-          });
-          speechResult = "";
-          speechConfidence = 0;
-        }
       }
     }
     // ── END DEEPGRAM TRANSCRIPTION ──────────────────────────────────────
@@ -2197,7 +2194,7 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
           maxLength: 15,
           timeout: 2,
           playBeep: false,
-          trim: "trim-silence",
+          trim: "do-not-trim",
           transcribe: false,
         });
       } else {
@@ -2511,7 +2508,7 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
           maxLength: 15,
           timeout: 2,
           playBeep: false,
-          trim: "trim-silence",
+          trim: "do-not-trim",
           transcribe: false,
         });
       } else {
