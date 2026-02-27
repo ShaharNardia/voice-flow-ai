@@ -1,5 +1,6 @@
 const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
 const {getFirestore} = require("firebase-admin/firestore");
+const {logger} = require("firebase-functions");
 
 class BootstrapError extends Error {
   constructor(code, message) {
@@ -20,8 +21,15 @@ async function applySubscription(data, authUid) {
     status,
   } = data || {};
 
-  const configSecret =
-    process.env.ADMIN_PROVISION_SECRET || "temp-secret-20251109";
+  // SECURITY: No hardcoded fallback – secret MUST be set via env var.
+  // Set with: firebase functions:secrets:set ADMIN_PROVISION_SECRET
+  const configSecret = process.env.ADMIN_PROVISION_SECRET || "";
+  if (!configSecret) {
+    logger.warn(
+      "ADMIN_PROVISION_SECRET is not set – secret-based auth is disabled.",
+    );
+  }
+
   let callerIsAdmin = false;
 
   if (authUid) {
@@ -34,21 +42,39 @@ async function applySubscription(data, authUid) {
 
   const usingSecret =
     configSecret &&
+    configSecret.length >= 16 && // Enforce minimum secret length
     typeof secret === "string" &&
     secret.length > 0 &&
     secret === configSecret;
 
   if (!callerIsAdmin && !usingSecret) {
     throw new BootstrapError(
-        "permission-denied",
-        "Unauthorized to update subscription state.",
+      "permission-denied",
+      "Unauthorized to update subscription state.",
     );
   }
 
   if (!uid) {
     throw new BootstrapError(
-        "invalid-argument",
-        "The target uid is required.",
+      "invalid-argument",
+      "The target uid is required.",
+    );
+  }
+
+  // Validate uid format (Firebase UIDs are alphanumeric, max 128 chars)
+  if (typeof uid !== "string" || uid.length > 128 || !/^[\w-]+$/.test(uid)) {
+    throw new BootstrapError(
+      "invalid-argument",
+      "Invalid uid format.",
+    );
+  }
+
+  // Whitelist allowed roles to prevent privilege escalation
+  const ALLOWED_ROLES = ["user", "admin", "technician", "agent"];
+  if (role && !ALLOWED_ROLES.includes(role)) {
+    throw new BootstrapError(
+      "invalid-argument",
+      `Invalid role. Allowed: ${ALLOWED_ROLES.join(", ")}`,
     );
   }
 
@@ -102,6 +128,7 @@ exports.setUserSubscription = onCall(async (request) => {
     if (error instanceof BootstrapError) {
       throw new HttpsError(error.code, error.message);
     }
+    logger.error("setUserSubscription error", error);
     throw new HttpsError("unknown", error.message || "Unknown error");
   }
 });
@@ -136,10 +163,10 @@ exports.bootstrapAdminUser = onRequest(async (req, res) => {
       });
       return;
     }
+    logger.error("bootstrapAdminUser error", error);
     res.status(500).json({
       status: "error",
       message: error.message || "Unexpected error",
     });
   }
 });
-

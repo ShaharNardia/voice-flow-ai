@@ -16,16 +16,32 @@ const twilioClient =
 /**
  * Twilio Media Stream Handler
  * Receives audio from Twilio Media Streams and processes it through Deepgram STT
+ *
+ * LATENCY OPTIMIZATIONS (Premium Product):
+ * 1. Immediate filler phrase while waiting for LLM (eliminates dead air)
+ * 2. Non-blocking Firestore writes (session update doesn't block response)
+ * 3. Aggressive barge-in detection (200ms threshold)
+ * 4. Deepgram endpointing at 250ms for fast turn-taking
+ * 5. LLM timeout capped at 5s
+ * 6. Conversation history capped at 20 messages for fast LLM inference
  */
 
 // Store active Deepgram connections per call
 const activeConnections = new Map();
 
+// ── Latency constants ────────────────────────────────────────────────
+const BARGE_IN_CONFIDENCE_THRESHOLD = 0.4; // Lower = more sensitive to interruption
+const BARGE_IN_TIME_THRESHOLD = 200; // ms – faster barge-in for natural feel
+const MAX_CONVERSATION_HISTORY = 20; // Cap history to keep LLM fast
+const LLM_TIMEOUT_MS = 5000; // 5s max for real-time voice
+
 /**
  * Handle Twilio Media Stream WebSocket connection
  * This endpoint receives audio from Twilio and forwards it to Deepgram
  */
-exports.twilioMediaStream = onRequest(async (req, res) => {
+exports.twilioMediaStream = onRequest(
+  {minInstances: 1, timeoutSeconds: 300, memory: "512MiB"},
+  async (req, res) => {
   try {
     const callSid = req.query.callSid || req.body?.callSid;
     const callSessionId = req.query.callSessionId || req.body?.callSessionId;
@@ -127,8 +143,8 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
     // Helper function to create TwiML for barge-in (stop current Say)
     const createBargeInTwiML = () => {
       const response = new twilio.twiml.VoiceResponse();
-      // Pause briefly to stop current Say, then continue streaming
-      response.pause({length: 0.1});
+      // Minimal pause to stop current Say, then continue streaming
+      response.pause({length: 0.05});
       response.stream({
         url: streamUrl,
         track: "both_tracks",
@@ -140,27 +156,24 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
     let deepgramConnection = null;
     let lastFinalTranscript = "";
     let transcriptBuffer = "";
-    let isBotSpeaking = false; // Track if bot is currently speaking
+    let isBotSpeaking = false;
     let lastInterimTime = 0;
-    const BARGE_IN_CONFIDENCE_THRESHOLD = 0.5; // Minimum confidence for barge-in
-    const BARGE_IN_TIME_THRESHOLD = 500; // ms - minimum time between interim results to trigger barge-in
 
     // Track transcript processing start time
     let transcriptStartTime = Date.now();
-    
+
     const onTranscript = async (transcriptData) => {
       const {text, isFinal, confidence} = transcriptData;
       const now = Date.now();
 
-      // Handle interim results for barge-in detection
+      // ── Handle interim results for barge-in detection ──────────
       if (!isFinal && text && text.trim() && confidence >= BARGE_IN_CONFIDENCE_THRESHOLD) {
         transcriptBuffer = text;
-        
-        // Check if this is a new interim result (not just an update)
+
         const timeSinceLastInterim = now - lastInterimTime;
         lastInterimTime = now;
 
-        // If bot is speaking and we have a confident interim result, trigger barge-in
+        // If bot is speaking and we detect speech → barge-in!
         if (isBotSpeaking && timeSinceLastInterim > BARGE_IN_TIME_THRESHOLD) {
           const bargeInStartTime = Date.now();
           logger.info("Barge-in detected - stopping bot speech", {
@@ -169,23 +182,15 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
             interimText: text,
             confidence,
             timeSinceLastInterim,
-            timestamp: new Date().toISOString(),
           });
 
-          // Stop current Say by sending barge-in TwiML
           const bargeInTwiML = createBargeInTwiML();
           const bargeInSent = await sendTwiMLToTwilio(bargeInTwiML, "barge-in");
           const bargeInLatency = Date.now() - bargeInStartTime;
-          
+
           if (bargeInSent) {
             isBotSpeaking = false;
-            logger.info("Barge-in TwiML sent successfully", {
-              callSessionId,
-              callSid,
-              bargeInLatencyMs: bargeInLatency,
-            });
-          } else {
-            logger.warn("Failed to send barge-in TwiML", {
+            logger.info("Barge-in executed", {
               callSessionId,
               callSid,
               bargeInLatencyMs: bargeInLatency,
@@ -193,36 +198,66 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
           }
         }
 
-        logger.debug("Interim transcript received", {
+        logger.debug("Interim transcript", {
           callSessionId,
-          callSid,
           text,
           confidence,
           isBotSpeaking,
-          textLength: text.length,
         });
         return;
       }
 
-      // Handle final transcript
+      // ── Handle final transcript ────────────────────────────────
       if (isFinal && text && text.trim()) {
         const finalTranscriptStartTime = Date.now();
-        
-        // Final transcript received - process with LLM
-        logger.info("Final transcript received from Deepgram", {
+        const sttLatency = finalTranscriptStartTime - transcriptStartTime;
+
+        logger.info("Final transcript from Deepgram", {
           callSessionId,
           callSid,
           text,
-          textLength: text.length,
           confidence,
-          sttProcessingTimeMs: sttProcessingTime,
-          timestamp: new Date().toISOString(),
+          sttLatencyMs: sttLatency,
         });
 
         try {
-          // Update conversation history
+          // ── STEP 1: Send filler phrase IMMEDIATELY (no dead air) ──
+          const fillerPhrase = llmService.getRandomFiller(language);
+          const fillerTwiML = createSayTwiML(fillerPhrase);
+          const fillerStartTime = Date.now();
+
+          // Send filler and start LLM call concurrently
+          const [fillerSent] = await Promise.all([
+            sendTwiMLToTwilio(fillerTwiML, "filler"),
+            // Pre-fetch conversation history while filler plays
+            sessionRef.get(),
+          ]);
+
+          if (fillerSent) {
+            isBotSpeaking = true;
+          }
+
+          const fillerLatency = Date.now() - fillerStartTime;
+          logger.info("Filler phrase sent", {
+            callSessionId,
+            fillerPhrase,
+            fillerLatencyMs: fillerLatency,
+          });
+
+          // ── STEP 2: Get conversation history ──────────────────
           const currentData = await sessionRef.get();
-          const currentHistory = currentData.data()?.conversationHistory || [];
+          let currentHistory = currentData.data()?.conversationHistory || [];
+
+          // Cap history to keep LLM inference fast
+          if (currentHistory.length > MAX_CONVERSATION_HISTORY) {
+            // Keep system-relevant first messages + last N messages
+            const keepFirst = 2;
+            const keepLast = MAX_CONVERSATION_HISTORY - keepFirst;
+            currentHistory = [
+              ...currentHistory.slice(0, keepFirst),
+              ...currentHistory.slice(-keepLast),
+            ];
+          }
 
           // Add user message
           currentHistory.push({
@@ -231,7 +266,7 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
             timestamp: new Date(),
           });
 
-          // Get company data for context
+          // ── STEP 3: Get company data for context ──────────────
           const companyId = currentData.data()?.companyId;
           let companyData = {};
           if (companyId) {
@@ -245,11 +280,11 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
             }
           }
 
-          // Get LLM response
+          // ── STEP 4: Get LLM response ──────────────────────────
           const llmStartTime = Date.now();
           const systemPrompt = llmService.buildSystemPrompt(assistant, companyData, language);
           const llmHistory = llmService.getConversationHistory({conversationHistory: currentHistory});
-          
+
           const llmResult = await llmService.getLLMResponse(
             systemPrompt,
             text,
@@ -272,40 +307,47 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
             timestamp: new Date(),
           });
 
-          // Update session
-          await sessionRef.set({
-            conversationHistory: currentHistory,
-            lastSpeechResult: text,
-            lastAIResponse: aiResponse,
-            updatedAt: FieldValue.serverTimestamp(),
-          }, {merge: true});
-
-          // Send TwiML response back to Twilio
+          // ── STEP 5: Send AI response (replace filler) ─────────
           const twimlStartTime = Date.now();
           const sayTwiML = createSayTwiML(aiResponse);
           const twimlSent = await sendTwiMLToTwilio(sayTwiML, "llm-response");
           const twimlLatency = Date.now() - twimlStartTime;
-          
+
           if (twimlSent) {
-            isBotSpeaking = true; // Mark that bot is now speaking
+            isBotSpeaking = true;
           }
+
+          // ── STEP 6: Update session (NON-BLOCKING) ─────────────
+          // Fire-and-forget: don't wait for Firestore write to complete
+          sessionRef.set({
+            conversationHistory: currentHistory,
+            lastSpeechResult: text,
+            lastAIResponse: aiResponse,
+            updatedAt: FieldValue.serverTimestamp(),
+          }, {merge: true}).catch((err) => {
+            logger.error("Non-blocking session update failed", {
+              error: err.message,
+              callSessionId,
+            });
+          });
 
           logger.info("LLM response generated and sent", {
             callSessionId,
             callSid,
-            userMessage: text,
-            userMessageLength: text.length,
+            userMessage: text.substring(0, 50),
             aiResponse: aiResponse.substring(0, 100) + (aiResponse.length > 100 ? "..." : ""),
-            aiResponseLength: aiResponse.length,
+            sttLatencyMs: sttLatency,
+            fillerLatencyMs: fillerLatency,
             llmLatencyMs: llmLatency,
             twimlLatencyMs: twimlLatency,
             totalLatencyMs: totalLatency,
-            sttProcessingTimeMs: llmStartTime - finalTranscriptStartTime,
             twimlSent,
             tokensUsed: llmResult.tokensUsed,
-            timestamp: new Date().toISOString(),
+            historySize: currentHistory.length,
           });
 
+          // Reset transcript start time for next utterance
+          transcriptStartTime = Date.now();
         } catch (error) {
           logger.error("Error processing transcript with LLM", {
             error: error.message,
@@ -313,6 +355,20 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
             text,
             stack: error.stack,
           });
+
+          // On error, send a recovery phrase so the user isn't left in silence
+          try {
+            const lang = language?.startsWith("he") ? "he" : "en";
+            const recoveryPhrase = lang === "he"
+              ? "סליחה, רגע אחד בבקשה..."
+              : "Sorry, one moment please...";
+            const recoveryTwiML = createSayTwiML(recoveryPhrase);
+            await sendTwiMLToTwilio(recoveryTwiML, "error-recovery");
+          } catch (recoveryErr) {
+            logger.error("Recovery phrase also failed", {
+              error: recoveryErr.message,
+            });
+          }
         }
       }
     };
@@ -324,9 +380,7 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
         callSessionId,
         callSid,
       });
-      
-      // If Deepgram connection fails critically, try to fallback
-      // Note: This is a best-effort fallback - the call may need to be redirected
+
       if (deepgramConnection) {
         try {
           deepgramService.closeDeepgramConnection(deepgramConnection);
@@ -346,21 +400,19 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
         callSid,
         callSessionId,
       });
-      
+
       // Fallback to Twilio Gather
       if (twilioClient && callSid) {
         try {
           const fallbackResponse = new twilio.twiml.VoiceResponse();
           const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
-          const REGION = "us-central1";
-          const PROJECT_ID = process.env.GCLOUD_PROJECT;
           const BASE_FUNCTION_URL = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net`;
-          
+
           fallbackResponse.say(
             {voice: finalVoiceId, language: sayLanguage},
-            "מעבר למערכת זיהוי דיבור חלופית."
+            "מעבר למערכת זיהוי דיבור חלופית.",
           );
-          
+
           const gather = fallbackResponse.gather({
             input: "speech",
             action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
@@ -372,18 +424,18 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
             profanityFilter: false,
             enhanced: true,
           });
-          
+
           gather.say({voice: finalVoiceId, language: sayLanguage}, "");
-          
+
           await twilioClient.calls(callSid).update({
             twiml: fallbackResponse.toString(),
           });
-          
+
           logger.info("Fallback to Twilio Gather - DEEPGRAM_API_KEY not set", {
             callSid,
             callSessionId,
           });
-          
+
           res.status(200).send("OK - Fallback to Twilio Gather");
           return;
         } catch (fallbackError) {
@@ -402,8 +454,8 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
     }
 
     // Normalize language for Deepgram (he-IL → he)
-    const deepgramLanguage = language === "he" || language?.startsWith("he") ? "he" : 
-                            language === "en" || language?.startsWith("en") ? "en" : 
+    const deepgramLanguage = language === "he" || language?.startsWith("he") ? "he" :
+                            language === "en" || language?.startsWith("en") ? "en" :
                             language === "ar" || language?.startsWith("ar") ? "ar" : "he";
 
     // Create Deepgram connection
@@ -436,23 +488,19 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
         callSessionId,
         hasApiKey: !!process.env.DEEPGRAM_API_KEY,
       });
-      
-      // Try to fallback to Twilio Gather by redirecting the call
-      // Note: This requires updating the call via REST API
+
+      // Try to fallback to Twilio Gather
       if (twilioClient && callSid) {
         try {
-          const twilio = require("twilio");
           const fallbackResponse = new twilio.twiml.VoiceResponse();
           const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
-          const REGION = "us-central1";
-          const PROJECT_ID = process.env.GCLOUD_PROJECT;
           const BASE_FUNCTION_URL = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net`;
-          
+
           fallbackResponse.say(
             {voice: finalVoiceId, language: sayLanguage},
-            "מעבר למערכת זיהוי דיבור חלופית."
+            "מעבר למערכת זיהוי דיבור חלופית.",
           );
-          
+
           const gather = fallbackResponse.gather({
             input: "speech",
             action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
@@ -464,18 +512,18 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
             profanityFilter: false,
             enhanced: true,
           });
-          
+
           gather.say({voice: finalVoiceId, language: sayLanguage}, "");
-          
+
           await twilioClient.calls(callSid).update({
             twiml: fallbackResponse.toString(),
           });
-          
+
           logger.info("Fallback to Twilio Gather after Deepgram failure", {
             callSid,
             callSessionId,
           });
-          
+
           res.status(200).send("OK - Fallback to Twilio Gather");
           return;
         } catch (fallbackError) {
@@ -486,13 +534,12 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
           });
         }
       }
-      
+
       res.status(500).send("Failed to create Deepgram connection");
       return;
     }
 
     // Handle incoming audio data
-    // Twilio Media Streams sends audio as binary data
     req.on("data", (chunk) => {
       if (deepgramConnection) {
         deepgramService.sendAudioToDeepgram(deepgramConnection, chunk);
@@ -529,7 +576,6 @@ exports.twilioMediaStream = onRequest(async (req, res) => {
 
     // Send 200 OK to Twilio
     res.status(200).send("OK");
-
   } catch (error) {
     logger.error("Twilio Media Stream handler failed", {
       error: error.message,

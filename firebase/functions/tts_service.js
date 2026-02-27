@@ -21,10 +21,10 @@ function now() {
   return Date.now();
 }
 
-function setCors(res) {
-  res.set("Access-Control-Allow-Origin", "*");
-  res.set("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+const {setCorsHeadersSafe} = require("./security_utils");
+
+function setCors(req, res) {
+  setCorsHeadersSafe(req, res);
 }
 
 function parseBody(req) {
@@ -59,7 +59,7 @@ function escapeSsml(text = "") {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
-    .replace(/\"/g, "&quot;")
+    .replace(/"/g, "&quot;")
     .replace(/'/g, "&apos;");
 }
 
@@ -131,7 +131,7 @@ async function listElevenLabsVoices() {
   if (elevenVoicesCache && elevenVoicesCache.expiresAt > now()) {
     return elevenVoicesCache.value;
   }
-  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const apiKey = (elevenLabsApiKey.value() || process.env.ELEVENLABS_API_KEY || "").replace(/[\s\r\n\t\0]+/g, "");
   if (!apiKey) {
     throw new Error("ELEVENLABS_API_KEY environment variable is required.");
   }
@@ -240,7 +240,7 @@ async function synthesizeWithAzure({text, voiceId, languageCode, speakingRate, s
 }
 
 async function synthesizeWithElevenLabs({text, voiceId, modelId, optimizeStreamingLatency, voiceSettings}) {
-  const apiKey = process.env.ELEVENLABS_API_KEY;
+  const apiKey = (elevenLabsApiKey.value() || process.env.ELEVENLABS_API_KEY || "").replace(/[\s\r\n\t\0]+/g, "");
   if (!apiKey) {
     throw new Error("ELEVENLABS_API_KEY environment variable is required.");
   }
@@ -273,7 +273,7 @@ async function synthesizeWithElevenLabs({text, voiceId, modelId, optimizeStreami
 exports.listTtsVoices = onRequest(
   {secrets: [elevenLabsApiKey]},
   async (req, res) => {
-  setCors(res);
+  setCors(req, res);
   if (req.method === "OPTIONS") {
     res.status(204).end();
     return;
@@ -311,9 +311,9 @@ exports.listTtsVoices = onRequest(
 });
 
 exports.synthesizeTts = onRequest(
-  {secrets: [elevenLabsApiKey]},
+  {secrets: [elevenLabsApiKey], minInstances: 1, memory: "512MiB"},
   async (req, res) => {
-  setCors(res);
+  setCors(req, res);
   if (req.method === "OPTIONS") {
     res.status(204).end();
     return;
@@ -336,6 +336,7 @@ exports.synthesizeTts = onRequest(
     const options = body.options || {};
 
     let result;
+    let usedProvider = provider;
     if (provider === "google") {
       result = await synthesizeWithGoogle({
         text,
@@ -345,29 +346,58 @@ exports.synthesizeTts = onRequest(
         pitch: body.pitch || options.pitch,
       });
     } else if (provider === "azure") {
-      result = await synthesizeWithAzure({
-        text,
-        voiceId,
-        languageCode,
-        speakingRate: body.speakingRate || options.speakingRate,
-        style: body.style || options.style,
-      });
+      try {
+        result = await synthesizeWithAzure({
+          text,
+          voiceId,
+          languageCode,
+          speakingRate: body.speakingRate || options.speakingRate,
+          style: body.style || options.style,
+        });
+      } catch (azureErr) {
+        logger.warn("Azure TTS failed, falling back to Google TTS", {
+          error: azureErr.message,
+          originalProvider: provider,
+        });
+        usedProvider = "google";
+        result = await synthesizeWithGoogle({
+          text,
+          voiceId: DEFAULT_VOICE_IDS.google,
+          languageCode: languageCode || "he-IL",
+        });
+      }
     } else {
-      result = await synthesizeWithElevenLabs({
-        text,
-        voiceId,
-        modelId: body.modelId || options.modelId,
-        optimizeStreamingLatency:
-          body.optimizeStreamingLatency ?? options.optimizeStreamingLatency,
-        voiceSettings: body.voiceSettings || options.voiceSettings,
-      });
+      try {
+        result = await synthesizeWithElevenLabs({
+          text,
+          voiceId,
+          modelId: body.modelId || options.modelId,
+          optimizeStreamingLatency:
+            body.optimizeStreamingLatency ?? options.optimizeStreamingLatency,
+          voiceSettings: body.voiceSettings || options.voiceSettings,
+        });
+      } catch (elevenLabsErr) {
+        logger.warn("ElevenLabs TTS failed, falling back to Google TTS", {
+          error: elevenLabsErr.message,
+          status: elevenLabsErr.response?.status,
+          originalProvider: provider,
+        });
+        usedProvider = "google";
+        result = await synthesizeWithGoogle({
+          text,
+          voiceId: DEFAULT_VOICE_IDS.google,
+          languageCode: languageCode || "he-IL",
+        });
+      }
     }
 
     const elapsedMs = now() - startedAt;
     res.status(200).json({
       status: "success",
-      provider,
-      voiceId,
+      provider: usedProvider,
+      requestedProvider: usedProvider !== provider ? provider : undefined,
+      fallback: usedProvider !== provider ? true : undefined,
+      voiceId: usedProvider !== provider ? DEFAULT_VOICE_IDS[usedProvider] : voiceId,
       audioEncoding: result.audioEncoding,
       audioContent: result.audioContent,
       sampleRateHertz: result.sampleRateHertz,

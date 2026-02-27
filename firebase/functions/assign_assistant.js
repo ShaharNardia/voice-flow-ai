@@ -13,6 +13,7 @@ const {
   buildNotFoundResponse,
   safeJsonParse,
 } = require("./workflow_utils");
+const {sanitizeObject, applyRateLimit, isValidPhone} = require("./security_utils");
 
 exports.assignAssistant = onRequest(async (req, res) => {
   try {
@@ -25,7 +26,12 @@ exports.assignAssistant = onRequest(async (req, res) => {
       return;
     }
 
-    const payload = safeJsonParse(req.body);
+    // Rate limit: 60 requests per minute per IP
+    if (!applyRateLimit(req, res, {maxRequests: 60, windowMs: 60000})) {
+      return;
+    }
+
+    const payload = sanitizeObject(safeJsonParse(req.body));
     const phoneNumber = payload.phone_number || payload.phoneNumber;
     const isFromAssistant = !!payload.is_from_assistant;
     const callerId = payload.caller_id || null;
@@ -34,6 +40,14 @@ exports.assignAssistant = onRequest(async (req, res) => {
       res.status(400).json({
         status: "error",
         message: "phone_number is required",
+      });
+      return;
+    }
+
+    if (!isValidPhone(phoneNumber)) {
+      res.status(400).json({
+        status: "error",
+        message: "Invalid phone number format",
       });
       return;
     }
@@ -114,4 +128,3 @@ exports.assignAssistant = onRequest(async (req, res) => {
     });
   }
 });
-

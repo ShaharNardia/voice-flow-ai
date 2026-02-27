@@ -10,6 +10,7 @@ const {
   safeJsonParse,
   normalizePhoneNumber,
 } = require("./workflow_utils");
+const {sanitizeObject, applyRateLimit} = require("./security_utils");
 
 exports.endOfCallLog = onRequest(async (req, res) => {
   try {
@@ -22,7 +23,12 @@ exports.endOfCallLog = onRequest(async (req, res) => {
       return;
     }
 
-    const payload = safeJsonParse(req.body);
+    // Rate limit: 120 requests per minute (high traffic webhook)
+    if (!applyRateLimit(req, res, {maxRequests: 120, windowMs: 60000})) {
+      return;
+    }
+
+    const payload = sanitizeObject(safeJsonParse(req.body));
 
     const callSessionId = payload.call_session_id || payload.callSessionId;
     const jobId = payload.job_id || payload.jobId || null;
@@ -82,64 +88,79 @@ exports.endOfCallLog = onRequest(async (req, res) => {
     const callLogRef = callLogCollection.doc();
     const now = FieldValue.serverTimestamp();
 
-    await callLogRef.set(
-      {
-        id: callLogRef.id,
-        callSessionId,
-        jobId,
-        leadId: leadDoc.id,
-        companyId: companyDoc ? companyDoc.id : null,
-        duration: callDuration,
-        status: callStatus,
-        recordingUrl: callRecordingUrl,
-        transcript,
-        summary,
-        createdAt: now,
-        endedAt: now,
-      },
-      {merge: true},
+    // ── PARALLEL WRITES: Execute all independent Firestore writes concurrently ──
+    const writePromises = [];
+
+    // 1. Create call log entry
+    writePromises.push(
+      callLogRef.set(
+        {
+          id: callLogRef.id,
+          callSessionId,
+          jobId,
+          leadId: leadDoc.id,
+          companyId: companyDoc ? companyDoc.id : null,
+          duration: callDuration,
+          status: callStatus,
+          recordingUrl: callRecordingUrl,
+          transcript,
+          summary,
+          createdAt: now,
+          endedAt: now,
+        },
+        {merge: true},
+      ),
     );
 
-    await leadDoc.ref.set(
-      {
-        lastCallDate: now,
-        lastCallDuration: callDuration,
-        lastCallSummary: summary || "",
-        lastCallRecording: callRecordingUrl || "",
-        status: callStatus === "completed" ? "contacted" : "active",
-        totalCalls: FieldValue.increment(1),
-        totalCallDuration: FieldValue.increment(callDuration),
-      },
-      {merge: true},
+    // 2. Update lead record
+    writePromises.push(
+      leadDoc.ref.set(
+        {
+          lastCallDate: now,
+          lastCallDuration: callDuration,
+          lastCallSummary: summary || "",
+          lastCallRecording: callRecordingUrl || "",
+          status: callStatus === "completed" ? "contacted" : "active",
+          totalCalls: FieldValue.increment(1),
+          totalCallDuration: FieldValue.increment(callDuration),
+        },
+        {merge: true},
+      ),
     );
 
+    // 3. Update job if exists
     if (jobId) {
-      await db
-        .collection(COLLECTION_MAP.jobs[0])
-        .doc(jobId)
-        .set(
-          {
-            status: callStatus === "completed" ? "completed" : callStatus,
-            updatedAt: now,
-            lastCallSessionId: callSessionId,
-          },
-          {merge: true},
-        );
+      writePromises.push(
+        db
+          .collection(COLLECTION_MAP.jobs[0])
+          .doc(jobId)
+          .set(
+            {
+              status: callStatus === "completed" ? "completed" : callStatus,
+              updatedAt: now,
+              lastCallSessionId: callSessionId,
+            },
+            {merge: true},
+          ),
+      );
     }
 
+    // 4. Update company credits & notify webhook if exists
     if (companyDoc) {
       const companyData = companyDoc.data() || {};
       const creditRate = Number(companyData.companyMinutesRate || companyData.creditRate || 1);
       const minutesUsed = callDuration > 0 ? callDuration / 60 : 0;
       const creditDelta = minutesUsed * creditRate * -1;
 
-      await companyDoc.ref.set(
-        {
-          credits: FieldValue.increment(creditDelta),
-          minutes: FieldValue.increment(minutesUsed),
-          lastCallTime: now,
-        },
-        {merge: true},
+      writePromises.push(
+        companyDoc.ref.set(
+          {
+            credits: FieldValue.increment(creditDelta),
+            minutes: FieldValue.increment(minutesUsed),
+            lastCallTime: now,
+          },
+          {merge: true},
+        ),
       );
 
       if (
@@ -160,9 +181,24 @@ exports.endOfCallLog = onRequest(async (req, res) => {
         companyData.callWebhookUrl ||
         null;
 
-      if (webhookUrl) {
+      // Validate webhook URL to prevent SSRF attacks
+      const isValidWebhookUrl = (url) => {
         try {
-          await axios.post(
+          const parsed = new URL(url);
+          return (
+            (parsed.protocol === "https:" || parsed.protocol === "http:") &&
+            !parsed.hostname.match(/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/) &&
+            !parsed.hostname.endsWith(".local")
+          );
+        } catch {
+          return false;
+        }
+      };
+
+      if (webhookUrl && isValidWebhookUrl(webhookUrl)) {
+        // Webhook is fire-and-forget – don't block the response
+        writePromises.push(
+          axios.post(
             webhookUrl,
             {
               event: "call_completed",
@@ -176,15 +212,16 @@ exports.endOfCallLog = onRequest(async (req, res) => {
               recording_url: callRecordingUrl,
               timestamp: new Date().toISOString(),
             },
-            {
-              timeout: 5000,
-            },
-          );
-        } catch (webhookError) {
-          logger.error("Failed to notify external webhook", webhookError);
-        }
+            {timeout: 5000},
+          ).catch((webhookError) => {
+            logger.error("Failed to notify external webhook", webhookError);
+          }),
+        );
       }
     }
+
+    // Execute all writes in parallel
+    await Promise.all(writePromises);
 
     res.status(200).json(
       buildSuccessResponse({

@@ -45,17 +45,23 @@ function createDeepgramConnection(language = "he", model = "nova-2", onTranscrip
 
   const deepgram = createClient(DEEPGRAM_API_KEY);
 
-  // Create WebSocket connection with optimized settings for low latency and barge-in
+  // Create WebSocket connection with AGGRESSIVE low-latency settings
+  // Tuned for premium real-time voice bot experience
   const connection = deepgram.listen.live({
     model: model,
     language: deepgramLanguage,
     smart_format: true,
-    interim_results: true,
-    endpointing: 300, // End of speech detection (ms) - lower = faster detection
-    vad_events: true, // Voice activity detection - enables barge-in detection
-    punctuate: true, // Add punctuation for better accuracy
-    diarize: false, // Speaker diarization not needed for single speaker
+    interim_results: true, // Critical for barge-in detection
+    utterance_end_ms: 1000, // Detect end of utterance after 1s silence
+    endpointing: 250, // End of speech detection (ms) - aggressive for fast response
+    vad_events: true, // Voice activity detection – enables barge-in
+    vad_turnoff: 500, // Stop VAD after 500ms of silence (faster turn-taking)
+    punctuate: true, // Better accuracy with punctuation
+    diarize: false, // Single speaker – no need
     multichannel: false, // Single channel audio
+    encoding: "mulaw", // Twilio sends mulaw audio
+    sample_rate: 8000, // Twilio sends 8kHz audio
+    channels: 1, // Mono audio
   });
 
   logger.info("Deepgram connection created", {

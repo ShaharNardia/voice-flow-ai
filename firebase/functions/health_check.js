@@ -1,0 +1,78 @@
+/**
+ * Health Check & Monitoring Endpoint
+ *
+ * Provides system health status for uptime monitoring services.
+ * Checks: Firestore connectivity, Twilio config, Stripe config, SendGrid config.
+ */
+
+const {onRequest} = require("firebase-functions/v2/https");
+const {logger} = require("firebase-functions");
+const {getFirestore} = require("firebase-admin/firestore");
+
+const VERSION = "1.0.0";
+const START_TIME = Date.now();
+
+exports.healthCheck = onRequest(async (req, res) => {
+  if (req.method !== "GET") {
+    res.set("Allow", "GET");
+    res.status(405).json({status: "error", message: "Method not allowed."});
+    return;
+  }
+
+  const checks = {};
+  let overallHealthy = true;
+
+  // 1. Firestore connectivity (critical – only failure that causes degraded)
+  try {
+    const db = getFirestore();
+    const fsStart = Date.now();
+    await db.collection("admin").limit(1).get();
+    const fsLatency = Date.now() - fsStart;
+    checks.firestore = {status: "ok", latencyMs: fsLatency};
+  } catch (error) {
+    checks.firestore = {status: "error", message: error.message};
+    overallHealthy = false;
+  }
+
+  // 2. Environment configuration checks (informational only – missing optional
+  //    services should NOT cause degraded status; only Firestore is critical)
+  const envChecks = {
+    twilio: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+    stripe: !!process.env.STRIPE_SECRET_KEY,
+    sendgrid: !!process.env.SENDGRID_API_KEY,
+    adminSecret: !!process.env.ADMIN_PROVISION_SECRET,
+    googleTts: true, // Always available via default credentials
+  };
+
+  const configuredCount = Object.values(envChecks).filter(Boolean).length;
+  const totalCount = Object.values(envChecks).length;
+
+  checks.config = {
+    status: configuredCount === totalCount ? "ok" : "partial",
+    configured: `${configuredCount}/${totalCount}`,
+    services: envChecks,
+  };
+
+  // 3. Memory usage
+  const mem = process.memoryUsage();
+  checks.memory = {
+    heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024),
+    heapTotalMb: Math.round(mem.heapTotal / 1024 / 1024),
+    rssMb: Math.round(mem.rss / 1024 / 1024),
+  };
+
+  const uptimeSeconds = Math.round((Date.now() - START_TIME) / 1000);
+
+  const result = {
+    status: overallHealthy ? "healthy" : "degraded",
+    version: VERSION,
+    uptimeSeconds,
+    timestamp: new Date().toISOString(),
+    region: process.env.FUNCTION_REGION || "us-central1",
+    nodeVersion: process.version,
+    checks,
+  };
+
+  const statusCode = overallHealthy ? 200 : 503;
+  res.status(statusCode).json(result);
+});

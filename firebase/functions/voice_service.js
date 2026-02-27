@@ -10,6 +10,15 @@ const {
   generateId,
 } = require("./workflow_utils");
 
+const {
+  sanitizeObject,
+  applyRateLimit,
+  handleCorsSafe,
+  setCorsHeadersSafe,
+  isValidPhone,
+  validateRequired,
+} = require("./security_utils");
+
 const asteriskService = require("./asterisk_service");
 const scenarioEngine = require("./scenario_engine");
 const llmService = require("./llm_service");
@@ -40,15 +49,9 @@ const ALLOWED_ORIGINS = [
 ];
 
 function setCorsHeaders(req, res) {
-  const origin = req.headers.origin;
-  if (ALLOWED_ORIGINS.includes(origin)) {
-    res.set("Access-Control-Allow-Origin", origin);
-  } else {
-    res.set("Access-Control-Allow-Origin", "*");
-  }
-  res.set("Access-Control-Allow-Methods", "GET, POST, PATCH, DELETE, OPTIONS");
-  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  res.set("Access-Control-Max-Age", "3600");
+  // Delegate to hardened CORS handler from security_utils
+  // No wildcard fallback – unknown origins are blocked
+  return setCorsHeadersSafe(req, res);
 }
 
 // Multi-language messages support
@@ -606,8 +609,15 @@ exports.assistantsCreate = onRequest(corsOptions, async (req, res) => {
     return;
   }
 
+  // Rate limit: 30 creates per minute per IP
+  if (!applyRateLimit(req, res, {maxRequests: 30, windowMs: 60000})) {
+    return;
+  }
+
   try {
-    const payload = getJsonBody(req);
+    // Sanitize all input to prevent XSS
+    const rawPayload = getJsonBody(req);
+    const payload = sanitizeObject(rawPayload);
     const db = getFirestore();
     const docRef = db.collection("assistants").doc();
     const now = FieldValue.serverTimestamp();
@@ -675,8 +685,13 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
     return;
   }
 
+  // Rate limit: 30 updates per minute per IP
+  if (!applyRateLimit(req, res, {maxRequests: 30, windowMs: 60000})) {
+    return;
+  }
+
   try {
-    const payload = getJsonBody(req);
+    const payload = sanitizeObject(getJsonBody(req));
     const assistantId = payload.id || payload.assistantId;
     if (!assistantId) {
       res.status(400).json({
@@ -1102,7 +1117,7 @@ exports.releasePhoneNumber = onRequest(corsOptions, async (req, res) => {
   }
 });
 
-exports.placeCall = onRequest(corsOptions, async (req, res) => {
+exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"}, async (req, res) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
     res.status(204).send("");
@@ -1313,7 +1328,9 @@ exports.placeCall = onRequest(corsOptions, async (req, res) => {
   }
 });
 
-exports.twilioVoiceWebhook = onRequest(async (req, res) => {
+exports.twilioVoiceWebhook = onRequest(
+  {minInstances: 1, timeoutSeconds: 120, memory: "512MiB"},
+  async (req, res) => {
   // CRITICAL: Log immediately using multiple methods to ensure visibility
   const logData = {
     method: req.method,
@@ -1854,9 +1871,9 @@ exports.twilioVoiceWebhook = onRequest(async (req, res) => {
     // 2. sttProvider is explicitly set to "deepgram", OR
     // 3. DEEPGRAM_API_KEY is available (default to Deepgram for better Hebrew STT)
     const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
-    const useDeepgram = assistant.transcriber?.provider === "deepgram" || 
-                        assistant.sttProvider === "deepgram" ||
-                        !!DEEPGRAM_API_KEY; // Default to Deepgram if API key is available
+    let useDeepgram = assistant.transcriber?.provider === "deepgram" ||
+                      assistant.sttProvider === "deepgram" ||
+                      !!DEEPGRAM_API_KEY; // Default to Deepgram if API key is available
     
     if (useDeepgram) {
       try {

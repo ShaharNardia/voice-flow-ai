@@ -1,29 +1,38 @@
-const {onCall} = require("firebase-functions/v2/https");
+const {onCall, HttpsError} = require("firebase-functions/v2/https");
+const {logger} = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
+const {sanitizeObject, isValidPhone} = require("./security_utils");
 
 exports.createJob = onCall(async (request) => {
+  if (!request.auth?.uid) {
+    throw new HttpsError("unauthenticated", "Authentication required.");
+  }
+
+  const data = sanitizeObject(request.data || {});
+  const {
+    userName,
+    userEmail,
+    title,
+    jobDescription,
+    userPhoneNumber,
+    address,
+    requestedTime,
+    companyId,
+  } = data;
+
+  // Validate required fields
+  if (!userName || !userPhoneNumber) {
+    throw new HttpsError(
+      "invalid-argument",
+      "userName and userPhoneNumber are required.",
+    );
+  }
+
+  if (!isValidPhone(userPhoneNumber)) {
+    throw new HttpsError("invalid-argument", "Invalid phone number format.");
+  }
+
   try {
-    if (!request.auth?.uid) {
-      return { error: "Unauthorized" };
-    }
-
-    const data = request.data;
-    const {
-      userName,
-      userEmail,
-      title,
-      jobDescription,
-      userPhoneNumber,
-      address,
-      requestedTime,
-      companyId
-    } = data;
-
-    // Validate required fields
-    if (!userName || !userPhoneNumber) {
-      return { error: "Missing required fields: userName and userPhoneNumber are required" };
-    }
-
     const db = getFirestore();
 
     // Get company reference
@@ -31,13 +40,16 @@ exports.createJob = onCall(async (request) => {
     if (companyId) {
       companyRef = db.collection("Company").doc(companyId);
     } else {
-      // If no companyId provided, try to find company by phone number
-      const companySnapshot = await db.collection("Company")
+      const companySnapshot = await db
+        .collection("Company")
         .where("companyPhoneNumbers", "array-contains", userPhoneNumber)
         .get();
 
       if (companySnapshot.empty) {
-        return { error: "No company found for the provided phone number" };
+        throw new HttpsError(
+          "not-found",
+          "No company found for the provided phone number.",
+        );
       }
 
       companyRef = companySnapshot.docs[0].ref;
@@ -59,30 +71,31 @@ exports.createJob = onCall(async (request) => {
       createdTime: new Date(),
       assignedTechnician: null,
       priority: "Medium",
-      estimatedDuration: 60, // Default 1 hour
+      estimatedDuration: 60,
       notes: "Created via AI assistant",
       createdBy: request.auth.uid,
-      createdByType: "AI Assistant"
+      createdByType: "AI Assistant",
     };
 
     await jobRef.set(jobData);
 
-    console.log(`Job created successfully: ${jobRef.id} for customer: ${userName}`);
+    logger.info(
+      `Job created: ${jobRef.id} for customer: ${userName}`,
+    );
 
-    return { 
-      success: true, 
+    return {
+      success: true,
       jobId: jobRef.id,
-      message: "Job created successfully" 
+      message: "Job created successfully",
     };
-
   } catch (error) {
-    console.error("Error creating job:", error);
-    return { 
-      error: error.message || "Failed to create job" 
-    };
+    if (error instanceof HttpsError) {
+      throw error;
+    }
+    logger.error("Failed to create job:", error);
+    throw new HttpsError(
+      "internal",
+      error.message || "Failed to create job.",
+    );
   }
 });
-
-
-
-

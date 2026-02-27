@@ -1,90 +1,154 @@
-const functions = require("firebase-functions");
-const admin = require("firebase-admin");
-// To avoid deployment errors, do not call admin.initializeApp() in your code
+const {onRequest} = require("firebase-functions/v2/https");
+const {logger} = require("firebase-functions");
+const {getFirestore} = require("firebase-admin/firestore");
 
-const stripe = require("stripe")(
-  "sk_test_51RoW9MBEKJak3ro0jA0jH8974xcak1a1EpdzTR5pOGL5qgGMI4V3UgEjTfyJgG95wHzknUwTuntcI4Zbco99kn5S00Wux331Ro",
-);
+// ── Stripe initialisation ───────────────────────────────────────────
+// SECURITY: Keys are loaded from environment / Firebase Secrets.
+// Set them with:
+//   firebase functions:secrets:set STRIPE_SECRET_KEY
+//   firebase functions:secrets:set STRIPE_WEBHOOK_SECRET
+// Never hard-code secret keys in source code.
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
 
-exports.stripeCustomerSubscription = functions.https.onRequest(
-  async (req, res) => {
-    // Write your code below!
+let _stripe = null;
+function getStripe() {
+  if (!_stripe) {
+    if (!STRIPE_SECRET_KEY) {
+      throw new Error(
+        "STRIPE_SECRET_KEY is not configured. " +
+        "Set it via Firebase Secrets: firebase functions:secrets:set STRIPE_SECRET_KEY",
+      );
+    }
+    _stripe = require("stripe")(STRIPE_SECRET_KEY);
+  }
+  return _stripe;
+}
+
+// ── Idempotency – prevent duplicate event processing ────────────────
+const PROCESSED_EVENTS_COLLECTION = "ProcessedStripeEvents";
+const EVENT_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+async function isEventAlreadyProcessed(eventId) {
+  const db = getFirestore();
+  const docRef = db.collection(PROCESSED_EVENTS_COLLECTION).doc(eventId);
+  const snapshot = await docRef.get();
+  return snapshot.exists;
+}
+
+async function markEventProcessed(eventId, eventType) {
+  const db = getFirestore();
+  const docRef = db.collection(PROCESSED_EVENTS_COLLECTION).doc(eventId);
+  await docRef.set({
+    eventId,
+    eventType,
+    processedAt: new Date().toISOString(),
+    expiresAt: new Date(Date.now() + EVENT_TTL_MS).toISOString(),
+  });
+}
+
+// ── Webhook handler ─────────────────────────────────────────────────
+exports.stripeCustomerSubscription = onRequest(async (req, res) => {
+  try {
+    if (req.method !== "POST") {
+      res.set("Allow", "POST");
+      res.status(405).json({
+        status: "error",
+        message: "Method not allowed. Expected POST.",
+      });
+      return;
+    }
+
+    logger.info("Received Stripe webhook request");
+
+    if (!STRIPE_WEBHOOK_SECRET) {
+      logger.error("STRIPE_WEBHOOK_SECRET is not configured.");
+      return res.sendStatus(500);
+    }
+
+    const sig = req.headers["stripe-signature"];
+    if (!sig) {
+      logger.warn("Missing stripe-signature header");
+      return res.sendStatus(400);
+    }
+
+    // Verify the event
+    let event;
     try {
-      // Log to check if the webhook was received
-      console.log("Received Stripe webhook request");
+      const stripe = getStripe();
+      event = stripe.webhooks.constructEvent(
+        req.rawBody,
+        sig,
+        STRIPE_WEBHOOK_SECRET,
+      );
+    } catch (err) {
+      logger.error("Error verifying Stripe signature:", err.message);
+      return res.sendStatus(400);
+    }
 
-      const sig = req.headers["stripe-signature"];
-      const endpointSecret = "whsec_cO6LPtRCkStCtD9vjiwrwD8226waLKql";
+    // ── Idempotency check ─────────────────────────────────────────
+    if (await isEventAlreadyProcessed(event.id)) {
+      logger.info(`Stripe event ${event.id} already processed – skipping.`);
+      return res.sendStatus(200);
+    }
 
-      // Verify the event and log if verification fails
-      let event;
-      try {
-        event = stripe.webhooks.constructEvent(
-          req.rawBody,
-          sig,
-          endpointSecret,
+    // ── Handle subscription events ────────────────────────────────
+    const SUBSCRIPTION_EVENTS = {
+      "customer.subscription.created": true,
+      "customer.subscription.updated": true,
+      "customer.subscription.deleted": false,
+    };
+
+    const subscribedValue = SUBSCRIPTION_EVENTS[event.type];
+
+    if (subscribedValue !== undefined) {
+      const dataObject = event.data.object;
+
+      logger.info(
+        `Processing ${event.type} for customer ${dataObject.customer}`,
+      );
+
+      const db = getFirestore();
+      const userSnapshot = await db
+        .collection("user")
+        .where("stripe_customer_id", "==", dataObject.customer)
+        .get();
+
+      if (userSnapshot.empty) {
+        logger.warn(
+          `No user found with stripe_customer_id: ${dataObject.customer}`,
         );
-      } catch (err) {
-        console.error("Error verifying Stripe signature:", err.message);
-        return res.sendStatus(400);
-      }
-
-      const handleSubscriptionEvent = async (eventType, subscribed) => {
-        const dataObject = event.data.object;
-
-        console.log(
-          `Processing ${eventType} event for customer ID: ${dataObject.customer}`,
-        );
-
-        const userSnapshot = await admin
-          .firestore()
-          .collection("user")
-          .where("stripe_customer_id", "==", dataObject.customer)
-          .get();
-
-        if (userSnapshot.empty) {
-          console.warn(
-            `No user found with stripeCustomerId: ${dataObject.customer}`,
-          );
-          return;
-        }
-
-        await Promise.all(
-          userSnapshot.docs.map(async (userDoc) => {
-            const userRef = userDoc.ref;
-            console.log(`Updating user document for user ID: ${userDoc.id}`);
-            await userRef.update({
-              subscribed: subscribed,
+      } else {
+        // Process each user doc individually so one failure doesn't
+        // prevent the rest from updating.
+        for (const userDoc of userSnapshot.docs) {
+          try {
+            await userDoc.ref.update({
+              subscribed: subscribedValue,
               stripe_subscription_id: dataObject.id,
               stripe_subscription_status: dataObject.status,
             });
-            console.log(
-              `User document updated successfully for user ID: ${userDoc.id}`,
+            logger.info(
+              `Updated subscription for user ${userDoc.id} → subscribed=${subscribedValue}`,
             );
-          }),
-        );
-      };
-
-      // Handling different subscription events
-      if (event.type === "customer.subscription.created") {
-        console.log("Handling 'customer.subscription.created' event");
-        await handleSubscriptionEvent("Subscription created", true);
-      } else if (event.type === "customer.subscription.deleted") {
-        console.log("Handling 'customer.subscription.deleted' event");
-        await handleSubscriptionEvent("Subscription deleted", false);
-      } else if (event.type === "customer.subscription.updated") {
-        console.log("Handling 'customer.subscription.updated' event");
-        await handleSubscriptionEvent("Subscription updated", true);
-      } else {
-        console.log(`Unhandled event type: ${event.type}`);
+          } catch (updateErr) {
+            logger.error(
+              `Failed to update user ${userDoc.id}:`,
+              updateErr,
+            );
+          }
+        }
       }
-
-      // Respond with a 200 status to acknowledge receipt of the webhook
-      return res.sendStatus(200);
-    } catch (err) {
-      console.error("Error processing webhook:", err.message);
-      return res.sendStatus(400);
+    } else {
+      logger.info(`Unhandled Stripe event type: ${event.type}`);
     }
-    // Write your code above!
-  },
-);
+
+    // Mark event as processed (after successful handling)
+    await markEventProcessed(event.id, event.type);
+
+    return res.sendStatus(200);
+  } catch (err) {
+    logger.error("Error processing Stripe webhook:", err);
+    return res.sendStatus(500);
+  }
+});

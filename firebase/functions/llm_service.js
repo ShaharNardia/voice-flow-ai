@@ -7,49 +7,110 @@ const {logger} = require("firebase-functions");
 const axios = require("axios");
 
 // Filler phrases for natural conversation by language
+// Categorized by context for smarter selection
 const FILLER_PHRASES = {
-  "he": [
-    "רגע אחד...",
-    "בוא נראה...",
-    "אממ...",
-    "כן, אני בודק את זה...",
-    "שנייה, אני מסתכל...",
-    "בסדר גמור, תן לי רגע...",
-    "אני מבין...",
-    "מצוין!",
-    "נהדר!",
-    "בטח!",
-    "בשמחה!",
-    "אין בעיה!",
-  ],
-  "en": [
-    "Let me see...",
-    "Hmm...",
-    "One moment...",
-    "Yes, I'm checking that...",
-    "Just a second, I'm looking...",
-    "Alright, give me a moment...",
-    "I understand...",
-    "Great!",
-    "Excellent!",
-    "Sure!",
-    "Of course!",
-    "No problem!",
-  ],
-  "ar": [
-    "لحظة واحدة...",
-    "دعني أرى...",
-    "همم...",
-    "نعم، أنا أتحقق من ذلك...",
-    "ثانية، أنا أنظر...",
-    "حسناً، أعطني لحظة...",
-    "أفهم...",
-    "رائع!",
-    "ممتاز!",
-    "بالتأكيد!",
-    "بكل سرور!",
-    "لا مشكلة!",
-  ],
+  "he": {
+    // "Thinking" fillers – when bot is processing
+    thinking: [
+      "רגע אחד...",
+      "בוא נראה...",
+      "אממ...",
+      "שנייה...",
+      "אוקיי...",
+      "כן, רגע...",
+      "הממ, בוא נבדוק...",
+      "שנייה אני בודק...",
+    ],
+    // Acknowledgment – confirming understanding
+    acknowledge: [
+      "כן, אני מבין...",
+      "בסדר גמור...",
+      "מצוין!",
+      "נהדר!",
+      "בטח!",
+      "בשמחה!",
+      "אין בעיה!",
+      "בוודאי!",
+      "אני מבין בדיוק!",
+      "מעולה!",
+    ],
+    // Backchanneling – during customer speech
+    backchannel: [
+      "כן",
+      "נכון",
+      "מבין",
+      "אוקיי",
+      "בסדר",
+      "ברור",
+      "אהה",
+    ],
+  },
+  "en": {
+    thinking: [
+      "Let me see...",
+      "Hmm...",
+      "One moment...",
+      "Just a sec...",
+      "Okay...",
+      "Right, let me check...",
+      "Hmm, let's see...",
+      "One second...",
+    ],
+    acknowledge: [
+      "I understand...",
+      "Great!",
+      "Excellent!",
+      "Sure!",
+      "Of course!",
+      "No problem!",
+      "Absolutely!",
+      "Perfect!",
+      "That makes sense!",
+      "Got it!",
+    ],
+    backchannel: [
+      "Yes",
+      "Right",
+      "I see",
+      "Okay",
+      "Mm-hmm",
+      "Sure",
+      "Uh-huh",
+    ],
+  },
+  "ar": {
+    thinking: [
+      "لحظة واحدة...",
+      "دعني أرى...",
+      "همم...",
+      "ثانية...",
+      "حسناً...",
+      "نعم، لحظة...",
+      "دعني أتحقق...",
+      "ثانية أتحقق...",
+    ],
+    acknowledge: [
+      "أفهم...",
+      "رائع!",
+      "ممتاز!",
+      "بالتأكيد!",
+      "بكل سرور!",
+      "لا مشكلة!",
+      "تماماً!",
+      "مثالي!",
+      "فهمت بالضبط!",
+      "حسناً!",
+    ],
+    backchannel: [
+      "نعم",
+      "صحيح",
+      "أفهم",
+      "حسناً",
+      "تمام",
+      "واضح",
+      "آها",
+    ],
+  },
 };
 
 /**
@@ -486,7 +547,7 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
             "Authorization": `Bearer ${OPENAI_API_KEY}`,
             "Content-Type": "application/json",
           },
-          timeout: 10000, // 10 seconds max for real-time
+          timeout: 5000, // 5 seconds max for real-time voice (premium latency target)
         },
     );
 
@@ -578,13 +639,16 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
 }
 
 /**
- * Get a random filler phrase for the specified language
+ * Get a random filler phrase for the specified language and context.
+ *
  * @param {string} language - Language code (e.g., "he-IL", "en-US", "he", "en")
+ * @param {string} [context="thinking"] - Context: "thinking", "acknowledge", "backchannel"
  * @returns {string} Random filler phrase
  */
-function getRandomFiller(language = "he-IL") {
+function getRandomFiller(language = "he-IL", context = "thinking") {
   const lang = detectLanguage(language);
-  const fillers = FILLER_PHRASES[lang] || FILLER_PHRASES["he"];
+  const langFillers = FILLER_PHRASES[lang] || FILLER_PHRASES["he"];
+  const fillers = langFillers[context] || langFillers.thinking;
   return fillers[Math.floor(Math.random() * fillers.length)];
 }
 
