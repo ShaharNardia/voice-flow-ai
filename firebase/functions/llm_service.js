@@ -10,20 +10,18 @@ const axios = require("axios");
 // Categorized by context for smarter selection
 const FILLER_PHRASES = {
   "he": {
-    // "Thinking" fillers – when bot is processing
+    // "Thinking" fillers – gender-neutral
     thinking: [
       "רגע אחד...",
-      "בוא נראה...",
-      "אממ...",
       "שנייה...",
+      "אממ...",
       "אוקיי...",
       "כן, רגע...",
-      "הממ, בוא נבדוק...",
-      "שנייה אני בודק...",
+      "הממ, רגע...",
+      "שנייה, בבדיקה...",
     ],
-    // Acknowledgment – confirming understanding
+    // Acknowledgment – gender-neutral
     acknowledge: [
-      "כן, אני מבין...",
       "בסדר גמור...",
       "מצוין!",
       "נהדר!",
@@ -31,18 +29,17 @@ const FILLER_PHRASES = {
       "בשמחה!",
       "אין בעיה!",
       "בוודאי!",
-      "אני מבין בדיוק!",
+      "הבנתי!",
       "מעולה!",
     ],
-    // Backchanneling – during customer speech
+    // Backchanneling – gender-neutral
     backchannel: [
       "כן",
       "נכון",
-      "מבין",
+      "הבנתי",
       "אוקיי",
       "בסדר",
       "ברור",
-      "אהה",
     ],
   },
   "en": {
@@ -238,7 +235,7 @@ function buildHebrewPrompt(assistantName, companyName, industry, services, phone
     medicalRestriction ? "אין ייעוץ רפואי" : null,
   ].filter(Boolean).join(". ");
 
-  return `אתה ${assistantName}, נציג שירות לקוחות מקצועי ואנושי של ${companyName}${industry ? ` (${industry})` : ""}.
+  return `הינך ${assistantName}, נציג/ת שירות לקוחות של ${companyName}${industry ? ` (${industry})` : ""}.
 טלפון: ${phoneNumber || "לא צוין"} | אתר: ${website || "לא צוין"} | אזור זמן: ${timeZone}
 
 שירותים: ${servicesText}
@@ -246,12 +243,14 @@ function buildHebrewPrompt(assistantName, companyName, industry, services, phone
 
 כללים קריטיים:
 - תגובות קצרות: מקסימום 2 משפטים. שיחת טלפון = קצר וממוקד
-- עברית תקנית מושלמת, טון אנושי וחם (לא רובוטי)
-- תמיד לעניין: ענה ישירות, אל תסטה
-- אם הלקוח שואל על שירות שלא ברשימה, אמור שתעביר לנציג אנושי
-- כשאוספים פרטים: שם, טלפון/אימייל, מועד מועדף, כתובת
+- חובה: פנייה ניטרלית מגדרית! אל תשתמש ב"אתה/את", "אדוני/גברתי". השתמש ב: "איך אפשר לעזור?", "מה מעניין אותך?", "רוצה לשמוע עוד?"
+- אל תניח מגדר של הלקוח/ה. במקום "אתה רוצה?" תגיד "רוצה לקבוע תור?" או "אפשר לעזור עם משהו נוסף?"
+- עברית תקנית, טון אנושי וחם
+- ענה ישירות ולעניין
+- אם שואלים על שירות שלא ברשימה: "אעביר לנציג שירות שיוכל לעזור"
+- כשאוספים פרטים: שם, טלפון/אימייל, מועד מועדף
 - אשר פרטים לפני סיום: "רק לאשר: [שם], [שירות], [מועד]. נכון?"
-- סיום: "תודה שפנית ל-${companyName}. יום נפלא!"
+- סיום: "תודה על הפנייה ל-${companyName}. יום נפלא!"
 ${additionalInstructions ? `\nהוראות נוספות: ${additionalInstructions}` : ""}`;
 }
 

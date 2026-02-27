@@ -57,36 +57,36 @@ function setCorsHeaders(req, res) {
 // Multi-language messages support
 const MESSAGES = {
   "he-IL": {
-    defaultGreeting: "שלום, כאן העוזר הווירטואלי שלכם. תודה שענית לשיחה.",
-    askAvailability: "האם את/ה זמין/ה לשיחה? אנא אמור/י כן או לא.",
-    didNotHear: "סליחה, לא שמעתי אותך. תוכל לחזור בבקשה?",
-    noResponse: "אין בעיה. ניצור איתך קשר בהקדם. יום נעים!",
-    positiveResponse: "מצוין! תודה על ההתעניינות. אחד מאנשי הצוות שלנו יחזור אליך בהקדם. יום נפלא!",
-    negativeResponse: "אני מבין/ה. תודה על הזמן. אם תשנה/י דעתך, אל תהסס/י ליצור איתנו קשר. יום נעים!",
-    unclearResponse: "תודה על התגובה. מישהו מהצוות שלנו יחזור אליך בהקדם. יום נעים!",
+    defaultGreeting: "שלום, כאן העוזר הווירטואלי. איך אפשר לעזור?",
+    askAvailability: "יש אפשרות לדבר עכשיו? אפשר להגיד כן או לא.",
+    didNotHear: "סליחה, לא שמעתי. אפשר לחזור על זה?",
+    noResponse: "אין בעיה. ניצור קשר בהקדם. יום נעים!",
+    positiveResponse: "מצוין! תודה על ההתעניינות. מהצוות שלנו ייצרו קשר בהקדם. יום נפלא!",
+    negativeResponse: "הבנתי. תודה על הזמן. אפשר ליצור קשר בכל עת. יום נעים!",
+    unclearResponse: "תודה על התגובה. ניצור קשר בהקדם. יום נעים!",
     thankYouGoodbye: "תודה על הזמן. להתראות.",
-    errorOccurred: "אירעה שגיאה. אנא נסה שוב מאוחר יותר.",
+    errorOccurred: "אירעה שגיאה. אפשר לנסות שוב מאוחר יותר.",
     sessionNotFound: "השיחה לא נמצאה. להתראות.",
     scenarioNotFound: "התרחיש לא נמצא. להתראות.",
     flowError: "שגיאה בתרחיש. להתראות.",
-    contactSupport: "שלום. לא הצלחנו לאתר את השיחה שלך. אנא צור קשר עם התמיכה.",
+    contactSupport: "שלום. לא הצלחנו לאתר את השיחה. אפשר ליצור קשר עם התמיכה.",
     assistantNotFound: "שלום. לא הצלחנו לאתר את פרטי העוזר. להתראות.",
     willBeInTouch: "תודה על הזמן. ניצור קשר בהקדם. להתראות.",
   },
   "he": {
-    defaultGreeting: "שלום, כאן העוזר הווירטואלי שלכם. תודה שענית לשיחה.",
-    askAvailability: "האם את/ה זמין/ה לשיחה? אנא אמור/י כן או לא.",
-    didNotHear: "סליחה, לא שמעתי אותך. תוכל לחזור בבקשה?",
-    noResponse: "אין בעיה. ניצור איתך קשר בהקדם. יום נעים!",
-    positiveResponse: "מצוין! תודה על ההתעניינות. אחד מאנשי הצוות שלנו יחזור אליך בהקדם. יום נפלא!",
-    negativeResponse: "אני מבין/ה. תודה על הזמן. אם תשנה/י דעתך, אל תהסס/י ליצור איתנו קשר. יום נעים!",
-    unclearResponse: "תודה על התגובה. מישהו מהצוות שלנו יחזור אליך בהקדם. יום נעים!",
+    defaultGreeting: "שלום, כאן העוזר הווירטואלי. איך אפשר לעזור?",
+    askAvailability: "יש אפשרות לדבר עכשיו? אפשר להגיד כן או לא.",
+    didNotHear: "סליחה, לא שמעתי. אפשר לחזור על זה?",
+    noResponse: "אין בעיה. ניצור קשר בהקדם. יום נעים!",
+    positiveResponse: "מצוין! תודה על ההתעניינות. מהצוות שלנו ייצרו קשר בהקדם. יום נפלא!",
+    negativeResponse: "הבנתי. תודה על הזמן. אפשר ליצור קשר בכל עת. יום נעים!",
+    unclearResponse: "תודה על התגובה. ניצור קשר בהקדם. יום נעים!",
     thankYouGoodbye: "תודה על הזמן. להתראות.",
-    errorOccurred: "אירעה שגיאה. אנא נסה שוב מאוחר יותר.",
+    errorOccurred: "אירעה שגיאה. אפשר לנסות שוב מאוחר יותר.",
     sessionNotFound: "השיחה לא נמצאה. להתראות.",
     scenarioNotFound: "התרחיש לא נמצא. להתראות.",
     flowError: "שגיאה בתרחיש. להתראות.",
-    contactSupport: "שלום. לא הצלחנו לאתר את השיחה שלך. אנא צור קשר עם התמיכה.",
+    contactSupport: "שלום. לא הצלחנו לאתר את השיחה. אפשר ליצור קשר עם התמיכה.",
     assistantNotFound: "שלום. לא הצלחנו לאתר את פרטי העוזר. להתראות.",
     willBeInTouch: "תודה על הזמן. ניצור קשר בהקדם. להתראות.",
   },
@@ -1877,21 +1877,15 @@ exports.twilioVoiceWebhook = onRequest(
       const greetingToSay = greeting || getMessage("defaultGreeting", language);
 
       // CRITICAL: Greeting is INSIDE Gather to enable barge-in (interruption).
-      // When <Say> is nested inside <Gather>, Twilio automatically stops the
-      // Say and begins capturing speech if the caller speaks during playback.
-      // STT Model: "phone_call" = Google STT V1 which supports Hebrew (he-IL).
-      // Google STT V2 models silently fall back to English for Hebrew.
-      // deepgram_nova-3 causes APPLICATION ERROR with he-IL language code.
+      // Simplest possible config - let Twilio auto-select the best STT model.
+      // Removed: speechModel, hints, profanityFilter - may interfere with Hebrew STT.
       const gather = response.gather({
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`,
         method: "POST",
-        timeout: 15,
-        speechTimeout: "auto",
+        timeout: 10,
+        speechTimeout: 2,
         language: gatherLanguage,
-        speechModel: "phone_call",
-        hints: hebrewHints,
-        profanityFilter: false,
       });
 
       // Say greeting INSIDE Gather → enables barge-in!
@@ -2029,6 +2023,20 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       twilioLanguage, // CRITICAL: What language did Twilio ACTUALLY use?
       hasSpeechResult: !!speechResult && speechResult.trim().length > 0,
     });
+
+    // Detect if Hebrew speech was misrecognized as English
+    const hebrewRegex = /[\u0590-\u05FF]/;
+    const isHebrewText = hebrewRegex.test(speechResult);
+    const isLowConfidence = parseFloat(speechConfidence) < 0.5;
+    if (speechResult && speechResult.trim() && !isHebrewText) {
+      logger.warn("HEBREW STT ISSUE: Speech result contains NO Hebrew characters!", {
+        callSessionId,
+        speechResult,
+        speechConfidence,
+        twilioLanguage,
+        possiblyMisrecognized: true,
+      });
+    }
     
     const response = new twilio.twiml.VoiceResponse();
 
@@ -2109,12 +2117,9 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
         method: "POST",
-        timeout: 15,
-        speechTimeout: "auto",
+        timeout: 10,
+        speechTimeout: 2,
         language: gatherLanguage,
-        speechModel: "phone_call",
-        hints: hebrewHints,
-        profanityFilter: false,
       });
 
       // Say the repeat message inside Gather for barge-in support
@@ -2419,12 +2424,9 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
         method: "POST",
-        timeout: 15,
-        speechTimeout: "auto",
+        timeout: 10,
+        speechTimeout: 2,
         language: gatherLanguage,
-        speechModel: "phone_call",
-        hints: hebrewHints,
-        profanityFilter: false,
       });
 
       // AI response INSIDE Gather → enables barge-in during AI speech!
