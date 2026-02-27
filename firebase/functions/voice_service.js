@@ -144,9 +144,10 @@ const MESSAGES = {
 };
 
 // Default voices by language (Google Cloud TTS WaveNet via Twilio - highest quality)
+// Hebrew voices: Wavenet-A=female, Wavenet-B=male, Wavenet-C=female, Wavenet-D=male
 const DEFAULT_VOICES = {
-  "he": "Google.he-IL-Wavenet-A",
-  "he-IL": "Google.he-IL-Wavenet-A",
+  "he": "Google.he-IL-Wavenet-D",
+  "he-IL": "Google.he-IL-Wavenet-D",
   "en": "Polly.Joanna",
   "en-US": "Polly.Joanna",
   "en-GB": "Polly.Amy",
@@ -154,8 +155,8 @@ const DEFAULT_VOICES = {
   "ar-XA": "Google.ar-XA-Wavenet-A",
 };
 
-// Default Hebrew voice (for backward compatibility)
-const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-A";
+// Default Hebrew voice (male - Wavenet-D)
+const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-D";
 // Default English voice (for backward compatibility)
 const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
 
@@ -1383,7 +1384,7 @@ exports.twilioVoiceWebhook = onRequest(
       } catch (twilioError) {
         console.error("[twilioVoiceWebhook] Failed to create Twilio response", twilioError);
         res.set("Content-Type", "text/xml");
-        res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-A" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
+        res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
         return;
       }
     }
@@ -1402,7 +1403,7 @@ exports.twilioVoiceWebhook = onRequest(
       });
       console.error("[twilioVoiceWebhook] Failed to create TwiML response", twimlError);
       res.set("Content-Type", "text/xml");
-      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-A" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
+      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
       return;
     }
     
@@ -1731,7 +1732,7 @@ exports.twilioVoiceWebhook = onRequest(
           console.error("[twilioVoiceWebhook] Failed to send error response", responseError);
           // Last resort: send raw XML
           res.set("Content-Type", "text/xml");
-          res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-A" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
+          res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
         }
         return;
       }
@@ -1878,10 +1879,9 @@ exports.twilioVoiceWebhook = onRequest(
       // CRITICAL: Greeting is INSIDE Gather to enable barge-in (interruption).
       // When <Say> is nested inside <Gather>, Twilio automatically stops the
       // Say and begins capturing speech if the caller speaks during playback.
-      // NOTE: Do NOT set speechModel for Hebrew:
-      // - Google STT V2 models (telephony, conversations, etc.) silently fall back to English
-      // - deepgram_nova-3 causes APPLICATION ERROR with he-IL language code
-      // Without speechModel, Twilio uses "Twilio Picks" mode with automatic failover.
+      // STT Model: "phone_call" = Google STT V1 which supports Hebrew (he-IL).
+      // Google STT V2 models silently fall back to English for Hebrew.
+      // deepgram_nova-3 causes APPLICATION ERROR with he-IL language code.
       const gather = response.gather({
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`,
@@ -1889,6 +1889,7 @@ exports.twilioVoiceWebhook = onRequest(
         timeout: 15,
         speechTimeout: "auto",
         language: gatherLanguage,
+        speechModel: "phone_call",
         hints: hebrewHints,
         profanityFilter: false,
       });
@@ -1920,11 +1921,9 @@ exports.twilioVoiceWebhook = onRequest(
       }
     }
 
-    // Safety net: If Gather times out or callback fails, Twilio falls through here
-    response.say(
-      {voice: voiceId || DEFAULT_HEBREW_VOICE, language: sayLanguage || "he-IL"},
-      getMessage("noResponse", language) || "סליחה, לא שמעתי. אנא התקשר שוב.",
-    );
+    // Safety net: If Gather times out or callback fails, redirect back to keep alive
+    response.redirect({method: "POST"},
+      `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`);
 
     // Note: No need to add say/hangup here - Twilio Gather will wait for user input
     // If no response is received (timeout), Twilio will call twilioGatherCallback with empty SpeechResult
@@ -1988,7 +1987,7 @@ exports.twilioVoiceWebhook = onRequest(
       console.error("[twilioVoiceWebhook] Failed to create Twilio response in error handler", twilioError);
       // Fallback: return simple XML
       res.set("Content-Type", "text/xml");
-      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-A" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
+      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
       return;
     }
     
@@ -2113,6 +2112,7 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         timeout: 15,
         speechTimeout: "auto",
         language: gatherLanguage,
+        speechModel: "phone_call",
         hints: hebrewHints,
         profanityFilter: false,
       });
@@ -2120,11 +2120,10 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       // Say the repeat message inside Gather for barge-in support
       gather.say({voice: voiceId, language: sayLanguage}, repeatMessage);
 
-      // Safety fallback after Gather
-      response.say(
-        {voice: voiceId, language: sayLanguage},
-        getMessage("thankYouGoodbye", language) || "תודה, להתראות.",
-      );
+      // Safety fallback: redirect back to callback instead of goodbye
+      // This keeps the conversation alive instead of hanging up
+      response.redirect({method: "POST"},
+        `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`);
 
       res.set("Content-Type", "text/xml");
       res.status(200).send(response.toString());
@@ -2423,6 +2422,7 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         timeout: 15,
         speechTimeout: "auto",
         language: gatherLanguage,
+        speechModel: "phone_call",
         hints: hebrewHints,
         profanityFilter: false,
       });
@@ -2432,11 +2432,9 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         gather.say({voice: voiceId, language: sayLanguage}, aiResponse);
       }
 
-      // Safety net: If Gather times out and callback fails, say goodbye
-      response.say(
-        {voice: voiceId, language: sayLanguage},
-        getMessage("thankYouGoodbye", language) || "תודה, להתראות.",
-      );
+      // Safety net: redirect back to keep conversation alive
+      response.redirect({method: "POST"},
+        `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`);
     }
 
     res.set("Content-Type", "text/xml");
