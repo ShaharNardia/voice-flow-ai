@@ -1878,18 +1878,27 @@ exports.twilioVoiceWebhook = onRequest(
       // CRITICAL: Greeting is INSIDE Gather to enable barge-in (interruption).
       // When <Say> is nested inside <Gather>, Twilio automatically stops the
       // Say and begins capturing speech if the caller speaks during playback.
-      const gather = response.gather({
+      // Deepgram Nova-3 has native Hebrew support (language code "he").
+      // Google STT V2 only supports chirp_2/chirp_3 for Hebrew - all other Google
+      // models (telephony, conversations, etc.) silently fall back to English.
+      // When speechModel is explicitly set, speechTimeout MUST be a positive integer (not "auto").
+      const isHebrew = gatherLanguage?.startsWith("he");
+      const gatherOptions = {
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`,
         method: "POST",
         timeout: 15, // 15 seconds to wait for speech after greeting finishes
-        speechTimeout: "auto", // Twilio auto-detects end of speech
         language: gatherLanguage,
-        speechModel: "experimental_conversations", // Best for Hebrew conversational STT
         hints: hebrewHints,
         profanityFilter: false,
-        // NOTE: enhanced=true only supports 8 languages (NOT Hebrew). Removed.
-      });
+      };
+      if (isHebrew) {
+        gatherOptions.speechModel = "deepgram_nova-3";
+        gatherOptions.speechTimeout = 3; // Required: positive integer when speechModel is set
+      } else {
+        gatherOptions.speechTimeout = "auto";
+      }
+      const gather = response.gather(gatherOptions);
 
       // Say greeting INSIDE Gather → enables barge-in!
       gather.say({voice: voiceId, language: sayLanguage}, greetingToSay);
@@ -2012,21 +2021,21 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
     const speechResult = req.body?.SpeechResult || "";
     const speechConfidence = req.body?.Confidence || 0;
     
-    // Log STT results for debugging
+    // Log STT results for debugging - include Language field from Twilio
+    const twilioLanguage = req.body?.Language || "NOT_SET";
     console.log("=== twilioGatherCallback CALLED ===");
     console.log("callSessionId:", callSessionId);
     console.log("speechResult:", speechResult || "(empty)");
     console.log("speechConfidence:", speechConfidence);
-    console.log("Request body keys:", Object.keys(req.body || {}));
-    
+    console.log("twilioLanguage:", twilioLanguage);
+
     logger.info("Twilio Gather callback received", {
       callSessionId,
       speechResult: speechResult || "(empty)",
       speechResultLength: speechResult?.length || 0,
       speechConfidence,
+      twilioLanguage, // CRITICAL: What language did Twilio ACTUALLY use?
       hasSpeechResult: !!speechResult && speechResult.trim().length > 0,
-      bodyKeys: Object.keys(req.body || {}),
-      queryKeys: Object.keys(req.query || {}),
     });
     
     const response = new twilio.twiml.VoiceResponse();
@@ -2104,17 +2113,23 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         ? "שלום,כן,לא,תודה,אני,מעוניין,לא מעוניין,בבקשה,מה,איך,מתי,למה,עזרה,שירות,מידע,להתראות,טוב,בסדר,נכון,אוקיי,רגע,שנייה"
         : "";
 
-      const gather = response.gather({
+      const isHebrew = gatherLanguage?.startsWith("he");
+      const gatherOptions = {
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
         method: "POST",
         timeout: 15,
-        speechTimeout: "auto",
         language: gatherLanguage,
-        speechModel: "experimental_conversations",
         hints: hebrewHints,
         profanityFilter: false,
-      });
+      };
+      if (isHebrew) {
+        gatherOptions.speechModel = "deepgram_nova-3";
+        gatherOptions.speechTimeout = 3;
+      } else {
+        gatherOptions.speechTimeout = "auto";
+      }
+      const gather = response.gather(gatherOptions);
 
       // Say the repeat message inside Gather for barge-in support
       gather.say({voice: voiceId, language: sayLanguage}, repeatMessage);
@@ -2415,17 +2430,23 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         aiResponseLength: aiResponse?.length || 0,
       });
 
-      const gather = response.gather({
+      const isHebrew = gatherLanguage?.startsWith("he");
+      const gatherOptions = {
         input: "speech",
         action: `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`,
         method: "POST",
         timeout: 15, // 15 seconds for speech after AI response finishes
-        speechTimeout: "auto", // Twilio auto-detects end of speech
         language: gatherLanguage,
-        speechModel: "experimental_conversations",
         hints: hebrewHints,
         profanityFilter: false,
-      });
+      };
+      if (isHebrew) {
+        gatherOptions.speechModel = "deepgram_nova-3";
+        gatherOptions.speechTimeout = 3;
+      } else {
+        gatherOptions.speechTimeout = "auto";
+      }
+      const gather = response.gather(gatherOptions);
 
       // AI response INSIDE Gather → enables barge-in during AI speech!
       if (aiResponse) {
