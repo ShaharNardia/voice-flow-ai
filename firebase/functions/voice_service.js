@@ -147,10 +147,11 @@ const MESSAGES = {
 };
 
 // Default voices by language (Google Cloud TTS via Twilio)
-// Neural2 > WaveNet > Standard in quality. Hebrew male voices: B, D
+// Neural2 NOT available for Hebrew on Twilio — causes APPLICATION ERROR.
+// Using WaveNet which is the best available. Hebrew male: B, D
 const DEFAULT_VOICES = {
-  "he": "Google.he-IL-Neural2-D",
-  "he-IL": "Google.he-IL-Neural2-D",
+  "he": "Google.he-IL-Wavenet-D",
+  "he-IL": "Google.he-IL-Wavenet-D",
   "en": "Polly.Joanna",
   "en-US": "Polly.Joanna",
   "en-GB": "Polly.Amy",
@@ -158,8 +159,8 @@ const DEFAULT_VOICES = {
   "ar-XA": "Google.ar-XA-Wavenet-A",
 };
 
-// Default Hebrew voice (male Neural2-D - higher quality than WaveNet)
-const DEFAULT_HEBREW_VOICE = "Google.he-IL-Neural2-D";
+// Default Hebrew voice (male WaveNet-D — best available on Twilio for Hebrew)
+const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-D";
 // Default English voice (for backward compatibility)
 const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
 
@@ -174,7 +175,7 @@ const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
  * "aura-asteria-en", etc.) is NOT a valid Twilio voice and must be replaced
  * with the best available Twilio-compatible voice for the target language.
  *
- * For Hebrew the best quality is Google Neural2 (he-IL-Neural2-D = male).
+ * For Hebrew the best quality is Google WaveNet (he-IL-Wavenet-D = male).
  * Polly has NO Hebrew voices, so Polly voices are also swapped when Hebrew.
  *
  * @param {string} voiceId - The voice ID from the assistant definition
@@ -1387,7 +1388,7 @@ exports.twilioVoiceWebhook = onRequest(
       } catch (twilioError) {
         console.error("[twilioVoiceWebhook] Failed to create Twilio response", twilioError);
         res.set("Content-Type", "text/xml");
-        res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Neural2-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
+        res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
         return;
       }
     }
@@ -1406,7 +1407,7 @@ exports.twilioVoiceWebhook = onRequest(
       });
       console.error("[twilioVoiceWebhook] Failed to create TwiML response", twimlError);
       res.set("Content-Type", "text/xml");
-      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Neural2-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
+      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">שלום. המערכת לא מוגדרת כראוי. אנא צור קשר עם התמיכה.</Say><Hangup/></Response>');
       return;
     }
     
@@ -1735,7 +1736,7 @@ exports.twilioVoiceWebhook = onRequest(
           console.error("[twilioVoiceWebhook] Failed to send error response", responseError);
           // Last resort: send raw XML
           res.set("Content-Type", "text/xml");
-          res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Neural2-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
+          res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
         }
         return;
       }
@@ -1994,7 +1995,7 @@ exports.twilioVoiceWebhook = onRequest(
       console.error("[twilioVoiceWebhook] Failed to create Twilio response in error handler", twilioError);
       // Fallback: return simple XML
       res.set("Content-Type", "text/xml");
-      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Neural2-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
+      res.status(200).send('<?xml version="1.0" encoding="UTF-8"?><Response><Say voice="Google.he-IL-Wavenet-D" language="he-IL">אירעה שגיאה בלתי צפויה. אנא נסה שוב מאוחר יותר.</Say><Hangup/></Response>');
       return;
     }
     
