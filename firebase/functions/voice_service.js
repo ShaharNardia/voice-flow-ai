@@ -60,38 +60,38 @@ function setCorsHeaders(req, res) {
 // Multi-language messages support
 const MESSAGES = {
   "he-IL": {
-    defaultGreeting: "שלום, כאן העוזר הווירטואלי. איך אפשר לעזור?",
-    askAvailability: "יש אפשרות לדבר עכשיו? אפשר להגיד כן או לא.",
-    didNotHear: "סליחה, לא שמעתי. אפשר לחזור על זה?",
-    noResponse: "אין בעיה. ניצור קשר בהקדם. יום נעים!",
-    positiveResponse: "מצוין! תודה על ההתעניינות. מהצוות שלנו ייצרו קשר בהקדם. יום נפלא!",
-    negativeResponse: "הבנתי. תודה על הזמן. אפשר ליצור קשר בכל עת. יום נעים!",
-    unclearResponse: "תודה על התגובה. ניצור קשר בהקדם. יום נעים!",
-    thankYouGoodbye: "תודה על הזמן. להתראות.",
-    errorOccurred: "אירעה שגיאה. אפשר לנסות שוב מאוחר יותר.",
-    sessionNotFound: "השיחה לא נמצאה. להתראות.",
-    scenarioNotFound: "התרחיש לא נמצא. להתראות.",
-    flowError: "שגיאה בתרחיש. להתראות.",
-    contactSupport: "שלום. לא הצלחנו לאתר את השיחה. אפשר ליצור קשר עם התמיכה.",
-    assistantNotFound: "שלום. לא הצלחנו לאתר את פרטי העוזר. להתראות.",
-    willBeInTouch: "תודה על הזמן. ניצור קשר בהקדם. להתראות.",
+    defaultGreeting: "אהלן! מה נשמע? איך אפשר לעזור?",
+    askAvailability: "נוח לדבר עכשיו?",
+    didNotHear: "לא שמעתי, אפשר לחזור על זה?",
+    noResponse: "אין בעיה, ניצור קשר בזמן אחר. יום טוב!",
+    positiveResponse: "מעולה! נחזור אליך בהקדם. יום טוב!",
+    negativeResponse: "הבנתי, אין בעיה. אפשר ליצור קשר מתי שנוח. יום טוב!",
+    unclearResponse: "אוקיי, נחזור אליך בקרוב. יום טוב!",
+    thankYouGoodbye: "תודה, יום טוב!",
+    errorOccurred: "רגע, משהו השתבש. אפשר לנסות שוב אחר כך.",
+    sessionNotFound: "לא מצאתי את השיחה. להתראות.",
+    scenarioNotFound: "משהו לא עבד. להתראות.",
+    flowError: "הייתה תקלה. להתראות.",
+    contactSupport: "אהלן, לא הצלחתי למצוא את פרטי השיחה. כדאי ליצור קשר עם התמיכה.",
+    assistantNotFound: "אהלן, לא הצלחתי לטעון את המידע. להתראות.",
+    willBeInTouch: "תודה! ניצור קשר בקרוב. יום טוב!",
   },
   "he": {
-    defaultGreeting: "שלום, כאן העוזר הווירטואלי. איך אפשר לעזור?",
-    askAvailability: "יש אפשרות לדבר עכשיו? אפשר להגיד כן או לא.",
-    didNotHear: "סליחה, לא שמעתי. אפשר לחזור על זה?",
-    noResponse: "אין בעיה. ניצור קשר בהקדם. יום נעים!",
-    positiveResponse: "מצוין! תודה על ההתעניינות. מהצוות שלנו ייצרו קשר בהקדם. יום נפלא!",
-    negativeResponse: "הבנתי. תודה על הזמן. אפשר ליצור קשר בכל עת. יום נעים!",
-    unclearResponse: "תודה על התגובה. ניצור קשר בהקדם. יום נעים!",
-    thankYouGoodbye: "תודה על הזמן. להתראות.",
-    errorOccurred: "אירעה שגיאה. אפשר לנסות שוב מאוחר יותר.",
-    sessionNotFound: "השיחה לא נמצאה. להתראות.",
-    scenarioNotFound: "התרחיש לא נמצא. להתראות.",
-    flowError: "שגיאה בתרחיש. להתראות.",
-    contactSupport: "שלום. לא הצלחנו לאתר את השיחה. אפשר ליצור קשר עם התמיכה.",
-    assistantNotFound: "שלום. לא הצלחנו לאתר את פרטי העוזר. להתראות.",
-    willBeInTouch: "תודה על הזמן. ניצור קשר בהקדם. להתראות.",
+    defaultGreeting: "אהלן! מה נשמע? איך אפשר לעזור?",
+    askAvailability: "נוח לדבר עכשיו?",
+    didNotHear: "לא שמעתי, אפשר לחזור על זה?",
+    noResponse: "אין בעיה, ניצור קשר בזמן אחר. יום טוב!",
+    positiveResponse: "מעולה! נחזור אליך בהקדם. יום טוב!",
+    negativeResponse: "הבנתי, אין בעיה. אפשר ליצור קשר מתי שנוח. יום טוב!",
+    unclearResponse: "אוקיי, נחזור אליך בקרוב. יום טוב!",
+    thankYouGoodbye: "תודה, יום טוב!",
+    errorOccurred: "רגע, משהו השתבש. אפשר לנסות שוב אחר כך.",
+    sessionNotFound: "לא מצאתי את השיחה. להתראות.",
+    scenarioNotFound: "משהו לא עבד. להתראות.",
+    flowError: "הייתה תקלה. להתראות.",
+    contactSupport: "אהלן, לא הצלחתי למצוא את פרטי השיחה. כדאי ליצור קשר עם התמיכה.",
+    assistantNotFound: "אהלן, לא הצלחתי לטעון את המידע. להתראות.",
+    willBeInTouch: "תודה! ניצור קשר בקרוב. יום טוב!",
   },
   "en-US": {
     defaultGreeting: "Hello, this is your virtual assistant. Thank you for taking our call.",
@@ -165,24 +165,26 @@ const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-D";
 const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
 
 /**
- * Wrap text in SSML prosody for more natural Hebrew speech.
- * Slightly faster rate + lower pitch = confident human agent tone.
- * Twilio <Say> supports SSML when the text starts with <speak>.
- *
- * @param {string} text - Plain text to wrap
- * @param {string} language - Language code
- * @returns {string} SSML-wrapped text (or plain text for non-Hebrew)
+ * Strip nikud (Hebrew diacritical marks) from text.
+ * Google WaveNet is trained on non-vocalized Hebrew — nikud confuses it.
+ * Also strips SSML tags if present from previous versions.
+ * @param {string} text - Text that may contain nikud
+ * @returns {string} Clean text without nikud
  */
+function cleanHebrewText(text) {
+  if (!text) return text;
+  // Strip Hebrew nikud Unicode range (U+0591–U+05C7)
+  return text.replace(/[\u0591-\u05C7]/g, "");
+}
+
+// SSML removed — made TTS worse. Plain text sounds more natural with WaveNet.
 function wrapSSML(text, language) {
   if (!text) return text;
-  // Only apply SSML for Hebrew WaveNet voices (Google TTS supports SSML)
-  if (!language || !language.startsWith("he")) return text;
-  // Escape XML special characters in text
-  const escaped = text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;");
-  return `<speak><prosody rate="105%" pitch="-2st">${escaped}</prosody></speak>`;
+  // Clean nikud from Hebrew text (WaveNet doesn't need it)
+  if (language && language.startsWith("he")) {
+    return cleanHebrewText(text);
+  }
+  return text;
 }
 
 /**
@@ -1912,7 +1914,7 @@ exports.twilioVoiceWebhook = onRequest(
           action: `${callbackUrl}&source=record`,
           method: "POST",
           maxLength: 15,
-          timeout: 2,
+          timeout: 4,
           playBeep: false,
           trim: "do-not-trim",
           transcribe: false,
@@ -2165,40 +2167,63 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
     const hasSpeechResult = speechResult && speechResult.trim();
     
     if (!hasSpeechResult) {
+      // Track how many times we got empty speech (prevent infinite loop)
+      const emptyCount = (data.emptyResultCount || 0) + 1;
+
       logger.warn("Empty speech result received", {
         callSessionId,
         body: req.body,
         query: req.query,
         isFirstMessage,
+        emptyCount,
       });
-      
-      // If no speech detected, ask user to repeat
+
+      // Update empty count in Firestore (fire-and-forget)
+      sessionRef.set({emptyResultCount: emptyCount}, {merge: true}).catch(() => {});
+
       const sayLanguage = language === "he" ? "he-IL" : (language || "he-IL");
       const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
-      
-      // Get appropriate "didn't hear you" message
-      const repeatMessage = getMessage("didNotHear", language) ||
-                           (language?.startsWith("he")
-                             ? "סליחה, לא שמעתי אותך. תוכל לחזור בבקשה?"
-                             : "Sorry, I didn't hear you. Could you repeat please?");
-
       const isHebrew = language?.startsWith("he");
       const callbackUrl = `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`;
 
+      // After 3 empty attempts, say goodbye instead of looping forever
+      if (emptyCount >= 3) {
+        const goodbyeMsg = isHebrew
+          ? "נראה שיש בעיית קליטה. ניצור קשר בזמן אחר. יום טוב!"
+          : "It seems we're having connection issues. We'll try again later. Goodbye!";
+        response.say({voice: voiceId, language: sayLanguage}, goodbyeMsg);
+        response.hangup();
+        res.set("Content-Type", "text/xml");
+        res.status(200).send(response.toString());
+        return;
+      }
+
+      // Vary the "didn't hear" message to sound more natural
+      const repeatMessages = isHebrew
+        ? [
+            "לא שמעתי, אפשר לחזור על זה?",
+            "סליחה, לא קלטתי. מה נאמר?",
+            "רגע, לא שמעתי טוב. אפשר שוב?",
+          ]
+        : [
+            "Sorry, I didn't catch that. Could you repeat?",
+            "I didn't hear that. Could you say it again?",
+            "Sorry, could you repeat that?",
+          ];
+      const repeatMessage = repeatMessages[emptyCount - 1] || repeatMessages[0];
+
       if (isHebrew) {
-        // Hebrew: Say message then Record for Deepgram transcription
-        response.say({voice: voiceId, language: sayLanguage}, wrapSSML(repeatMessage, language));
+        response.say({voice: voiceId, language: sayLanguage}, repeatMessage);
         response.record({
           action: `${callbackUrl}&source=record`,
           method: "POST",
           maxLength: 15,
-          timeout: 2,
+          timeout: 4,
           playBeep: false,
           trim: "do-not-trim",
           transcribe: false,
         });
       } else {
-        // Non-Hebrew: Gather with barge-in
         const gather = response.gather({
           input: "speech",
           action: callbackUrl,
@@ -2216,6 +2241,11 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       res.set("Content-Type", "text/xml");
       res.status(200).send(response.toString());
       return;
+    }
+
+    // Reset empty count on successful speech
+    if (data.emptyResultCount > 0) {
+      sessionRef.set({emptyResultCount: 0}, {merge: true}).catch(() => {});
     }
 
     // Add user message to history
@@ -2506,7 +2536,7 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
           action: `${callbackUrl}&source=record`,
           method: "POST",
           maxLength: 15,
-          timeout: 2,
+          timeout: 4,
           playBeep: false,
           trim: "do-not-trim",
           transcribe: false,
