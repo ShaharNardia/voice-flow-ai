@@ -54,16 +54,14 @@ const FILLER_PHRASES = {
       "One second...",
     ],
     acknowledge: [
-      "I understand...",
-      "Great!",
-      "Excellent!",
-      "Sure!",
-      "Of course!",
-      "No problem!",
-      "Absolutely!",
-      "Perfect!",
-      "That makes sense!",
       "Got it!",
+      "Sure!",
+      "Great!",
+      "No problem!",
+      "Perfect!",
+      "Makes sense!",
+      "That works!",
+      "Sounds good!",
     ],
     backchannel: [
       "Yes",
@@ -116,15 +114,15 @@ const FILLER_PHRASES = {
  * @returns {string} Base language code (e.g., "he", "en", "ar")
  */
 function detectLanguage(language) {
-  if (!language) return "he"; // Default to Hebrew
-  
+  if (!language) return "en"; // Default to English
+
   const lang = language.toLowerCase();
   if (lang.startsWith("he")) return "he";
   if (lang.startsWith("en")) return "en";
   if (lang.startsWith("ar")) return "ar";
-  
-  // Default to Hebrew for unknown languages
-  return "he";
+
+  // Default to English for unknown languages
+  return "en";
 }
 
 /**
@@ -134,7 +132,7 @@ function detectLanguage(language) {
  * @param {string} language - Language code (e.g., "he-IL", "en-US", "he", "en")
  * @returns {string} System prompt in the specified language
  */
-function buildSystemPrompt(assistant, companyData = {}, language = "he-IL") {
+function buildSystemPrompt(assistant, companyData = {}, language = "en-US") {
   const lang = detectLanguage(language);
   const assistantName = assistant.name || assistant.assistantName || getDefaultAssistantName(lang);
   const companyName = assistant.companyName || companyData.name || getDefaultCompanyName(lang);
@@ -165,8 +163,8 @@ function buildSystemPrompt(assistant, companyData = {}, language = "he-IL") {
     return buildArabicPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
   }
   
-  // Default to Hebrew
-  return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
+  // Default to English
+  return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
 }
 
 /**
@@ -178,7 +176,7 @@ function getDefaultAssistantName(lang) {
     "en": "Virtual Assistant",
     "ar": "المساعد الافتراضي",
   };
-  return defaults[lang] || defaults["he"];
+  return defaults[lang] || defaults["en"];
 }
 
 /**
@@ -190,7 +188,7 @@ function getDefaultCompanyName(lang) {
     "en": "The Company",
     "ar": "الشركة",
   };
-  return defaults[lang] || defaults["he"];
+  return defaults[lang] || defaults["en"];
 }
 
 /**
@@ -202,7 +200,7 @@ function getDefaultTimeZone(lang) {
     "en": "America/New_York",
     "ar": "Asia/Dubai",
   };
-  return defaults[lang] || defaults["he"];
+  return defaults[lang] || defaults["en"];
 }
 
 /**
@@ -272,97 +270,54 @@ ${additionalInstructions ? `\nהוראות נוספות: ${additionalInstruction
 }
 
 /**
- * Build English system prompt
+ * Build English system prompt — voice-optimized, ~280 tokens
  */
 function buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "") {
-  // Format services
   const servicesText = services.length > 0
     ? services.map((s) => {
-        const name = s.name || "Service";
-        const desc = s.description || "";
-        const price = s.price ? `$${s.price}` : "Price upon quote";
-        const duration = s.duration || "";
-        return `${name}: ${desc}${price ? ` | Price: ${price}` : ""}${duration ? ` | Duration: ${duration}` : ""}`;
+        const parts = [s.name || "Service"];
+        if (s.description) parts.push(s.description);
+        if (s.price) parts.push(`$${s.price}`);
+        if (s.duration) parts.push(s.duration);
+        return parts.join(" | ");
       }).join("\n")
-    : "No specific services listed";
+    : "General services — ask caller what they need";
 
-  return `[Identity and Professionalism]
-You are ${assistantName}, a professional, friendly, and fast customer service representative for ${companyName}${industry ? `, operating in the ${industry} industry` : ""}. You sound like an experienced human representative - not a robot. Your role is to assist customers professionally, quickly, and courteously, collect appointment details, and keep everything organized in the system.
+  const canDo = [
+    createJobPermission && "book appointments",
+    reschedulePermission && "reschedule",
+    cancelPermission && "cancel bookings",
+    offerFreeEstimation && "offer free estimates",
+  ].filter(Boolean).join(", ") || "answer questions";
 
-[Company Information]
-- Company Name: ${companyName}
-- Phone Number: ${phoneNumber}
-- Website: ${website || "Not specified"}
-- Time Zone: ${timeZone}
+  const cantDo = [
+    priceRestriction && "negotiate prices",
+    legalRestriction && "give legal advice",
+    medicalRestriction && "give medical advice",
+  ].filter(Boolean).join(", ");
 
-[Services]
-We provide the following services:
+  return `You are ${assistantName}, a phone agent for ${companyName}${industry ? ` (${industry})` : ""}.
+Sound like a natural, warm American service rep — never robotic, never stiff.
+
+Rules (non-negotiable):
+- Max 1–2 short sentences per reply. That's it.
+- Never start a reply with "I". Vary openings: "Sure!", "Got it.", "Mmm, let me check.", "Right, so—"
+- Use contractions always: I'll, we've, that's, don't, can't, you're.
+- Never say "certainly", "absolutely", "of course", "I'd be happy to" — scripted and robotic.
+- Before thinking: say a filler first. "One sec.", "Sure, let me pull that up.", "Mmm."
+- Match caller's energy. They're casual → you're casual. They're in a hurry → you're fast.
+- When in doubt, ask one focused question. Not two.
+
+You can: ${canDo}
+${cantDo ? `You cannot: ${cantDo}` : ""}
+
+Company: ${companyName}${phoneNumber ? ` | Phone: ${phoneNumber}` : ""}${website ? ` | ${website}` : ""} | TZ: ${timeZone}
+
+Services:
 ${servicesText}
 
-[Permissions and Restrictions]
-- Free Estimate: ${offerFreeEstimation ? "Yes" : "No"}
-- Permission to Create Appointment: ${createJobPermission ? "Yes" : "No"}
-- Permission to Reschedule: ${reschedulePermission ? "Yes" : "No"}
-- Permission to Cancel: ${cancelPermission ? "Yes" : "No"}
-- Price Negotiation Restriction: ${priceRestriction ? "Yes" : "No"}
-- Legal Advice Restriction: ${legalRestriction ? "Yes" : "No"}
-- Medical Advice Restriction: ${medicalRestriction ? "Yes" : "No"}
-
-[Communication Style - Professional, Fast, and Friendly]
-You are a customer service representative of the highest level. Act like an experienced human representative:
-- **Speed**: Short, focused, and efficient responses - no more than 2 sentences per response
-- **Courtesy**: Always polite, respectful, and welcoming. Use phrases like "Of course", "Certainly", "Absolutely", "I'm here for you"
-- **Professionalism**: Confidence in knowledge, accuracy in details, maintaining a professional yet accessible tone
-- **Naturalness**: Sound like a real person - not a robot. Use a human voice, not too formal
-
-[Natural Conversation Flow - CRITICAL]
-You must sound like a real human representative, not a robot. The following rules are critical:
-- **Natural filler phrases**: When you're "thinking" or processing information, use natural phrases: "Let me see...", "One moment...", "Hmm...", "Yes, I'm checking that...", "Just a second, I'm looking...", "Alright, give me a moment..."
-- **Never silent**: If there's a delay, immediately say a filler phrase. Silence = robotic
-- **Warm acknowledgment**: "Great!", "Excellent!", "Sure!", "Of course!", "No problem!", "I understand exactly", "That makes sense"
-- **Pace matching**: If the customer speaks fast - respond fast. If they're calm - adjust your tone
-- **Backchanneling**: During the customer's speech, add "Yes", "Right", "I see", "Okay", "Alright" - this shows you're listening
-- **Correct word usage**: "I" when referring to yourself, "we" when referring to the company
-
-[Response Guidelines - Professional and Accurate]
-- **Perfect grammar**: No grammatical errors, professional and precise words
-- **Short responses**: Maximum 2-3 sentences. No more. Be focused and efficient
-- **Always on topic**: Don't deviate from the subject. If the customer asks something, answer directly
-- **Information organization**: When presenting options, use "First", "Second", "Third"
-- **Information verification**: When receiving important details (email, phone), repeat them for verification
-- **Presence check**: If there's a long silence, ask "Are you still there?" politely
-
-[Tasks and Goals - Professional Flow]
-1. **Professional greeting**: "Hello! Thank you for calling ${companyName}. This is ${assistantName}. How can I help you today?"
-2. **Understanding the need**: "Can you tell me what service you need?" or "What problem are you dealing with?"
-3. **Confirmation and continuation**: "Great! This is something we can definitely help with. Let's collect the required details."
-4. **Organized information collection**: 
-   - Full name
-   - Email address (with verification by spelling)
-   - Service address
-   - Preferred time (convert to precise time)
-5. **Summary and confirmation**: "Thank you! Just to confirm: [name], [service], [date and time], [address]. Correct?"
-6. **Creating appointment**: After confirmation, state "Great! I'm booking your appointment now..."
-7. **Professional closing**: "Your appointment has been successfully scheduled! Thank you for choosing ${companyName}. Have a wonderful day!"
-
-[Error Handling - Courtesy and Professionalism]
-- **If you didn't hear**: "Sorry, I didn't hear that well. Could you repeat that please?"
-- **If you didn't understand**: "I want to make sure I understood correctly. Do you mean...?"
-- **If there's a technical problem**: "One moment, I have a small issue. Give me a second to check..."
-- **Irrelevant questions**: "I understand your question, but I'm here to help with our services. How can I help?"
-
-[Conversation End Detection]
-End the conversation politely if the customer says:
-- "Thank you", "Thanks", "Goodbye", "Bye", "I'm done", "That's all"
-- Or if the conversation has reached a natural end (appointment scheduled, question answered)
-
-[Very Important - Perfect Professional English]
-- Perfect grammar without errors
-- Professional and precise words
-- Short responses (maximum 2-3 sentences)
-- Always on topic - don't deviate
-- Professional yet accessible and human tone
-${additionalInstructions ? `\n[Additional Instructions - Very Important]\n${additionalInstructions}\n` : ""}`;
+Goal: greet → understand need → collect name + phone + preferred time → confirm → ${createJobPermission ? "book it" : "pass to team"}.
+Wrap up warmly: "Awesome, you're all set! Anything else?"${additionalInstructions ? `\n\nExtra instructions: ${additionalInstructions}` : ""}`;
 }
 
 /**
@@ -460,6 +415,79 @@ ${additionalInstructions ? `\n[تعليمات إضافية - مهم جداً]\n$
 }
 
 /**
+ * Agent tools — exposed to the LLM via OpenAI function calling.
+ * The LLM decides autonomously when to call them based on conversation context.
+ */
+const AGENT_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "send_email",
+      description: "Send a follow-up or confirmation email to the customer. Use this when the customer provides their email address and asks for a confirmation, summary, or any written follow-up.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {type: "string", description: "Customer email address"},
+          template: {type: "string", enum: ["appointmentConfirmation", "callSummary", "welcome"], description: "Email template to use"},
+          templateVars: {type: "object", description: "Template variables (customerName, companyName, appointmentTime, address, details, etc.)"},
+        },
+        required: ["to", "template"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "send_whatsapp",
+      description: "Send a WhatsApp message to the customer. Use this when the customer asks for a WhatsApp confirmation, reminder, or follow-up message.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {type: "string", description: "Customer phone number in E.164 format (e.g. +12125551234)"},
+          message: {type: "string", description: "Message text to send"},
+        },
+        required: ["to", "message"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_appointment",
+      description: "Create a job or appointment in the system. Use this after collecting all required details (name, service, time) and the customer confirms they want to book.",
+      parameters: {
+        type: "object",
+        properties: {
+          customerName: {type: "string", description: "Customer full name"},
+          customerEmail: {type: "string", description: "Customer email address (optional)"},
+          customerPhone: {type: "string", description: "Customer phone in E.164 format"},
+          service: {type: "string", description: "Service being booked"},
+          scheduledTime: {type: "string", description: "Appointment date/time in ISO 8601 format"},
+          address: {type: "string", description: "Service address (optional)"},
+          notes: {type: "string", description: "Any additional notes (optional)"},
+        },
+        required: ["customerName", "service", "scheduledTime"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "transfer_call",
+      description: "Transfer the call to a human agent. Use this when the customer explicitly asks to speak to a person, when the issue is complex and requires human judgment, or when you cannot resolve the customer's request.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {type: "string", description: "E.164 phone number of the human agent or queue to transfer to"},
+          reason: {type: "string", description: "Brief reason for the transfer"},
+        },
+        required: ["to"],
+      },
+    },
+  },
+];
+
+/**
  * Get conversation history from session
  */
 function getConversationHistory(sessionData) {
@@ -492,11 +520,11 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
   const temperature = options.temperature || 0.9; // Higher for natural, human-like responses
   const maxTokens = options.maxTokens || 100; // Short for voice: 1-2 sentences max
 
-  // Build messages array
+  // Build messages array (userMessage may be null for tool-result continuation passes)
   const messages = [
     {role: "system", content: systemPrompt},
     ...conversationHistory,
-    {role: "user", content: userMessage},
+    ...(userMessage ? [{role: "user", content: userMessage}] : []),
   ];
 
   try {
@@ -510,16 +538,25 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
       historyLength: conversationHistory.length,
     });
 
+    // Build request body - include tools only when provided
+    const requestBody = {
+      model,
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+      response_format: {type: "text"},
+    };
+
+    if (options.tools && options.tools.length > 0) {
+      requestBody.tools = options.tools;
+      requestBody.tool_choice = "auto";
+      // When tools are enabled, response_format must not be set
+      delete requestBody.response_format;
+    }
+
     const response = await axios.post(
         "https://api.openai.com/v1/chat/completions",
-        {
-          model,
-          messages,
-          temperature,
-          max_tokens: maxTokens,
-          // Optimize for Hebrew
-          response_format: {type: "text"},
-        },
+        requestBody,
         {
           headers: {
             "Authorization": `Bearer ${OPENAI_API_KEY}`,
@@ -530,10 +567,13 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
     );
 
     const processingTime = Date.now() - startTime;
-    const content = response.data.choices[0]?.message?.content;
-    
-    if (!content) {
-      logger.error("OpenAI API returned empty content", {
+    const choice = response.data.choices[0];
+    const content = choice?.message?.content;
+    const toolCalls = choice?.message?.tool_calls || [];
+
+    // LLM either returns text OR tool calls — not both
+    if (!content && toolCalls.length === 0) {
+      logger.error("OpenAI API returned empty content and no tool calls", {
         responseData: response.data,
         choices: response.data.choices,
       });
@@ -541,7 +581,9 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
     }
 
     logger.info("OpenAI response received", {
-      responseLength: content.length,
+      responseLength: content?.length || 0,
+      toolCallCount: toolCalls.length,
+      toolNames: toolCalls.map((tc) => tc.function?.name),
       tokensUsed: response.data.usage?.total_tokens,
       processingTimeMs: processingTime,
       promptTokens: response.data.usage?.prompt_tokens,
@@ -549,7 +591,8 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
     });
 
     return {
-      text: content.trim(),
+      text: content ? content.trim() : null,
+      toolCalls,
       tokensUsed: response.data.usage?.total_tokens || 0,
     };
   } catch (error) {
@@ -623,9 +666,9 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
  * @param {string} [context="thinking"] - Context: "thinking", "acknowledge", "backchannel"
  * @returns {string} Random filler phrase
  */
-function getRandomFiller(language = "he-IL", context = "thinking") {
+function getRandomFiller(language = "en-US", context = "thinking") {
   const lang = detectLanguage(language);
-  const langFillers = FILLER_PHRASES[lang] || FILLER_PHRASES["he"];
+  const langFillers = FILLER_PHRASES[lang] || FILLER_PHRASES["en"];
   const fillers = langFillers[context] || langFillers.thinking;
   return fillers[Math.floor(Math.random() * fillers.length)];
 }
@@ -635,4 +678,5 @@ module.exports = {
   getLLMResponse,
   getConversationHistory,
   getRandomFiller,
+  AGENT_TOOLS,
 };

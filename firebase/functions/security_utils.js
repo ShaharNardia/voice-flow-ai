@@ -6,6 +6,7 @@
 
 const {logger} = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
+const admin = require("firebase-admin");
 
 // ── HTML / XSS Sanitization ──────────────────────────────────────────
 
@@ -252,6 +253,24 @@ function handleCorsSafe(req, res) {
   return false; // Continue processing
 }
 
+// ── Auth Token Extraction ─────────────────────────────────────────────
+
+/**
+ * Extract and verify a Firebase UID from the Authorization: Bearer header.
+ * Returns null if missing, invalid, or expired.
+ */
+async function extractUidFromRequest(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+  try {
+    const decoded = await admin.auth().verifyIdToken(authHeader.slice(7));
+    return decoded.uid;
+  } catch (e) {
+    logger.warn("extractUidFromRequest: invalid token", e.message);
+    return null;
+  }
+}
+
 module.exports = {
   stripHtml,
   sanitizeObject,
@@ -264,4 +283,5 @@ module.exports = {
   ALLOWED_ORIGINS,
   setCorsHeadersSafe,
   handleCorsSafe,
+  extractUidFromRequest,
 };

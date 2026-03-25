@@ -17,6 +17,7 @@ const {
   setCorsHeadersSafe,
   isValidPhone,
   validateRequired,
+  extractUidFromRequest,
 } = require("./security_utils");
 
 const axios = require("axios");
@@ -26,6 +27,7 @@ const llmService = require("./llm_service");
 const deepgramService = require("./deepgram_service");
 
 const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
+const {getKnowledgeContext} = require("./knowledge_service");
 
 const REGION = "us-central1";
 const PROJECT_ID = process.env.GCLOUD_PROJECT;
@@ -94,29 +96,29 @@ const MESSAGES = {
     willBeInTouch: "תודה! ניצור קשר בקרוב. יום טוב!",
   },
   "en-US": {
-    defaultGreeting: "Hello, this is your virtual assistant. Thank you for taking our call.",
-    askAvailability: "Are you available to speak with us? Please say yes or no.",
-    didNotHear: "Sorry, I didn't catch that. Could you please repeat?",
-    noResponse: "No problem. We will contact you again soon. Have a great day!",
-    positiveResponse: "Great! Thank you for your interest. One of our team members will call you back shortly to assist you further. Have a wonderful day!",
-    negativeResponse: "I understand. Thank you for your time. If you change your mind, feel free to reach out to us. Have a great day!",
-    unclearResponse: "Thank you for your response. We will have someone reach out to you soon. Have a great day!",
-    thankYouGoodbye: "Thank you for your time. Goodbye.",
-    errorOccurred: "An error occurred. Please try again later.",
-    sessionNotFound: "Session not found. Goodbye.",
-    scenarioNotFound: "Scenario not found. Goodbye.",
-    flowError: "Flow error. Goodbye.",
-    contactSupport: "Hello. We could not locate your call session. Please contact support.",
-    assistantNotFound: "Hello. We could not locate your assistant information. Goodbye.",
-    willBeInTouch: "Thank you for your time. We will be in touch. Goodbye.",
+    defaultGreeting: "Hey there! Thanks for calling. How can I help you today?",
+    askAvailability: "Hey, is this a good time to chat for a minute?",
+    didNotHear: "Sorry, I didn't quite catch that — could you say it again?",
+    noResponse: "No worries at all! We'll reach out again soon. Have a great day!",
+    positiveResponse: "Awesome! One of our team members will give you a call shortly. Have a great day!",
+    negativeResponse: "Totally understand. Thanks for your time — feel free to reach out whenever you're ready!",
+    unclearResponse: "Got it, thanks! We'll have someone follow up with you soon.",
+    thankYouGoodbye: "Thanks so much. Take care!",
+    errorOccurred: "Hmm, something went wrong on our end. Please try again in a bit.",
+    sessionNotFound: "Hmm, we couldn't find your session. Goodbye.",
+    scenarioNotFound: "Something went wrong with the call flow. Goodbye.",
+    flowError: "We ran into an issue. Goodbye.",
+    contactSupport: "Hey, we had trouble pulling up your call. Please reach out to our support team.",
+    assistantNotFound: "Hey, we couldn't load the right assistant for this call. Goodbye.",
+    willBeInTouch: "Great talking with you! We'll be in touch soon.",
   },
   "en": {
-    defaultGreeting: "Hello, this is your virtual assistant. Thank you for taking our call.",
-    askAvailability: "Are you available to speak with us? Please say yes or no.",
-    didNotHear: "Sorry, I didn't catch that. Could you please repeat?",
-    noResponse: "No problem. We will contact you again soon. Have a great day!",
-    positiveResponse: "Great! Thank you for your interest. One of our team members will call you back shortly to assist you further. Have a wonderful day!",
-    negativeResponse: "I understand. Thank you for your time. If you change your mind, feel free to reach out to us. Have a great day!",
+    defaultGreeting: "Hey there! Thanks for calling. How can I help you today?",
+    askAvailability: "Hey, is this a good time to chat for a minute?",
+    didNotHear: "Sorry, I didn't quite catch that — could you say it again?",
+    noResponse: "No worries at all! We'll reach out again soon. Have a great day!",
+    positiveResponse: "Awesome! One of our team members will give you a call shortly. Have a great day!",
+    negativeResponse: "Totally understand. Thanks for your time — feel free to reach out whenever you're ready!",
     unclearResponse: "Thank you for your response. We will have someone reach out to you soon. Have a great day!",
     thankYouGoodbye: "Thank you for your time. Goodbye.",
     errorOccurred: "An error occurred. Please try again later.",
@@ -152,17 +154,18 @@ const MESSAGES = {
 const DEFAULT_VOICES = {
   "he": "Google.he-IL-Wavenet-D",
   "he-IL": "Google.he-IL-Wavenet-D",
-  "en": "Polly.Joanna",
-  "en-US": "Polly.Joanna",
-  "en-GB": "Polly.Amy",
+  "en": "Google.en-US-Neural2-F",
+  "en-US": "Google.en-US-Neural2-F",
+  "en-GB": "Google.en-GB-Neural2-A",
+  "en-AU": "Google.en-AU-Neural2-A",
   "ar": "Google.ar-XA-Wavenet-A",
   "ar-XA": "Google.ar-XA-Wavenet-A",
 };
 
 // Default Hebrew voice (male WaveNet-D — best available on Twilio for Hebrew)
 const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-D";
-// Default English voice (for backward compatibility)
-const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
+// Default English voice — Neural2-F (female, most natural, available on Twilio for English)
+const DEFAULT_ENGLISH_VOICE = "Google.en-US-Neural2-F";
 
 /**
  * Strip nikud (Hebrew diacritical marks) from text.
@@ -207,7 +210,7 @@ function wrapSSML(text, language) {
  */
 function resolveVoiceForLanguage(voiceId, language) {
   if (!language) {
-    language = "he-IL"; // Default to Hebrew
+    language = "en-US"; // Default to English
   }
 
   const lang = language.toLowerCase();
@@ -255,10 +258,10 @@ function resolveVoiceForLanguage(voiceId, language) {
   return DEFAULT_ENGLISH_VOICE;
 }
 
-// Get message based on language (defaults to Hebrew)
-function getMessage(key, language = "he-IL") {
+// Get message based on language (defaults to English)
+function getMessage(key, language = "en-US") {
   if (!language) {
-    language = "he-IL"; // Default to Hebrew
+    language = "en-US"; // Default to English
   }
 
   const lang = language.toLowerCase();
@@ -282,9 +285,9 @@ function getMessage(key, language = "he-IL") {
 }
 
 // Get positive/negative keywords based on language
-function getKeywords(language = "he-IL") {
+function getKeywords(language = "en-US") {
   if (!language) {
-    language = "he-IL"; // Default to Hebrew
+    language = "en-US"; // Default to English
   }
 
   const lang = language.toLowerCase();
@@ -379,6 +382,73 @@ function requireTwilio(res) {
     return false;
   }
   return true;
+}
+
+/**
+ * Resolve Twilio credentials for a call with 3-tier fallback:
+ *  1. Per-company credentials stored on the Company Firestore doc
+ *  2. System-level env vars (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN)
+ *
+ * Throws if billing config requires basic users to use own keys and
+ * the caller is on the basic plan without company credentials.
+ */
+async function getEffectiveTwilioCredentials(companyId, uid) {
+  const db = getFirestore();
+
+  // 1. Per-company credentials
+  if (companyId) {
+    try {
+      const companyDoc = await db.collection("Company").doc(String(companyId)).get();
+      const company = companyDoc.exists ? companyDoc.data() : null;
+      if (company?.twilioAccountSid && company?.twilioAuthToken) {
+        return {
+          sid:   company.twilioAccountSid,
+          token: company.twilioAuthToken,
+          from:  company.twilioDefaultFrom || TWILIO_DEFAULT_FROM,
+          isOwn: true,
+        };
+      }
+    } catch (e) {
+      logger.warn("Could not fetch company Twilio credentials", {companyId, error: e.message});
+    }
+  }
+
+  // 2. Check if billing config requires basic plan users to have own keys
+  if (uid) {
+    try {
+      const [billingSnap, userSnap] = await Promise.all([
+        db.collection("config").doc("billing").get(),
+        db.collection("users").doc(uid).get(),
+      ]);
+      const billing = billingSnap.exists ? (billingSnap.data() || {}) : {};
+      const plan = userSnap.exists ? (userSnap.data()?.plan || "basic") : "basic";
+      if (billing.basicRequiresOwnKeys && plan === "basic") {
+        const err = new Error(
+          "Basic plan requires your own Twilio API keys. Please add them in Settings → Integrations.",
+        );
+        err.code = "REQUIRES_OWN_KEYS";
+        throw err;
+      }
+    } catch (e) {
+      if (e.code === "REQUIRES_OWN_KEYS") throw e;
+      logger.warn("Could not check billing key-requirement config", {uid, error: e.message});
+    }
+  }
+
+  // 3. Fall back to system-level env vars
+  if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) {
+    const err = new Error(
+      "Twilio configuration missing. Set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN environment variables.",
+    );
+    err.code = "TWILIO_NOT_CONFIGURED";
+    throw err;
+  }
+  return {
+    sid:   TWILIO_ACCOUNT_SID,
+    token: TWILIO_AUTH_TOKEN,
+    from:  TWILIO_DEFAULT_FROM,
+    isOwn: false,
+  };
 }
 
 function collectPhoneNumbers(raw) {
@@ -648,6 +718,9 @@ exports.assistantsCreate = onRequest(corsOptions, async (req, res) => {
   }
 
   try {
+    // Extract authenticated user
+    const uid = await extractUidFromRequest(req);
+
     // Sanitize all input to prevent XSS
     const rawPayload = getJsonBody(req);
     const payload = sanitizeObject(rawPayload);
@@ -656,7 +729,8 @@ exports.assistantsCreate = onRequest(corsOptions, async (req, res) => {
     const now = FieldValue.serverTimestamp();
 
     const definition = payload.assistant || payload;
-    const ownerId =
+    // Always use token UID if available; fall back to payload for legacy/internal calls
+    const ownerId = uid ||
       payload.userId ||
       payload.metadata?.userId ||
       payload.ownerId ||
@@ -668,12 +742,16 @@ exports.assistantsCreate = onRequest(corsOptions, async (req, res) => {
     const record = {
       id: docRef.id,
       name: payload.name || definition?.name || "Assistant",
+      assistantName: payload.assistantName || payload.name || "Assistant",
+      companyName: payload.companyName || "",
       firstMessage: payload.firstMessage || definition?.firstMessage || "",
       language:
         payload.language ||
         definition?.transcriber?.language ||
         definition?.model?.language ||
-        "he-IL",
+        "en-US",
+      voice: payload.voice || null,
+      systemPrompt: payload.systemPrompt || payload.instructions || "",
       definition,
       ownerId,
       companyId,
@@ -686,13 +764,14 @@ exports.assistantsCreate = onRequest(corsOptions, async (req, res) => {
     res.status(201).json({
       id: docRef.id,
       name: record.name,
+      assistantName: record.assistantName,
+      companyName: record.companyName,
       firstMessage: record.firstMessage,
       language: record.language,
+      voice: record.voice,
+      systemPrompt: record.systemPrompt,
       assistant: definition,
-      metadata: {
-        ownerId,
-        companyId,
-      },
+      metadata: { ownerId, companyId },
     });
   } catch (error) {
     logger.error("Failed to create assistant", error);
@@ -724,13 +803,11 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
   }
 
   try {
+    const uid = await extractUidFromRequest(req);
     const payload = sanitizeObject(getJsonBody(req));
     const assistantId = payload.id || payload.assistantId;
     if (!assistantId) {
-      res.status(400).json({
-        status: "error",
-        message: "Assistant id is required.",
-      });
+      res.status(400).json({ status: "error", message: "Assistant id is required." });
       return;
     }
 
@@ -738,44 +815,50 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
     const docRef = db.collection("assistants").doc(assistantId);
     const snapshot = await docRef.get();
     if (!snapshot.exists) {
-      res
-        .status(404)
-        .json(buildNotFoundResponse("Assistant not found", {assistantId}));
+      res.status(404).json(buildNotFoundResponse("Assistant not found", {assistantId}));
       return;
     }
 
-    const updates = {};
-    const definition = snapshot.data().definition || {};
+    // Ownership check: if caller is authenticated and not the owner, reject
+    const existing = snapshot.data();
+    if (uid && existing.ownerId && existing.ownerId !== uid) {
+      res.status(403).json({ status: "error", message: "Forbidden." });
+      return;
+    }
+
+    const definition = existing.definition || {};
     const newDefinition = payload.assistant || payload.definition;
 
-    if (payload.name) {
-      updates.name = payload.name;
-    }
-    if (payload.firstMessage) {
-      updates.firstMessage = payload.firstMessage;
-    }
-    if (payload.language) {
-      updates.language = payload.language;
-    }
-    if (newDefinition) {
-      updates.definition = newDefinition;
-    }
-    updates.updatedAt = FieldValue.serverTimestamp();
+    const updates = { updatedAt: FieldValue.serverTimestamp() };
+    if (payload.name !== undefined) updates.name = payload.name;
+    if (payload.assistantName !== undefined) updates.assistantName = payload.assistantName;
+    if (payload.companyName !== undefined) updates.companyName = payload.companyName;
+    if (payload.firstMessage !== undefined) updates.firstMessage = payload.firstMessage;
+    if (payload.language !== undefined) updates.language = payload.language;
+    if (payload.voice !== undefined) updates.voice = payload.voice;
+    if (payload.systemPrompt !== undefined) updates.systemPrompt = payload.systemPrompt;
+    if (payload.instructions !== undefined) updates.systemPrompt = payload.instructions;
+    if (newDefinition) updates.definition = newDefinition;
 
     await docRef.set(updates, {merge: true});
 
     const result = await docRef.get();
+    const d = result.data();
     res.status(200).json({
       id: result.id,
-      ...result.data(),
-      definition: result.data().definition || definition,
+      name: d.name,
+      assistantName: d.assistantName,
+      companyName: d.companyName,
+      firstMessage: d.firstMessage,
+      language: d.language,
+      voice: d.voice,
+      systemPrompt: d.systemPrompt,
+      definition: d.definition || definition,
+      ownerId: d.ownerId,
     });
   } catch (error) {
     logger.error("Failed to update assistant", error);
-    res.status(500).json({
-      status: "error",
-      message: "Failed to update assistant",
-    });
+    res.status(500).json({ status: "error", message: "Failed to update assistant" });
   }
 });
 
@@ -795,25 +878,27 @@ exports.assistantsDelete = onRequest(corsOptions, async (req, res) => {
   }
 
   try {
+    const uid = await extractUidFromRequest(req);
     const payload = getJsonBody(req);
     const assistantId = payload.id || payload.assistantId;
     if (!assistantId) {
-      res.status(400).json({
-        status: "error",
-        message: "Assistant id is required.",
-      });
+      res.status(400).json({ status: "error", message: "Assistant id is required." });
       return;
     }
 
     const db = getFirestore();
-    await db.collection("assistants").doc(assistantId).delete();
+    const docRef = db.collection("assistants").doc(assistantId);
+    const snapshot = await docRef.get();
+    if (snapshot.exists && uid && snapshot.data().ownerId && snapshot.data().ownerId !== uid) {
+      res.status(403).json({ status: "error", message: "Forbidden." });
+      return;
+    }
+
+    await docRef.delete();
     res.status(200).json(buildSuccessResponse({assistantId}));
   } catch (error) {
     logger.error("Failed to delete assistant", error);
-    res.status(500).json({
-      status: "error",
-      message: "Failed to delete assistant",
-    });
+    res.status(500).json({ status: "error", message: "Failed to delete assistant" });
   }
 });
 
@@ -833,19 +918,27 @@ exports.assistantsList = onRequest(corsOptions, async (req, res) => {
   }
 
   try {
+    const uid = await extractUidFromRequest(req);
     const db = getFirestore();
-    const snapshot = await db
-      .collection("assistants")
-      .orderBy("createdAt", "desc")
-      .get();
+
+    let query = db.collection("assistants").orderBy("createdAt", "desc");
+    if (uid) {
+      // Include both user-owned assistants and legacy ones with no ownerId (null)
+      query = query.where("ownerId", "in", [uid, null]);
+    }
+    const snapshot = await query.get();
 
     const assistants = snapshot.docs.map((doc) => {
       const data = doc.data();
       return {
         id: doc.id,
-        name: data.name,
+        name: data.name || data.assistantName,
+        assistantName: data.assistantName || data.name,
+        companyName: data.companyName || "",
         firstMessage: data.firstMessage,
         language: data.language,
+        voice: data.voice || null,
+        systemPrompt: data.systemPrompt || "",
         assistant: data.definition,
         metadata: {
           ownerId: data.ownerId || null,
@@ -857,10 +950,7 @@ exports.assistantsList = onRequest(corsOptions, async (req, res) => {
     res.status(200).json(assistants);
   } catch (error) {
     logger.error("Failed to list assistants", error);
-    res.status(500).json({
-      status: "error",
-      message: "Failed to list assistants",
-    });
+    res.status(500).json({ status: "error", message: "Failed to list assistants" });
   }
 });
 
@@ -901,10 +991,14 @@ exports.assistantsGet = onRequest(corsOptions, async (req, res) => {
     const data = doc.data();
     res.status(200).json({
       id: doc.id,
-      assistant: data.definition,
-      name: data.name,
+      name: data.name || data.assistantName,
+      assistantName: data.assistantName || data.name,
+      companyName: data.companyName || "",
       firstMessage: data.firstMessage,
       language: data.language,
+      voice: data.voice || null,
+      systemPrompt: data.systemPrompt || "",
+      assistant: data.definition,
       metadata: {
         ownerId: data.ownerId || null,
         companyId: data.companyId || null,
@@ -1150,6 +1244,31 @@ exports.releasePhoneNumber = onRequest(corsOptions, async (req, res) => {
   }
 });
 
+exports.listPhoneNumbers = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "GET") {
+    res.set("Allow", "GET, OPTIONS");
+    res.status(405).json({status: "error", message: "Method not allowed. Expected GET."});
+    return;
+  }
+  if (!requireTwilio(res)) return;
+  try {
+    const numbers = await twilioClient.incomingPhoneNumbers.list({limit: 100});
+    res.json(numbers.map((n) => ({
+      sid: n.sid,
+      phoneNumber: n.phoneNumber,
+      friendlyName: n.friendlyName,
+      country: n.isoCountry || "US",
+    })));
+  } catch (error) {
+    logger.error("Failed to list phone numbers", error);
+    res.status(500).json({status: "error", message: "Failed to list phone numbers"});
+  }
+});
+
 exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"}, async (req, res) => {
   // Handle CORS preflight
   if (req.method === "OPTIONS") {
@@ -1168,6 +1287,7 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
 
   try {
     const payload = getJsonBody(req);
+    const callerUid = await extractUidFromRequest(req);
 
     const leadNumber = payload.number || payload.leadPhone;
     if (!leadNumber) {
@@ -1180,15 +1300,78 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
 
     const companyId = payload.companyId || null;
     const assistantId = payload.assistantId || payload.assistant?.id || null;
-    const rawAssistantDefinition = payload.assistantJson || payload.assistant || {};
+    let rawAssistantDefinition = payload.assistantJson || payload.assistant || {};
+
+    // If only assistantId was supplied (no definition), load from Firestore
+    if (assistantId && Object.keys(rawAssistantDefinition).length === 0) {
+      try {
+        const db2 = getFirestore();
+        const aDoc = await db2.collection("assistants").doc(assistantId).get();
+        if (aDoc.exists) {
+          rawAssistantDefinition = { id: assistantId, ...aDoc.data() };
+        }
+      } catch (loadErr) {
+        logger.warn("Could not load assistant definition", { assistantId, error: loadErr.message });
+      }
+    }
     
     // Check if company uses Asterisk
     const asteriskConfig = await asteriskService.getAsteriskConfig(companyId);
     const useAsterisk = asteriskConfig !== null;
-    
-    // For Twilio, require Twilio credentials
-    if (!useAsterisk && !requireTwilio(res)) {
-      return;
+
+    // Resolve Twilio credentials (per-company → system fallback)
+    let effectiveTwilioClient = null;
+    if (!useAsterisk) {
+      let effectiveCreds;
+      try {
+        effectiveCreds = await getEffectiveTwilioCredentials(companyId, callerUid);
+      } catch (credErr) {
+        const httpStatus = credErr.code === "REQUIRES_OWN_KEYS" ? 403 : 500;
+        res.status(httpStatus).json({
+          status: "error",
+          code: credErr.code || "twilio_config_error",
+          message: credErr.message,
+        });
+        return;
+      }
+      effectiveTwilioClient = twilio(effectiveCreds.sid, effectiveCreds.token);
+    }
+
+    // Credit balance check for authenticated users on basic plan
+    if (callerUid && !useAsterisk) {
+      try {
+        const cdb = getFirestore();
+        const userSnap = await cdb.collection("users").doc(callerUid).get();
+        if (userSnap.exists) {
+          const u = userSnap.data();
+          if (u.creditGranted) {
+            const balance = typeof u.creditBalance === "number" ? u.creditBalance : 0;
+            if (balance <= 0) {
+              res.status(402).json({
+                status: "error",
+                code: "credit_exhausted",
+                message: "Credit balance exhausted. Upgrade to Pro to continue making calls.",
+              });
+              return;
+            }
+            if (u.creditExpiresAt) {
+              const expiresAt = u.creditExpiresAt.toDate
+                ? u.creditExpiresAt.toDate()
+                : new Date(u.creditExpiresAt);
+              if (expiresAt < new Date()) {
+                res.status(402).json({
+                  status: "error",
+                  code: "credit_expired",
+                  message: "Trial credit has expired. Upgrade to Pro to continue making calls.",
+                });
+                return;
+              }
+            }
+          }
+        }
+      } catch (creditErr) {
+        logger.warn("Credit check failed (non-fatal)", {callerUid, error: creditErr.message});
+      }
     }
     
     const companyPhone =
@@ -1328,7 +1511,7 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
         ? `${BASE_FUNCTION_URL}/scenarioFlowExecute?callSessionId=${sessionId}`
         : `${TWILIO_VOICE_WEBHOOK}?callSessionId=${sessionId}`;
       
-      const twilioCall = await twilioClient.calls.create({
+      const twilioCall = await effectiveTwilioClient.calls.create({
         to: leadNumber,
         from: companyPhone,
         url: webhookUrl,
@@ -1353,13 +1536,91 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
       });
     }
   } catch (error) {
-    logger.error("Failed to place call", error);
+    logger.error("Failed to place call", { message: error.message, stack: error.stack, code: error.code });
     res.status(500).json({
       status: "error",
-      message: "Failed to place call",
+      message: error.message || "Failed to place call",
+      code: error.code || undefined,
     });
   }
 });
+
+/**
+ * Internal helper: place an outbound call programmatically (used by campaignStart).
+ * Mirrors the placeCall HTTP handler but takes a plain object instead of req/res.
+ */
+exports._placeCallInternal = async function(payload, ownerUid) {
+  const {number, companyPhone, assistantId, metadata} = payload;
+  if (!number || !companyPhone || !assistantId) {
+    throw new Error("number, companyPhone, and assistantId are required");
+  }
+  const db = getFirestore();
+
+  // Load assistant definition
+  const astSnap = await db.collection("assistants").doc(assistantId).get();
+  if (!astSnap.exists) throw new Error(`Assistant ${assistantId} not found`);
+  const astData = astSnap.data();
+
+  // Resolve company info
+  const companyId = astData.companyId || ownerUid;
+  const sessionId = db.collection("call_sessions").doc().id;
+  const sessionRef = db.collection("call_sessions").doc(sessionId);
+
+  // Credit check for campaign caller
+  if (ownerUid) {
+    const userSnap = await db.collection("users").doc(ownerUid).get();
+    if (userSnap.exists) {
+      const u = userSnap.data();
+      if (u.creditGranted) {
+        const balance = typeof u.creditBalance === "number" ? u.creditBalance : 0;
+        if (balance <= 0) {
+          throw new Error("Credit balance exhausted. Upgrade to Pro to continue making calls.");
+        }
+        if (u.creditExpiresAt) {
+          const expiresAt = u.creditExpiresAt.toDate
+            ? u.creditExpiresAt.toDate()
+            : new Date(u.creditExpiresAt);
+          if (expiresAt < new Date()) {
+            throw new Error("Trial credit has expired. Upgrade to Pro to continue making calls.");
+          }
+        }
+      }
+    }
+  }
+
+  // Resolve per-company Twilio credentials (3-tier fallback)
+  const effectiveCreds = await getEffectiveTwilioCredentials(companyId, ownerUid);
+  const campaignTwilioClient = twilio(effectiveCreds.sid, effectiveCreds.token);
+
+  await sessionRef.set({
+    id: sessionId,
+    assistantId,
+    assistantDefinition: astData,
+    assistantName: astData.name || astData.assistantName || "",
+    companyId,
+    companyName: astData.companyName || "",
+    companyPhone,
+    leadNumber: number,
+    leadName: metadata?.leadName || "",
+    status: "initiated",
+    metadata: metadata || {},
+    ownerId: ownerUid,
+    createdAt: FieldValue.serverTimestamp(),
+    updatedAt: FieldValue.serverTimestamp(),
+  });
+
+  const twilioCall = await campaignTwilioClient.calls.create({
+    to: number,
+    from: companyPhone,
+    url: `${TWILIO_VOICE_WEBHOOK}?callSessionId=${sessionId}`,
+    statusCallback: `${TWILIO_STATUS_WEBHOOK}?callSessionId=${sessionId}`,
+    statusCallbackMethod: "POST",
+    statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
+  });
+
+  await sessionRef.set({twilioSid: twilioCall.sid, status: "dialing"}, {merge: true});
+  return {callSid: twilioCall.sid, callSessionId: sessionId};
+};
 
 exports.twilioVoiceWebhook = onRequest(
   {minInstances: 1, timeoutSeconds: 120, memory: "512MiB"},
@@ -1670,32 +1931,34 @@ exports.twilioVoiceWebhook = onRequest(
         sessionId = sessionRef.id;
         
         // Build assistant definition from company data
-        const assistantName = companyDoc.assistantname || "העוזר הווירטואלי";
-        const companyName = companyDoc.name || "החברה";
-        const rawFirstMessage = companyDoc.inboundmessage || getMessage("defaultGreeting", "he-IL");
-        
+        const assistantName = companyDoc.assistantname || "Virtual Assistant";
+        const companyName = companyDoc.name || "our team";
+        // Default to English for new companies — existing companies with language set are unaffected
+        const companyLanguage = companyDoc.language || "en-US";
+        const rawFirstMessage = companyDoc.inboundmessage || getMessage("defaultGreeting", companyLanguage);
+
         // Replace placeholders in firstMessage
         const processedFirstMessage = replacePlaceholders(rawFirstMessage, {
           assistantName: assistantName,
           companyName: companyName,
           leadName: "", // No lead name for inbound calls
         });
-        
+
         // Get STT provider from company settings
         const sttProvider = companyDoc.transcriber?.provider || companyDoc.sttProvider || "twilio";
         const sttModel = companyDoc.transcriber?.model || companyDoc.sttModel || "nova-2";
-        
+
         const assistantDefinition = {
           name: assistantName,
           assistantName: assistantName,
           companyName: companyName,
           firstMessage: processedFirstMessage,
-          voice: companyDoc.voice || DEFAULT_HEBREW_VOICE,
-          language: companyDoc.language || "he-IL",
+          voice: companyDoc.voice || DEFAULT_ENGLISH_VOICE,
+          language: companyLanguage,
           transcriber: {
             provider: sttProvider,
             model: sttModel,
-            language: companyDoc.language || "he-IL",
+            language: companyLanguage,
           },
           sttProvider: sttProvider,
           sttModel: sttModel,
@@ -1834,7 +2097,7 @@ exports.twilioVoiceWebhook = onRequest(
     }
     
     // Get voice settings from assistant definition
-    const language = assistant.language || "he-IL";
+    const language = assistant.language || "en-US";
     const voiceId = resolveVoiceForLanguage(assistant.voice, language);
     
     // Get the processed greeting (placeholders already replaced in placeCall)
@@ -1881,7 +2144,7 @@ exports.twilioVoiceWebhook = onRequest(
     }
 
     // Ensure language is full code (he-IL) for Twilio Say
-    const sayLanguage = language === "he" ? "he-IL" : language;
+    const sayLanguage = language === "he" ? "he-IL" : (language || "en-US");
     console.log("[twilioVoiceWebhook] Saying greeting with voice:", voiceId, "language:", sayLanguage);
 
     // Use sessionId (which is either callSessionId for outbound or newly created for inbound)
@@ -1893,7 +2156,7 @@ exports.twilioVoiceWebhook = onRequest(
     // requires a separate Cloud Run service deployment.
     // Using Twilio Gather as the primary STT provider.
     // Gather with nested <Say> provides automatic barge-in (interruption).
-    const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
+    const gatherLanguage = language === "he" ? "he-IL" : (language || "en-US");
 
     // Hebrew speech hints for improved recognition quality
     const hebrewHints = language?.startsWith("he")
@@ -1905,38 +2168,38 @@ exports.twilioVoiceWebhook = onRequest(
       const isHebrew = gatherLanguage?.startsWith("he");
       const callbackUrl = `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`;
 
-      if (isHebrew) {
-        // HEBREW: Twilio STT does NOT support Hebrew reliably.
-        // Use <Say> + <Record> → download recording → Deepgram REST API for transcription.
-        // No barge-in with Record, but at least Hebrew is correctly recognized.
-        response.say({voice: voiceId, language: sayLanguage}, wrapSSML(greetingToSay, language));
-        response.record({
-          action: `${callbackUrl}&source=record`,
-          method: "POST",
-          maxLength: 15,
-          timeout: 4,
-          playBeep: false,
-          trim: "do-not-trim",
-          transcribe: false,
-        });
-      } else {
-        // NON-HEBREW: Use Gather with nested Say for barge-in
-        const gather = response.gather({
-          input: "speech",
-          action: callbackUrl,
-          method: "POST",
-          timeout: 10,
-          speechTimeout: 2,
-          language: gatherLanguage,
-        });
-        gather.say({voice: voiceId, language: sayLanguage}, greetingToSay);
-      }
+      // ALL languages (Hebrew, English, Arabic) now use Cloud Run WebSocket streaming.
+      // Cloud Run handles Deepgram STT (nova-3-general, Hebrew/English/Arabic),
+      // filler phrases, GPT-4o-mini LLM, and TwiML responses via REST API updates.
+      // CLOUD_RUN_URL may not propagate from .env via Firebase CLI (known .gitignore issue),
+      // so we hardcode the deployed URL as a fallback to guarantee WebSocket is always used.
+      const CLOUD_RUN_FALLBACK = "https://voiceflow-mediastream-900818829902.us-central1.run.app";
+      const cloudRunUrl = process.env.CLOUD_RUN_URL || CLOUD_RUN_FALLBACK;
+      logger.info("Cloud Run URL resolution", {
+        fromEnv: !!process.env.CLOUD_RUN_URL,
+        url: cloudRunUrl,
+        callSessionId: finalSessionId,
+        language: gatherLanguage,
+      });
+
+      // Say greeting first, then start WebSocket media stream to Cloud Run
+      response.say(
+        {voice: voiceId, language: sayLanguage},
+        isHebrew ? wrapSSML(greetingToSay, language) : greetingToSay,
+      );
+      const start = response.start();
+      start.stream({
+        url: `wss://${cloudRunUrl.replace(/^https?:\/\//, "")}/stream/${finalSessionId}`,
+        track: "both_tracks",
+      });
+      // Long pause keeps the call alive while the WebSocket stream handles all turns
+      response.pause({length: "120"});
 
       logger.info("Voice webhook greeting set up", {
         callSid: callSid || "unknown",
         callSessionId: finalSessionId,
         language: gatherLanguage,
-        mode: isHebrew ? "record+deepgram" : "gather",
+        mode: "stream",
         greetingLength: greetingToSay.length,
       });
     } catch (gatherError) {
@@ -2142,7 +2405,7 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
     const data = snapshot.data();
     const assistant = data.assistantDefinition || {};
     // Ensure language is always set to he-IL for Hebrew (not just "he")
-    let language = assistant.language || "he-IL";
+    let language = assistant.language || "en-US";
     if (language === "he") {
       language = "he-IL";
     }
@@ -2181,8 +2444,8 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       // Update empty count in Firestore (fire-and-forget)
       sessionRef.set({emptyResultCount: emptyCount}, {merge: true}).catch(() => {});
 
-      const sayLanguage = language === "he" ? "he-IL" : (language || "he-IL");
-      const gatherLanguage = language === "he" ? "he-IL" : (language || "he-IL");
+      const sayLanguage = language === "he" ? "he-IL" : (language || "en-US");
+      const gatherLanguage = language === "he" ? "he-IL" : (language || "en-US");
       const isHebrew = language?.startsWith("he");
       const callbackUrl = `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${callSessionId}`;
 
@@ -2228,9 +2491,11 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
           input: "speech",
           action: callbackUrl,
           method: "POST",
-          timeout: 10,
-          speechTimeout: 2,
+          timeout: 8,
+          speechTimeout: "auto",
           language: gatherLanguage,
+          enhanced: "true",
+          profanityFilter: "false",
         });
         gather.say({voice: voiceId, language: sayLanguage}, repeatMessage);
       }
@@ -2259,10 +2524,45 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
     let aiResponse = "";
     let shouldContinue = true;
     let shouldHangup = false;
-    
+
     // Resolve company data (was fetched in parallel earlier)
     const companySnapshot = await companyDataPromise;
     const companyData = companySnapshot?.exists ? companySnapshot.data() : {};
+
+    // ── Per-phone conversation memory ────────────────────────────────────
+    // On the FIRST turn of this call, load a brief summary of prior calls
+    // from the same phone number and inject it as context.
+    let callerMemoryContext = "";
+    const isFirstTurn = conversationHistory.length <= 2; // greeting + this first user message
+    if (isFirstTurn && data.leadNumber) {
+      try {
+        const prevSessions = await db.collection("call_sessions")
+          .where("leadNumber", "==", data.leadNumber)
+          .orderBy("createdAt", "desc")
+          .limit(4) // last 4 calls
+          .get();
+
+        // Filter out the current session
+        const pastSessions = prevSessions.docs
+          .filter((d) => d.id !== callSessionId)
+          .slice(0, 3);
+
+        if (pastSessions.length > 0) {
+          const summaries = pastSessions.map((d) => {
+            const s = d.data();
+            const date = s.createdAt?.toDate?.()?.toLocaleDateString?.() || "unknown date";
+            const lastMsg = s.lastAIResponse || "";
+            const turns = Math.floor((s.conversationHistory?.length || 0) / 2);
+            return `- ${date}: ${turns} turn call. Last bot reply: "${lastMsg.substring(0, 80)}"`;
+          });
+          callerMemoryContext = `\n\nPREVIOUS CALLS WITH THIS NUMBER (${data.leadNumber}):\n${summaries.join("\n")}\nUse this context to personalise the conversation if relevant.`;
+          logger.info("Loaded caller memory", { callSessionId, leadNumber: data.leadNumber, previousCalls: pastSessions.length });
+        }
+      } catch (memErr) {
+        logger.warn("Could not load caller memory", { error: memErr.message });
+      }
+    }
+    // ── End per-phone memory ─────────────────────────────────────────────
 
     const MAX_RETRIES = 2; // Reduced from 3 for faster voice response
     let retryCount = 0;
@@ -2271,9 +2571,32 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
 
     while (retryCount < MAX_RETRIES && !llmSuccess) {
       try {
-        // Build system prompt with company context and language
-        const systemPrompt = llmService.buildSystemPrompt(assistant, companyData, language);
-        
+        // Build system prompt with company context and language.
+        // Merge assistant-level custom instructions + caller memory into companyData.
+        const customInstructions = [
+          assistant.systemPrompt || assistant.instructions || companyData?.additionalInsturctions || "",
+          callerMemoryContext,
+        ].filter(Boolean).join("\n");
+        const mergedCompanyData = {
+          ...companyData,
+          additionalInsturctions: customInstructions,
+        };
+        let systemPrompt = llmService.buildSystemPrompt(assistant, mergedCompanyData, language);
+
+        // Inject knowledge base context (RAG) if assistant has uploaded documents
+        const assistantId = data.assistantId || assistant.id || null;
+        if (assistantId) {
+          try {
+            const knowledgeChunks = await getKnowledgeContext(db, assistantId, speechResult, 3);
+            if (knowledgeChunks.length > 0) {
+              systemPrompt += "\n\n## Reference Information\nUse the following knowledge to answer questions accurately:\n\n" +
+                knowledgeChunks.map((c) => c.content).join("\n\n---\n\n");
+            }
+          } catch (kbErr) {
+            logger.warn("Knowledge context retrieval failed (non-fatal)", kbErr.message);
+          }
+        }
+
         // Get conversation history for LLM
         const llmHistory = llmService.getConversationHistory({conversationHistory: conversationHistory});
         
@@ -2503,8 +2826,8 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
     
     // Say the AI response
     // Ensure language is full code (he-IL) for Twilio Say
-    const sayLanguage = language === "he" ? "he-IL" : language;
-    const gatherLanguage = language === "he" ? "he-IL" : language;
+    const sayLanguage = language === "he" ? "he-IL" : (language || "en-US");
+    const gatherLanguage = language === "he" ? "he-IL" : (language || "en-US");
     
     // Continue conversation or hang up
     if (shouldHangup) {
@@ -2542,14 +2865,16 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
           transcribe: false,
         });
       } else {
-        // Non-Hebrew: Gather with barge-in
+        // Non-Hebrew: Gather with optimised settings (barge-in via speechTimeout auto)
         const gather = response.gather({
           input: "speech",
           action: callbackUrl,
           method: "POST",
-          timeout: 10,
-          speechTimeout: 2,
+          timeout: 8,
+          speechTimeout: "auto",
           language: gatherLanguage,
+          enhanced: "true",
+          profanityFilter: "false",
         });
         if (aiResponse) {
           gather.say({voice: voiceId, language: sayLanguage}, aiResponse);
@@ -2593,6 +2918,154 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
     res.status(200).send(response.toString());
   }
 });
+
+async function _runPostCallTasks(callSessionId, callStatus) {
+  // 1. Run AI analysis first
+  try {
+    const analysisService = require("./analysis_service");
+    await analysisService._analyzeCallInternal(callSessionId);
+  } catch (e) {
+    logger.warn("Auto-analysis failed", {err: e.message, callSessionId});
+  }
+  // 2. Send SMS only for completed calls (analysis summary is now written to Firestore)
+  if (callStatus === "completed") {
+    await _sendPostCallSms(callSessionId);
+  }
+  // 3. Place feedback call if enabled in assistant definition
+  if (callStatus === "completed") {
+    _placeFeedbackCall(callSessionId).catch((err) =>
+      logger.warn("[feedback] feedback call failed (non-blocking)", {err: err.message, callSessionId}),
+    );
+  }
+
+  // 4. Update leads collection (lowercase) if this call was part of a campaign
+  try {
+    const db = getFirestore();
+    const snap = await db.collection("call_sessions").doc(callSessionId).get();
+    if (snap.exists) {
+      const session = snap.data();
+      const leadId = session.metadata?.leadId;
+      const campaignId = session.metadata?.campaignId;
+      const analysis = session.analysis || {};
+      const isSuccess = callStatus === "completed" && analysis.outcome === "success";
+      const newLeadStatus = isSuccess ? "completed"
+        : callStatus === "no-answer" || callStatus === "busy" ? "callback"
+        : callStatus === "completed" ? "callback"
+        : "failed";
+
+      if (leadId) {
+        await db.collection("leads").doc(leadId).set({
+          lastCallId: callSessionId,
+          lastCallDate: FieldValue.serverTimestamp(),
+          lastCallSummary: analysis.summary || "",
+          lastCallOutcome: analysis.outcome || callStatus,
+          status: newLeadStatus,
+          callCount: FieldValue.increment(1),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, {merge: true});
+        logger.info("Lead updated post-call", {leadId, newLeadStatus, callSessionId});
+      }
+
+      if (campaignId) {
+        await db.collection("campaigns").doc(campaignId).set({
+          calledCount: FieldValue.increment(1),
+          ...(isSuccess ? {successCount: FieldValue.increment(1)} : {failedCount: FieldValue.increment(1)}),
+          updatedAt: FieldValue.serverTimestamp(),
+        }, {merge: true});
+      }
+    }
+  } catch (e) {
+    logger.warn("Lead/campaign update failed", {err: e.message, callSessionId});
+  }
+
+  // 5. Deduct credit for basic-plan users after call completes
+  if (callStatus === "completed") {
+    try {
+      const db2 = getFirestore();
+      const sessionSnap = await db2.collection("call_sessions").doc(callSessionId).get();
+      const sess = sessionSnap.exists ? sessionSnap.data() : null;
+      const ownerUid = sess?.ownerId || sess?.metadata?.userId || null;
+      if (ownerUid) {
+        const userSnap = await db2.collection("users").doc(ownerUid).get();
+        if (userSnap.exists) {
+          const u = userSnap.data();
+          if (u.creditGranted && typeof u.creditBalance === "number" && u.creditBalance > 0) {
+            // Deduct a flat rate per call (100 cents = $1.00) — configurable via billing config
+            const billingSnap = await db2.collection("config").doc("billing").get();
+            const billing = billingSnap.exists ? (billingSnap.data() || {}) : {};
+            const costPerCallCents = typeof billing.costPerCallCents === "number"
+              ? billing.costPerCallCents : 100; // default $1 per call
+            const newBalance = Math.max(0, u.creditBalance - costPerCallCents);
+            await db2.collection("users").doc(ownerUid).set(
+              {creditBalance: newBalance, lastCreditDeduction: FieldValue.serverTimestamp()},
+              {merge: true},
+            );
+            // Also mirror to `user` (singular) collection
+            await db2.collection("user").doc(ownerUid).set(
+              {creditBalance: newBalance, lastCreditDeduction: FieldValue.serverTimestamp()},
+              {merge: true},
+            );
+            logger.info("Credit deducted post-call", {
+              ownerUid, deducted: costPerCallCents, newBalance, callSessionId,
+            });
+          }
+        }
+      }
+    } catch (creditErr) {
+      logger.warn("Credit deduction failed (non-fatal)", {err: creditErr.message, callSessionId});
+    }
+  }
+}
+
+async function _sendPostCallSms(callSessionId) {
+  const db = getFirestore();
+  const snap = await db.collection("call_sessions").doc(callSessionId).get();
+  if (!snap.exists) return;
+  const session = snap.data();
+  const leadNumber = session.leadNumber;
+  if (!leadNumber) return;
+
+  // Analysis is saved to call_sessions/{id}.analysis (by _analyzeCallInternal)
+  // Re-fetch the session to get the analysis that was just written
+  const freshSnap = await db.collection("call_sessions").doc(callSessionId).get();
+  const analysis = freshSnap.exists ? (freshSnap.data()?.analysis || {}) : {};
+  const summaryText = analysis.summary || "";
+  const outcome = analysis.outcome || "";
+
+  // Gate: only send SMS if assistant has sendSmsOnComplete=true OR a booking was detected
+  const assistantDef = session.assistantDefinition || {};
+  const BOOKING_OUTCOMES = ["appointment_booked", "meeting_scheduled", "booking", "success"];
+  const isBooking = BOOKING_OUTCOMES.some((k) => outcome.toLowerCase().includes(k)) ||
+    /\b(booked|appointment|meeting|scheduled|פגישה|נקבעה|קביעה)\b/i.test(summaryText);
+  if (!assistantDef.sendSmsOnComplete && !isBooking) {
+    logger.info("Post-call SMS skipped — no booking and sendSmsOnComplete not set", {callSessionId});
+    return;
+  }
+
+  const companyName = session.companyName || assistantDef.companyName || "us";
+  const fromNumber = session.companyPhone || TWILIO_DEFAULT_FROM;
+
+  // Resolve per-company Twilio credentials (3-tier fallback)
+  let smsCreds;
+  try {
+    const companyId = session.companyId || null;
+    const ownerId = session.ownerId || session.metadata?.userId || null;
+    smsCreds = await getEffectiveTwilioCredentials(companyId, ownerId);
+  } catch (credErr) {
+    logger.warn("Post-call SMS skipped: cannot resolve Twilio creds", {callSessionId, err: credErr.message});
+    return;
+  }
+
+  let smsBody = `Hi! You spoke with ${companyName} today.`;
+  if (summaryText) smsBody += ` ${summaryText.slice(0, 110)}`;
+  else if (session.lastAIResponse) smsBody += ` ${session.lastAIResponse.slice(0, 110)}`;
+  if (outcome === "success") smsBody += " We look forward to seeing you!";
+  if (smsBody.length > 160) smsBody = smsBody.slice(0, 157) + "...";
+
+  const client = require("twilio")(smsCreds.sid, smsCreds.token);
+  await client.messages.create({body: smsBody, from: fromNumber, to: leadNumber});
+  logger.info("Post-call SMS sent", {callSessionId, to: leadNumber, ownKeys: smsCreds.isOwn});
+}
 
 exports.twilioStatusCallback = onRequest(async (req, res) => {
   try {
@@ -2684,6 +3157,11 @@ exports.twilioStatusCallback = onRequest(async (req, res) => {
       } catch (callError) {
         logger.error("Failed to save Call record", callError);
       }
+
+      // Auto-analyze then SMS (sequential — SMS needs analysis summary)
+      _runPostCallTasks(String(callSessionId), callStatus).catch((err) =>
+        logger.warn("Post-call tasks failed (non-blocking)", {err: err.message, callSessionId}),
+      );
     }
 
     res.status(200).end();
@@ -2945,7 +3423,7 @@ exports.scenarioRecordingCallback = onRequest(async (req, res) => {
     if (callSessionId) {
       const db = getFirestore();
       const sessionRef = db.collection("call_sessions").doc(String(callSessionId));
-      
+
       await sessionRef.set({
         recordings: FieldValue.arrayUnion({
           sid: recordingSid,
@@ -2964,5 +3442,228 @@ exports.scenarioRecordingCallback = onRequest(async (req, res) => {
     logger.error("Recording callback failed", error);
     res.status(200).end();
   }
+});
+
+// ── Post-call Feedback Call ─────────────────────────────────────────────────
+// Places an outbound call after a completed conversation to collect quality
+// feedback. Enabled per-assistant via assistantDefinition.feedbackCallEnabled.
+// Stores results in call_sessions/{id}.feedback + call_feedback collection.
+
+async function _placeFeedbackCall(originalCallSessionId) {
+  try {
+    const db = getFirestore();
+    const snap = await db.collection("call_sessions").doc(originalCallSessionId).get();
+    if (!snap.exists) return;
+    const session = snap.data();
+
+    // Only if assistant has feedback calls enabled
+    if (!session.assistantDefinition?.feedbackCallEnabled) return;
+
+    const toNumber = session.leadNumber;
+    if (!toNumber) return;
+
+    // Don't send a second feedback call
+    if (session.feedbackCallSent) return;
+
+    // Skip if call was immediately rejected (< 3 seconds)
+    const duration = parseInt(session.twilioStatus?.CallDuration || "0", 10);
+    if (duration > 0 && duration < 3) {
+      logger.info("[feedback] Skipping feedback — call immediately rejected", {originalCallSessionId, duration});
+      return;
+    }
+
+    // Resolve Twilio credentials using 3-tier fallback (company → system env)
+    const companyId = session.companyId || null;
+    const ownerId = session.ownerId || session.metadata?.userId || null;
+    let feedbackCreds;
+    try {
+      feedbackCreds = await getEffectiveTwilioCredentials(companyId, ownerId);
+    } catch (credErr) {
+      logger.warn("[feedback] Cannot resolve Twilio creds", {originalCallSessionId, err: credErr.message});
+      return;
+    }
+    const fromNumber = session.companyPhone || feedbackCreds.from;
+    if (!fromNumber) {
+      logger.warn("[feedback] Missing from number", {originalCallSessionId});
+      return;
+    }
+
+    const client = twilio(feedbackCreds.sid, feedbackCreds.token);
+
+    // Mark original session so we don't double-send
+    await db.collection("call_sessions").doc(originalCallSessionId).set(
+      {feedbackCallSent: true, updatedAt: FieldValue.serverTimestamp()},
+      {merge: true},
+    );
+
+    const feedbackUrl = `${BASE_FUNCTION_URL}/twilioFeedbackWebhook?origSid=${encodeURIComponent(originalCallSessionId)}`;
+    const call = await client.calls.create({
+      to: toNumber,
+      from: fromNumber,
+      url: feedbackUrl,
+      method: "POST",
+    });
+
+    logger.info(`[feedback] Feedback call placed → ${toNumber}`, {originalCallSessionId, callSid: call.sid});
+  } catch (err) {
+    logger.warn("[feedback] _placeFeedbackCall error", {originalCallSessionId, err: err.message});
+  }
+}
+
+exports.twilioFeedbackWebhook = onRequest(async (req, res) => {
+  const origSid = req.query.origSid || req.body?.origSid || "";
+  const VoiceResponse = twilio.twiml.VoiceResponse;
+  const response = new VoiceResponse();
+
+  let language = "he-IL";
+  let voiceId = "Google.he-IL-Wavenet-A";
+  let companyName = "";
+
+  if (origSid) {
+    try {
+      const db = getFirestore();
+      const snap = await db.collection("call_sessions").doc(origSid).get();
+      if (snap.exists) {
+        const s = snap.data();
+        language = s.assistantDefinition?.language || "he-IL";
+        voiceId = s.assistantDefinition?.voice || "Google.he-IL-Wavenet-A";
+        companyName = s.assistantDefinition?.companyName || s.companyName || "";
+      }
+    } catch (_) { /* use defaults */ }
+  }
+
+  const isHebrew = language.startsWith("he");
+  const gatherUrl = `${BASE_FUNCTION_URL}/twilioFeedbackGather?origSid=${encodeURIComponent(origSid)}&step=rating`;
+
+  if (isHebrew) {
+    const gather = response.gather({
+      input: "dtmf",
+      numDigits: "1",
+      action: gatherUrl,
+      method: "POST",
+      timeout: "8",
+    });
+    gather.say({voice: voiceId, language},
+      `שלום! זה לני${companyName ? " מ-" + companyName : ""}. מתקשרים כדי לקבל ממך משוב קצר על השיחה שסיימנו. ` +
+      "איך תדרג את השיחה? לחץ 1 לגרוע, 2 לבינוני, 3 לסביר, 4 לטוב, 5 למצוין.",
+    );
+    response.say({voice: voiceId, language}, "לא קיבלנו תשובה. תודה על זמנך. שיהיה יום טוב!");
+  } else {
+    const gather = response.gather({
+      input: "dtmf",
+      numDigits: "1",
+      action: gatherUrl,
+      method: "POST",
+      timeout: "8",
+    });
+    gather.say({voice: voiceId, language},
+      `Hi! This is a quick follow-up call${companyName ? " from " + companyName : ""}. ` +
+      "How would you rate the call we just had? Press 1 for poor, 2 for fair, 3 for okay, 4 for good, 5 for excellent.",
+    );
+    response.say({voice: voiceId, language}, "We didn't get a response. Thank you for your time. Goodbye!");
+  }
+  response.hangup();
+  res.type("text/xml").send(response.toString());
+});
+
+exports.twilioFeedbackGather = onRequest(async (req, res) => {
+  const origSid = req.query.origSid || req.body?.origSid || "";
+  const step = req.query.step || req.body?.step || "rating";
+  const digits = String(req.body?.Digits || "").trim();
+  const speechResult = String(req.body?.SpeechResult || req.body?.TranscriptionText || "").trim();
+
+  const VoiceResponse = twilio.twiml.VoiceResponse;
+  const response = new VoiceResponse();
+
+  let language = "he-IL";
+  let voiceId = "Google.he-IL-Wavenet-A";
+
+  if (origSid) {
+    try {
+      const db = getFirestore();
+      const snap = await db.collection("call_sessions").doc(origSid).get();
+      if (snap.exists) {
+        const s = snap.data();
+        language = s.assistantDefinition?.language || "he-IL";
+        voiceId = s.assistantDefinition?.voice || "Google.he-IL-Wavenet-A";
+      }
+    } catch (_) { /* use defaults */ }
+  }
+
+  const isHebrew = language.startsWith("he");
+
+  if (step === "rating") {
+    const rating = parseInt(digits, 10) || 0;
+
+    if (origSid && rating > 0) {
+      const db = getFirestore();
+      await db.collection("call_sessions").doc(origSid).set(
+        {feedback: {rating, ratedAt: FieldValue.serverTimestamp()}, updatedAt: FieldValue.serverTimestamp()},
+        {merge: true},
+      );
+      logger.info(`[feedback] Rating ${rating} saved`, {origSid});
+    }
+
+    const improveUrl = `${BASE_FUNCTION_URL}/twilioFeedbackGather?origSid=${encodeURIComponent(origSid)}&step=improvement`;
+
+    if (isHebrew) {
+      const gather = response.gather({
+        input: "speech",
+        action: improveUrl,
+        method: "POST",
+        language: "he-IL",
+        timeout: "5",
+        speechTimeout: "auto",
+      });
+      gather.say({voice: voiceId, language},
+        `תודה על הדירוג ${rating > 0 ? rating : ""}. יש משהו שהיה אפשר לשפר בשיחה? אמור את זה עכשיו.`,
+      );
+      response.say({voice: voiceId, language}, "תודה רבה על המשוב! שיהיה יום טוב!");
+    } else {
+      const gather = response.gather({
+        input: "speech",
+        action: improveUrl,
+        method: "POST",
+        language: "en-US",
+        timeout: "5",
+        speechTimeout: "auto",
+      });
+      gather.say({voice: voiceId, language},
+        `Thank you for the rating. What could we improve in the call? Please say it now.`,
+      );
+      response.say({voice: voiceId, language}, "Thank you for the feedback! Have a great day!");
+    }
+    response.hangup();
+
+  } else if (step === "improvement") {
+    if (origSid) {
+      const db = getFirestore();
+      await db.collection("call_sessions").doc(origSid).set(
+        {
+          feedback: {improvement: speechResult, improvedAt: FieldValue.serverTimestamp()},
+          updatedAt: FieldValue.serverTimestamp(),
+        },
+        {merge: true},
+      );
+      // Also write to top-level call_feedback collection for easy querying
+      await db.collection("call_feedback").add({
+        originalCallSessionId: origSid,
+        improvement: speechResult,
+        createdAt: FieldValue.serverTimestamp(),
+      });
+      logger.info(`[feedback] Improvement saved: "${speechResult}"`, {origSid});
+    }
+
+    if (isHebrew) {
+      response.say({voice: voiceId, language}, "תודה רבה! נשתמש במשוב שלך כדי להשתפר. שיהיה לך יום נהדר!");
+    } else {
+      response.say({voice: voiceId, language}, "Thank you so much! We'll use your feedback to improve. Have a wonderful day!");
+    }
+    response.hangup();
+  } else {
+    response.hangup();
+  }
+
+  res.type("text/xml").send(response.toString());
 });
 

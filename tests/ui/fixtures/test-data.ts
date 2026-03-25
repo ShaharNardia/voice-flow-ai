@@ -61,3 +61,17 @@ export const testPhoneNumbers = {
   },
 };
 
+export const testCampaigns = {
+  valid: {
+    name: `QA Campaign ${Date.now()}`,
+    description: 'Created by automated test',
+  },
+};
+
+export const testScenarios = {
+  valid: {
+    name: `QA Scenario ${Date.now()}`,
+    description: 'Created by automated test',
+  },
+};
+

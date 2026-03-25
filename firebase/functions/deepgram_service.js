@@ -15,15 +15,15 @@ const DEEPGRAM_API_KEY = process.env.DEEPGRAM_API_KEY;
  * @returns {string} Base language code for Deepgram (e.g., "he", "en", "ar")
  */
 function normalizeLanguageForDeepgram(language) {
-  if (!language) return "he"; // Default to Hebrew
-  
+  if (!language) return "en"; // Default to English
+
   const lang = language.toLowerCase();
   if (lang.startsWith("he")) return "he";
   if (lang.startsWith("en")) return "en";
   if (lang.startsWith("ar")) return "ar";
-  
-  // Default to Hebrew for unknown languages
-  return "he";
+
+  // Default to English for unknown languages
+  return "en";
 }
 
 /**
@@ -34,7 +34,7 @@ function normalizeLanguageForDeepgram(language) {
  * @param {Function} onError - Error callback
  * @returns {Object} Deepgram connection object
  */
-function createDeepgramConnection(language = "he", model = "nova-2", onTranscript, onError) {
+function createDeepgramConnection(language = "en", model = null, onTranscript, onError) {
   if (!DEEPGRAM_API_KEY) {
     logger.error("DEEPGRAM_API_KEY is not set");
     throw new Error("DEEPGRAM_API_KEY is required");
@@ -43,19 +43,26 @@ function createDeepgramConnection(language = "he", model = "nova-2", onTranscrip
   // Normalize language code for Deepgram (he-IL → he, en-US → en)
   const deepgramLanguage = normalizeLanguageForDeepgram(language);
 
+  // Language-specific model and VAD settings for optimal latency
+  // English: nova-3 (most accurate), tighter VAD for faster turn-taking
+  // Hebrew: nova-2 (nova-3 causes APPLICATION ERROR with he-IL on Twilio)
+  const resolvedModel = model || (deepgramLanguage === "en" ? "nova-3" : "nova-2");
+  const utteranceEndMs = deepgramLanguage === "en" ? 600 : 800;
+  const vadTurnoff = deepgramLanguage === "en" ? 300 : 500;
+
   const deepgram = createClient(DEEPGRAM_API_KEY);
 
   // Create WebSocket connection with AGGRESSIVE low-latency settings
   // Tuned for premium real-time voice bot experience
   const connection = deepgram.listen.live({
-    model: model,
+    model: resolvedModel,
     language: deepgramLanguage,
     smart_format: true,
     interim_results: true, // Critical for barge-in detection
-    utterance_end_ms: 1000, // Detect end of utterance after 1s silence
-    endpointing: 250, // End of speech detection (ms) - aggressive for fast response
+    utterance_end_ms: utteranceEndMs, // English: 600ms, Hebrew: 800ms
+    endpointing: 150, // End of speech detection (ms) - aggressive for sub-second response
     vad_events: true, // Voice activity detection – enables barge-in
-    vad_turnoff: 500, // Stop VAD after 500ms of silence (faster turn-taking)
+    vad_turnoff: vadTurnoff, // English: 300ms, Hebrew: 500ms
     punctuate: true, // Better accuracy with punctuation
     diarize: false, // Single speaker – no need
     multichannel: false, // Single channel audio
@@ -67,7 +74,9 @@ function createDeepgramConnection(language = "he", model = "nova-2", onTranscrip
   logger.info("Deepgram connection created", {
     originalLanguage: language,
     deepgramLanguage,
-    model,
+    model: resolvedModel,
+    utteranceEndMs,
+    vadTurnoff,
   });
 
   // Handle transcript events

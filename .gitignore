@@ -101,3 +101,12 @@ node_modules/
 
 # Flutter SDK (if included as submodule)
 flutter/
+
+# Next.js build artifacts
+saas-frontend/.next/
+saas-frontend/out/
+
+# Service account keys — NEVER commit
+gleaming-idiom-*.json
+*-service-account*.json
+*serviceAccountKey*.json

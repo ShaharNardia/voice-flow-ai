@@ -20,7 +20,7 @@
     }
   ],
   "hosting": {
-    "public": "build/web",
+    "public": "saas-frontend/out",
     "ignore": [
       "firebase.json",
       "**/.*",

@@ -1,5 +1,5 @@
 const {onCall, onRequest, HttpsError} = require("firebase-functions/v2/https");
-const {getFirestore} = require("firebase-admin/firestore");
+const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const {logger} = require("firebase-functions");
 
 class BootstrapError extends Error {
@@ -79,17 +79,68 @@ async function applySubscription(data, authUid) {
   }
 
   const db = getFirestore();
+
+  // Derive plan from subscribed state (preserve existing plan if already set)
+  const existingSnap = await db.collection("user").doc(uid).get();
+  const existingPlan = existingSnap.exists ? existingSnap.data()?.plan : null;
+  const derivedPlan = data.plan || existingPlan || (subscribed ? "pro" : "basic");
+
   const userRef = db.collection("user").doc(uid);
   await userRef.set(
     {
       subscribed,
       stripe_subscription_status: stripeStatus,
       profile_completed: true,
+      plan: derivedPlan,
+      planUpdatedAt: FieldValue.serverTimestamp(),
       ...(role ? {role} : {}),
       ...(status ? {status} : {}),
     },
     {merge: true},
   );
+  // Mirror to `users` (plural) collection used by multi-tenant system
+  await db.collection("users").doc(uid).set(
+    {
+      uid,
+      plan: derivedPlan,
+      planUpdatedAt: FieldValue.serverTimestamp(),
+      ...(role ? {role} : {}),
+      ...(status ? {status} : {}),
+    },
+    {merge: true},
+  );
+
+  // Grant signup credit for first-time basic-plan users
+  const existingData = existingSnap.exists ? (existingSnap.data() || {}) : {};
+  if (derivedPlan === "basic" && !existingData.creditGranted) {
+    try {
+      const billingSnap = await db.collection("config").doc("billing").get();
+      const billing = billingSnap.exists ? (billingSnap.data() || {}) : {};
+      const signupCreditCents = typeof billing.signupCreditCents === "number"
+        ? billing.signupCreditCents : 1000; // default $10
+      const signupCreditDays = typeof billing.signupCreditDays === "number"
+        ? billing.signupCreditDays : 30;   // default 30 days
+      if (signupCreditCents > 0) {
+        const expiresAt = new Date();
+        expiresAt.setDate(expiresAt.getDate() + signupCreditDays);
+        const creditFields = {
+          creditBalance:   signupCreditCents,
+          creditGranted:   true,
+          creditExpiresAt: expiresAt,
+        };
+        await userRef.set(creditFields, {merge: true});
+        await db.collection("users").doc(uid).set(creditFields, {merge: true});
+        logger.info("Signup credit granted to new basic user", {
+          uid,
+          signupCreditCents,
+          expiresAt: expiresAt.toISOString(),
+        });
+      }
+    } catch (creditErr) {
+      // Non-fatal: log and continue
+      logger.warn("Failed to grant signup credit", {uid, error: creditErr.message});
+    }
+  }
 
   let companyRef = null;
   if (companyId) {

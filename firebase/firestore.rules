@@ -16,7 +16,12 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && getUserData().role == 'admin';
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
+        (exists(/databases/$(database)/documents/user/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'admin')
+      );
     }
 
     function belongsToCompany(companyId) {
@@ -30,15 +35,20 @@ service cloud.firestore {
       return !(value is string) || (!value.matches('.*<script.*') && !value.matches('.*onerror.*=.*'));
     }
 
-    // ── User collection ───────────────────────────────────────────
-    // Users can only create their own document.
-    // Users can read/write their own document.
-    // Admins can read any user document.
+    // ── User collection (legacy singular) ────────────────────────
     match /user/{userId} {
       allow create: if isOwner(userId);
       allow read:   if isOwner(userId) || isAdmin();
       allow update: if isOwner(userId) || isAdmin();
-      allow delete: if false; // Users cannot be deleted from client
+      allow delete: if false;
+    }
+
+    // ── Users collection (new plural — multi-tenant) ──────────────
+    match /users/{userId} {
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow read:   if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow update: if isAdmin();
+      allow delete: if false;
     }
 
     // ── Company collection ────────────────────────────────────────
@@ -95,27 +105,62 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // ── call_sessions collection (lowercase — actual backend collection name) ─
+    match /call_sessions/{sessionId} {
+      allow create: if isAuthenticated();
+      allow read:   if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if false;
+    }
+
     // ── Assistants collection ─────────────────────────────────────
     match /assistants/{assistantId} {
       allow create: if isAuthenticated();
-      allow read:   if isAuthenticated();
+      allow read:   if isAuthenticated() &&
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
+                        isAdmin());
       allow update: if isAuthenticated() &&
-                       (resource.data.ownerId == request.auth.uid ||
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
                         isAdmin());
       allow delete: if isAuthenticated() &&
-                       (resource.data.ownerId == request.auth.uid ||
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
                         isAdmin());
     }
 
     // ── Scenarios collection ──────────────────────────────────────
     match /scenarios/{scenarioId} {
       allow create: if isAuthenticated();
-      allow read:   if isAuthenticated();
+      allow read:   if isAuthenticated() &&
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
+                        isAdmin());
       allow update: if isAuthenticated() &&
-                       (resource.data.ownerId == request.auth.uid ||
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
                         isAdmin());
       allow delete: if isAuthenticated() &&
-                       (resource.data.ownerId == request.auth.uid ||
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
+                        isAdmin());
+    }
+
+    // ── phone_numbers collection ──────────────────────────────────
+    match /phone_numbers/{numberId} {
+      allow create: if isAuthenticated();
+      allow read:   if isAuthenticated() &&
+                       (resource.data.userId == null ||
+                        resource.data.userId == request.auth.uid ||
+                        isAdmin());
+      allow update: if isAuthenticated() &&
+                       (resource.data.userId == null ||
+                        resource.data.userId == request.auth.uid ||
+                        isAdmin());
+      allow delete: if isAuthenticated() &&
+                       (resource.data.userId == null ||
+                        resource.data.userId == request.auth.uid ||
                         isAdmin());
     }
 
@@ -156,6 +201,26 @@ service cloud.firestore {
       allow read:   if isAuthenticated();
       allow update: if false;
       allow delete: if false;
+    }
+
+    // ── Config collection (admin-managed settings) ────────────────
+    match /config/{document} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── call_feedback collection (post-call quality ratings) ──────
+    match /call_feedback/{feedbackId} {
+      allow create: if isAuthenticated();
+      allow read:   if isAuthenticated();
+      allow update: if false;
+      allow delete: if isAdmin();
+    }
+
+    // ── knowledge_chunks (RAG chunks) — server-side only ──────────
+    match /knowledge_chunks/{chunkId} {
+      allow read:   if isAuthenticated();
+      allow write:  if false;
     }
 
     // ── Deny everything else by default ───────────────────────────

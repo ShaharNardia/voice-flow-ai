@@ -1,11 +1,7 @@
 const {onRequest} = require("firebase-functions/v2/https");
-const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const axios = require("axios");
 const {TextToSpeechClient} = require("@google-cloud/text-to-speech");
-
-// Define secrets for TTS providers
-const elevenLabsApiKey = defineSecret("ELEVENLABS_API_KEY");
 
 const googleTtsClient = new TextToSpeechClient();
 
@@ -131,7 +127,7 @@ async function listElevenLabsVoices() {
   if (elevenVoicesCache && elevenVoicesCache.expiresAt > now()) {
     return elevenVoicesCache.value;
   }
-  const apiKey = (elevenLabsApiKey.value() || process.env.ELEVENLABS_API_KEY || "").replace(/[\s\r\n\t\0]+/g, "");
+  const apiKey = (process.env.ELEVENLABS_API_KEY || "").replace(/[\s\r\n\t\0]+/g, "");
   if (!apiKey) {
     throw new Error("ELEVENLABS_API_KEY environment variable is required.");
   }
@@ -240,7 +236,7 @@ async function synthesizeWithAzure({text, voiceId, languageCode, speakingRate, s
 }
 
 async function synthesizeWithElevenLabs({text, voiceId, modelId, optimizeStreamingLatency, voiceSettings}) {
-  const apiKey = (elevenLabsApiKey.value() || process.env.ELEVENLABS_API_KEY || "").replace(/[\s\r\n\t\0]+/g, "");
+  const apiKey = (process.env.ELEVENLABS_API_KEY || "").replace(/[\s\r\n\t\0]+/g, "");
   if (!apiKey) {
     throw new Error("ELEVENLABS_API_KEY environment variable is required.");
   }
@@ -271,7 +267,7 @@ async function synthesizeWithElevenLabs({text, voiceId, modelId, optimizeStreami
 }
 
 exports.listTtsVoices = onRequest(
-  {secrets: [elevenLabsApiKey]},
+  {},
   async (req, res) => {
   setCors(req, res);
   if (req.method === "OPTIONS") {
@@ -311,7 +307,7 @@ exports.listTtsVoices = onRequest(
 });
 
 exports.synthesizeTts = onRequest(
-  {secrets: [elevenLabsApiKey], minInstances: 1, memory: "512MiB"},
+  {minInstances: 1, memory: "512MiB"},
   async (req, res) => {
   setCors(req, res);
   if (req.method === "OPTIONS") {

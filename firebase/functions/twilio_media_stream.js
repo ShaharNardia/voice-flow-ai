@@ -4,6 +4,9 @@ const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const twilio = require("twilio");
 const deepgramService = require("./deepgram_service");
 const llmService = require("./llm_service");
+const {sendWhatsAppMessage} = require("./whatsapp_service");
+const sgMail = require("@sendgrid/mail");
+if (process.env.SENDGRID_API_KEY) sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // Initialize Twilio client
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
@@ -30,16 +33,16 @@ const twilioClient =
 const activeConnections = new Map();
 
 // ── Latency constants ────────────────────────────────────────────────
-const BARGE_IN_CONFIDENCE_THRESHOLD = 0.4; // Lower = more sensitive to interruption
+const BARGE_IN_CONFIDENCE_THRESHOLD = 0.35; // Lower = more sensitive (nova-3 en accuracy allows this)
 const BARGE_IN_TIME_THRESHOLD = 200; // ms – faster barge-in for natural feel
 const MAX_CONVERSATION_HISTORY = 20; // Cap history to keep LLM fast
-const LLM_TIMEOUT_MS = 5000; // 5s max for real-time voice
+const LLM_TIMEOUT_MS = 3000; // 3s max (GPT-4o-mini rarely exceeds 2s for ≤150 tokens)
 
 /**
  * Handle Twilio Media Stream WebSocket connection
  * This endpoint receives audio from Twilio and forwards it to Deepgram
  */
-exports.twilioMediaStream = onRequest(
+const twilioMediaStream = onRequest(
   {minInstances: 1, timeoutSeconds: 300, memory: "512MiB"},
   async (req, res) => {
   try {
@@ -298,23 +301,107 @@ exports.twilioMediaStream = onRequest(
               model: "gpt-4o-mini",
               maxTokens: 150,
               temperature: 0.8,
+              tools: llmService.AGENT_TOOLS,
             },
           );
 
           const llmLatency = Date.now() - llmStartTime;
-          const aiResponse = llmResult.text;
+          let aiResponse = llmResult.text;
           const totalLatency = Date.now() - finalTranscriptStartTime;
+
+          // ── STEP 4b: Handle tool calls (email/WhatsApp/appointment) ──
+          if (llmResult.toolCalls && llmResult.toolCalls.length > 0) {
+            const toolResults = [];
+            for (const toolCall of llmResult.toolCalls) {
+              const toolName = toolCall.function?.name;
+              let toolArgs = {};
+              try {
+                toolArgs = JSON.parse(toolCall.function?.arguments || "{}");
+              } catch (_) { /* ignore parse errors */ }
+
+              logger.info("Agent tool call", {toolName, callSessionId});
+
+              try {
+                if (toolName === "send_email") {
+                  const {to, template, templateVars = {}} = toolArgs;
+                  const templateVarsWithDefaults = {
+                    companyName: assistant.companyName || companyData.name || "",
+                    customerName: templateVars.customerName || "there",
+                    ...templateVars,
+                  };
+                  if (to && template) {
+                    await sgMail.send({
+                      to,
+                      from: process.env.SENDGRID_FROM_EMAIL || "noreply@voiceflow.ai",
+                      subject: `Confirmation from ${templateVarsWithDefaults.companyName}`,
+                      text: `Hi ${templateVarsWithDefaults.customerName}, your ${template.replace(/([A-Z])/g, " $1").toLowerCase()} is confirmed. Thank you for choosing ${templateVarsWithDefaults.companyName}!`,
+                    });
+                    toolResults.push({id: toolCall.id, result: "Email sent successfully"});
+                    logger.info("Tool: email sent", {to, template, callSessionId});
+                  }
+                } else if (toolName === "send_whatsapp") {
+                  const {to, message} = toolArgs;
+                  if (to && message) {
+                    await sendWhatsAppMessage(to, message);
+                    toolResults.push({id: toolCall.id, result: "WhatsApp message sent"});
+                    logger.info("Tool: WhatsApp sent", {to, callSessionId});
+                  }
+                } else if (toolName === "create_appointment") {
+                  // Store appointment in Firestore for team to action
+                  await db.collection("appointments").add({
+                    ...toolArgs,
+                    callSessionId,
+                    companyId: currentData.data()?.companyId,
+                    createdAt: FieldValue.serverTimestamp(),
+                    status: "pending",
+                  });
+                  toolResults.push({id: toolCall.id, result: "Appointment created successfully"});
+                  logger.info("Tool: appointment created", {service: toolArgs.service, callSessionId});
+                } else if (toolName === "transfer_call") {
+                  // Transfer is handled via TwiML — set flag and skip second LLM call
+                  const transferTwiML = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial>${toolArgs.to}</Dial></Response>`;
+                  await sendTwiMLToTwilio(transferTwiML, "transfer");
+                  toolResults.push({id: toolCall.id, result: "Call transferred"});
+                  logger.info("Tool: call transferred", {to: toolArgs.to, callSessionId});
+                }
+              } catch (toolError) {
+                logger.error("Tool execution failed", {toolName, error: toolError.message, callSessionId});
+                toolResults.push({id: toolCall.id, result: `Failed: ${toolError.message}`});
+              }
+            }
+
+            // Second LLM pass: give the model tool results so it can speak a confirmation
+            if (toolResults.length > 0) {
+              const toolResultMessages = [
+                {role: "assistant", content: null, tool_calls: llmResult.toolCalls},
+                ...toolResults.map((r) => ({
+                  role: "tool",
+                  tool_call_id: r.id,
+                  content: r.result,
+                })),
+              ];
+              const confirmResult = await llmService.getLLMResponse(
+                systemPrompt,
+                null,
+                [...llmHistory, ...toolResultMessages],
+                {model: "gpt-4o-mini", maxTokens: 60, temperature: 0.8},
+              );
+              aiResponse = confirmResult.text || "Done! Anything else I can help with?";
+            } else {
+              aiResponse = "Got it! Is there anything else I can help you with?";
+            }
+          }
 
           // Add AI response to history
           currentHistory.push({
             role: "assistant",
-            content: aiResponse,
+            content: aiResponse || "",
             timestamp: new Date(),
           });
 
           // ── STEP 5: Send AI response (replace filler) ─────────
           const twimlStartTime = Date.now();
-          const sayTwiML = createSayTwiML(aiResponse);
+          const sayTwiML = createSayTwiML(aiResponse || "Is there anything else I can help with?");
           const twimlSent = await sendTwiMLToTwilio(sayTwiML, "llm-response");
           const twimlLatency = Date.now() - twimlStartTime;
 
@@ -340,7 +427,7 @@ exports.twilioMediaStream = onRequest(
             callSessionId,
             callSid,
             userMessage: text.substring(0, 50),
-            aiResponse: aiResponse.substring(0, 100) + (aiResponse.length > 100 ? "..." : ""),
+            aiResponse: (aiResponse || "").substring(0, 100) + ((aiResponse || "").length > 100 ? "..." : ""),
             sttLatencyMs: sttLatency,
             fillerLatencyMs: fillerLatency,
             llmLatencyMs: llmLatency,
@@ -609,6 +696,7 @@ function closeConnection(callSid) {
 }
 
 module.exports = {
+  twilioMediaStream,
   getActiveConnection,
   closeConnection,
 };

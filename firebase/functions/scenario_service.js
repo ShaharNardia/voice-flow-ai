@@ -6,6 +6,7 @@
 const {onRequest} = require("firebase-functions/v2/https");
 const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
+const {extractUidFromRequest} = require("./security_utils");
 
 // CORS configuration
 const corsOptions = {
@@ -202,6 +203,7 @@ exports.scenariosCreate = onRequest(corsOptions, async (req, res) => {
   }
 
   try {
+    const uid = await extractUidFromRequest(req);
     const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
     const db = getFirestore();
 
@@ -224,7 +226,7 @@ exports.scenariosCreate = onRequest(corsOptions, async (req, res) => {
       name: payload.name,
       description: payload.description || "",
       companyId: payload.companyId || null,
-      ownerId: payload.ownerId || payload.userId || null,
+      ownerId: uid || payload.ownerId || payload.userId || null,
       version: 1,
       isActive: payload.isActive !== false,
       nodes: payload.nodes || [],
@@ -425,19 +427,20 @@ exports.scenariosList = onRequest(corsOptions, async (req, res) => {
   }
 
   try {
+    const uid = await extractUidFromRequest(req);
     const companyId = req.query.companyId;
-    const ownerId = req.query.ownerId || req.query.userId;
     const activeOnly = req.query.activeOnly === "true";
     const limit = parseInt(req.query.limit) || 50;
 
     const db = getFirestore();
     let query = db.collection("scenarios").orderBy("createdAt", "desc");
 
-    if (companyId) {
+    // Filter by authenticated user's UID — include legacy null-owner docs
+    const ownerFilter = uid || req.query.ownerId || req.query.userId;
+    if (ownerFilter) {
+      query = query.where("ownerId", "in", [ownerFilter, null]);
+    } else if (companyId) {
       query = query.where("companyId", "==", companyId);
-    }
-    if (ownerId) {
-      query = query.where("ownerId", "==", ownerId);
     }
     if (activeOnly) {
       query = query.where("isActive", "==", true);
