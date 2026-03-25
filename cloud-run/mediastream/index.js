@@ -828,10 +828,7 @@ Today is ${dateStr}. When booking appointments always state the specific date (d
     interim_results: true,
     endpointing: 200,
   };
-  // utterance_end_ms is NOT supported for nova-3 + non-English languages
-  if (deepgramModel === "nova-2") {
-    dgOpts.utterance_end_ms = 800;
-  }
+  // utterance_end_ms causes 400 errors on this Deepgram plan — disabled for all models
   console.log(`[${callSessionId}] Deepgram config: model=${dgOpts.model} lang=${dgOpts.language}`);
   deepgramConnection = deepgram.listen.live(dgOpts);
 
