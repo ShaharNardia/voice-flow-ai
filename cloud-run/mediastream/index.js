@@ -408,8 +408,32 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
       companyData.medicalRestriction && "give medical advice",
     ].filter(Boolean).join(", ");
 
-    let prompt = `You are ${name}, a phone agent for ${company}${industry ? ` (${industry})` : ""}.
-Sound like a natural, warm American service rep — never robotic.
+    // Language-specific instructions
+    const lang = ast.language || "en-US";
+    const isHebrew = lang.startsWith("he");
+    const isArabic = lang.startsWith("ar");
+
+    const langRules = isHebrew
+      ? `CRITICAL: You MUST respond ONLY in Hebrew. Every single word must be in Hebrew. Never use English.
+Sound like a natural, warm Israeli service rep — friendly, direct, casual.
+
+Rules:
+- Max 1–2 short sentences per reply.
+- Use casual Hebrew openers: "בטח!", "מעולה!", "אשמח לעזור!", "רגע אחד"
+- Never use formal language. Use everyday spoken Hebrew.
+- Match caller energy. Fast caller → fast reply.
+- Never ask for information already given in this conversation.
+- When the customer says שלום, להתראות, תודה, or the conversation is clearly done — use end_call immediately.`
+      : isArabic
+      ? `CRITICAL: You MUST respond ONLY in Arabic. Every single word must be in Arabic. Never use English or Hebrew.
+Sound like a natural, warm service rep.
+
+Rules:
+- Max 1–2 short sentences per reply.
+- Match caller energy. Fast caller → fast reply.
+- Never ask for information already given in this conversation.
+- When the customer says goodbye — use end_call immediately.`
+      : `Sound like a natural, warm American service rep — never robotic.
 
 Rules:
 - Max 1–2 short sentences per reply.
@@ -418,7 +442,14 @@ Rules:
 - Never say "certainly", "absolutely", "of course", "I'd be happy to".
 - Match caller energy. Fast caller → fast reply.
 - Never ask for information already given in this conversation — name, phone, date, or anything else.
-- When the customer says goodbye, that's all, thanks, or the conversation is clearly done — use end_call immediately.
+- When the customer says goodbye, that's all, thanks, or the conversation is clearly done — use end_call immediately.`;
+
+    const dateStr = isHebrew
+      ? new Date().toLocaleDateString("he-IL", {weekday:"long",year:"numeric",month:"long",day:"numeric"})
+      : new Date().toLocaleDateString("en-US", {weekday:"long",year:"numeric",month:"long",day:"numeric"});
+
+    let prompt = `You are ${name}, a phone agent for ${company}${industry ? ` (${industry})` : ""}.
+${langRules}
 
 You can: ${canDo}${cantDo ? `\nYou cannot: ${cantDo}` : ""}
 Company: ${company}${phone ? ` | ${phone}` : ""}${website ? ` | ${website}` : ""} | TZ: ${tz}
@@ -426,11 +457,11 @@ Company: ${company}${phone ? ` | ${phone}` : ""}${website ? ` | ${website}` : ""
 Services:
 ${servicesText}
 
-Stay focused on helping ${company} customers with technology and business needs. Engage with any tech, IT, security, or service question — even if not explicitly listed above. Only redirect if the topic is completely unrelated to the company (e.g. cooking, politics, sports). When unsure if something is in scope, say you'll pass it to the team.
+Stay focused on helping ${company} customers. Engage with any relevant question — even if not explicitly listed above. Only redirect if the topic is completely unrelated to the company. When unsure if something is in scope, say you'll pass it to the team.
 
 Goal: greet → understand need → collect name + phone + time → confirm → ${companyData.createJobPermission ? "book it" : "pass to team"}.${ast.additionalInstructions ? `\nExtra: ${ast.additionalInstructions}` : ""}
 
-Today is ${new Date().toLocaleDateString("en-US", {weekday:"long",year:"numeric",month:"long",day:"numeric"})}. When booking appointments always state the specific date (day + month + year) AND time — never say "same day" or leave the date vague.`;
+Today is ${dateStr}. When booking appointments always state the specific date (day + month + year) AND time.`;
 
     // Caller identity section
     if (callerCtx.leadNumber) {
@@ -669,9 +700,10 @@ Today is ${new Date().toLocaleDateString("en-US", {weekday:"long",year:"numeric"
 
   // ── Deepgram connection ────────────────────────────────────────────
   const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
-  // nova-2 does not support Hebrew or Arabic. Use nova-3-general for those languages.
-  const deepgramModel = (deepgramLang === "he" || deepgramLang === "ar") ? "nova-3-general" : "nova-2";
-  deepgramConnection = deepgram.listen.live({
+  // nova-2 does not support Hebrew or Arabic. Use nova-3 for those languages.
+  // IMPORTANT: Deepgram requires "nova-3" (not "nova-3-general") and "he" (not "he-IL").
+  const deepgramModel = (deepgramLang === "he" || deepgramLang === "ar") ? "nova-3" : "nova-2";
+  const dgOpts = {
     model: deepgramModel,
     language: deepgramLang === "en" ? "en-US" : deepgramLang,
     encoding: "mulaw",
@@ -681,8 +713,13 @@ Today is ${new Date().toLocaleDateString("en-US", {weekday:"long",year:"numeric"
     punctuate: true,
     interim_results: true,
     endpointing: 200,
-    utterance_end_ms: 800,
-  });
+  };
+  // utterance_end_ms is NOT supported for nova-3 + non-English languages
+  if (deepgramModel === "nova-2") {
+    dgOpts.utterance_end_ms = 800;
+  }
+  console.log(`[${callSessionId}] Deepgram config: model=${dgOpts.model} lang=${dgOpts.language}`);
+  deepgramConnection = deepgram.listen.live(dgOpts);
 
   // Deepgram SDK v3 uses "Results" (not "transcript") for live transcription events
   deepgramConnection.on("Results", (evt) => {
