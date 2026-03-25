@@ -40,6 +40,85 @@ const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
   ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
   : null;
 
+// ── ElevenLabs TTS ───────────────────────────────────────────────────
+const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
+// Default voice: "Eric" — smooth, trustworthy male (multilingual)
+const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "cjVigY5qzO86Huf0OWal";
+// In-memory audio cache for serving TTS audio to Twilio <Play>
+const audioCache = new Map(); // id → {buffer, contentType, createdAt}
+const AUDIO_CACHE_TTL = 120000; // 2 minutes
+
+// Serve generated audio for Twilio <Play>
+app.get("/audio/:id", (req, res) => {
+  const entry = audioCache.get(req.params.id);
+  if (!entry) return res.status(404).send("Not found");
+  res.set("Content-Type", entry.contentType);
+  res.set("Content-Length", entry.buffer.length);
+  res.send(entry.buffer);
+});
+
+// Cleanup stale audio entries every 60s
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, entry] of audioCache) {
+    if (now - entry.createdAt > AUDIO_CACHE_TTL) audioCache.delete(id);
+  }
+}, 60000);
+
+// Generate TTS via ElevenLabs → store in cache → return audio URL
+async function elevenLabsTTS(text, voiceId) {
+  const vid = voiceId || ELEVENLABS_VOICE_ID;
+  const apiKey = ELEVENLABS_API_KEY;
+  if (!apiKey) throw new Error("ELEVENLABS_API_KEY not set");
+
+  // Use native https to avoid any axios header mangling
+  const https = require("https");
+  const body = JSON.stringify({
+    text,
+    model_id: "eleven_flash_v2_5",
+    voice_settings: {stability: 0.45, similarity_boost: 0.78, style: 0.15},
+  });
+
+  const audioBuffer = await new Promise((resolve, reject) => {
+    const req = https.request({
+      hostname: "api.elevenlabs.io",
+      path: `/v1/text-to-speech/${vid}?output_format=ulaw_8000`,
+      method: "POST",
+      headers: {
+        "xi-api-key": apiKey,
+        "Content-Type": "application/json",
+        "Content-Length": Buffer.byteLength(body),
+      },
+      timeout: 8000,
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (c) => chunks.push(c));
+      res.on("end", () => {
+        const buf = Buffer.concat(chunks);
+        if (res.statusCode !== 200) {
+          reject(new Error(`ElevenLabs ${res.statusCode}: ${buf.toString().substring(0, 200)}`));
+        } else {
+          resolve(buf);
+        }
+      });
+    });
+    req.on("error", reject);
+    req.on("timeout", () => { req.destroy(); reject(new Error("ElevenLabs timeout")); });
+    req.write(body);
+    req.end();
+  });
+
+  console.log(`[ElevenLabs] TTS OK: ${audioBuffer.length} bytes for "${text.substring(0, 30)}..."`);
+  const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+  audioCache.set(id, {
+    buffer: audioBuffer,
+    contentType: "audio/basic", // ulaw
+    createdAt: Date.now(),
+  });
+  const cloudRunUrl = process.env.CLOUD_RUN_URL || `https://voiceflow-mediastream-900818829902.us-central1.run.app`;
+  return `${cloudRunUrl}/audio/${id}`;
+}
+
 // ── Latency constants ─────────────────────────────────────────────────
 const BARGE_IN_CONFIDENCE_THRESHOLD = 0.35;
 const BARGE_IN_TIME_THRESHOLD = 200; // ms
@@ -197,22 +276,61 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
     }
   };
 
-  // ── Build TwiML for <Say> (stream persists from initial webhook TwiML) ──
+  // ── Build TwiML (stream persists from initial webhook TwiML) ──────
 
   // NOTE: We do NOT include <Start><Stream> in response TwiML.
   // Twilio docs: "Existing streams are not stopped when new TwiML is returned."
-  // The stream started in the initial webhook TwiML persists through <Say>+<Pause> updates.
-  // Adding <Start><Stream> in responses creates duplicate WebSocket connections.
+  // The stream started in the initial webhook TwiML persists through updates.
+
+  // Fallback <Say> for filler phrases (must be instant, no TTS API call)
   const makeSayTwiML = (text) => {
     const r = new twilio.twiml.VoiceResponse();
     r.say({voice: voiceId, language: sayLanguage}, text);
-    r.pause({length: "120"}); // Keep call alive while existing stream captures user audio
+    r.pause({length: "120"});
     return r.toString();
+  };
+
+  // ElevenLabs <Play> for real responses (natural voice)
+  const makePlayTwiML = (audioUrl) => {
+    const r = new twilio.twiml.VoiceResponse();
+    r.play(audioUrl);
+    r.pause({length: "120"});
+    return r.toString();
+  };
+
+  // ElevenLabs <Play> + <Hangup> for goodbye
+  const makePlayHangupTwiML = (audioUrl) => {
+    const r = new twilio.twiml.VoiceResponse();
+    r.play(audioUrl);
+    r.hangup();
+    return r.toString();
+  };
+
+  // Try ElevenLabs, fallback to Twilio <Say>
+  const ttsAndSend = async (text, reason = "response", hangup = false) => {
+    if (ELEVENLABS_API_KEY) {
+      try {
+        const audioUrl = await elevenLabsTTS(text);
+        const twiml = hangup ? makePlayHangupTwiML(audioUrl) : makePlayTwiML(audioUrl);
+        return await sendTwiML(twiml, reason);
+      } catch (err) {
+        const errBody = err.response?.data ? Buffer.from(err.response.data).toString() : "";
+        console.error(`[${callSessionId}] ElevenLabs TTS failed (${err.response?.status}), falling back to Say:`, err.message, errBody.substring(0, 200));
+      }
+    }
+    // Fallback: Twilio <Say>
+    if (hangup) {
+      const r = new twilio.twiml.VoiceResponse();
+      r.say({voice: voiceId, language: sayLanguage}, text);
+      r.hangup();
+      return await sendTwiML(r.toString(), reason);
+    }
+    return await sendTwiML(makeSayTwiML(text), reason);
   };
 
   const makeBargeInTwiML = () => {
     const r = new twilio.twiml.VoiceResponse();
-    r.pause({length: "120"}); // Interrupt current <Say>, existing stream continues
+    r.pause({length: "120"}); // Interrupt current playback, existing stream continues
     return r.toString();
   };
 
@@ -665,14 +783,10 @@ Today is ${dateStr}. When booking appointments always state the specific date (d
       if (shouldHangup) {
         // Block all further transcript processing while Twilio plays goodbye and hangs up
         callEnding = true;
-        // Say goodbye and hang up in a single TwiML — no gap between goodbye and disconnect
-        const r = new twilio.twiml.VoiceResponse();
-        r.say({voice: voiceId, language: sayLanguage}, aiText);
-        r.hangup();
-        await sendTwiML(r.toString(), "goodbye-hangup");
+        await ttsAndSend(aiText, "goodbye-hangup", true);
         console.log(`[${callSessionId}] Hanging up after goodbye`);
       } else {
-        await sendTwiML(makeSayTwiML(aiText), "llm-response");
+        await ttsAndSend(aiText, "llm-response");
       }
       isBotSpeaking = !shouldHangup;
 
@@ -692,7 +806,7 @@ Today is ${dateStr}. When booking appointments always state the specific date (d
     } catch (err) {
       console.error(`[${callSessionId}] Transcript processing error:`, err.message);
       const recovery = deepgramLang === "he" ? "סליחה, רגע אחד בבקשה..." : "Sorry, one moment please...";
-      await sendTwiML(makeSayTwiML(recovery), "error-recovery").catch(() => {});
+      await ttsAndSend(recovery, "error-recovery").catch(() => {});
     } finally {
       llmRunning = false;
     }
@@ -750,7 +864,7 @@ Today is ${dateStr}. When booking appointments always state the specific date (d
           pendingTranscriptText = "";
           pendingTranscriptTimer = null;
           onTranscript({text: combined, isFinal: true, confidence}).catch(console.error);
-        }, 300);
+        }, 150); // reduced from 300ms for snappier responses
       }
     } else if (isFinal) {
       console.log(`[${callSessionId}] DG final (empty) conf=${confidence.toFixed(2)}`);
