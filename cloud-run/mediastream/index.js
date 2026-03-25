@@ -73,6 +73,8 @@ async function elevenLabsTTS(text, voiceId) {
 
   // Use native https to avoid any axios header mangling
   const https = require("https");
+  // eleven_flash_v2_5: fastest multilingual model (326ms vs 1140ms for multilingual_v2)
+  // Auto-detects Hebrew/Arabic from the text — do NOT pass language_code (causes 400)
   const body = JSON.stringify({
     text,
     model_id: "eleven_flash_v2_5",
