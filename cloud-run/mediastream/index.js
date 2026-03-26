@@ -40,13 +40,63 @@ const twilioClient = TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
   ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
   : null;
 
-// ── ElevenLabs TTS ───────────────────────────────────────────────────
-const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
-// Default voice: "Eric" — smooth, trustworthy male (multilingual)
-const ELEVENLABS_VOICE_ID = process.env.ELEVENLABS_VOICE_ID || "cjVigY5qzO86Huf0OWal";
+// ── Google Cloud TTS (direct API — much better Hebrew than Twilio <Say>) ──
+const {TextToSpeechClient} = require("@google-cloud/text-to-speech");
+const googleTtsClient = new TextToSpeechClient();
+
+// Voice mapping per language — user-tested choices
+const GOOGLE_TTS_VOICES = {
+  he: {name: "he-IL-Chirp3-HD-Achird", languageCode: "he-IL", ssmlGender: "MALE"},
+  en: {name: "en-US-Neural2-D", languageCode: "en-US", ssmlGender: "MALE"},
+  ar: {name: "ar-XA-Wavenet-B", languageCode: "ar-XA", ssmlGender: "MALE"},
+};
+
 // In-memory audio cache for serving TTS audio to Twilio <Play>
 const audioCache = new Map(); // id → {buffer, contentType, createdAt}
 const AUDIO_CACHE_TTL = 120000; // 2 minutes
+
+// On-demand TTS endpoint — used by Firebase voice_service for greeting with same voice
+app.get("/tts", async (req, res) => {
+  const text = req.query.text;
+  const lang = req.query.lang || "he";
+  if (!text) return res.status(400).send("text required");
+  try {
+    if (lang === "he") {
+      // Hebrew: OpenAI TTS (Alloy) — best pronunciation
+      const OPENAI_KEY = process.env.OPENAI_API_KEY;
+      const body = JSON.stringify({model: "tts-1", input: text, voice: "alloy", response_format: "mp3"});
+      const audioBuffer = await new Promise((resolve, reject) => {
+        const r = require("https").request({
+          hostname: "api.openai.com", path: "/v1/audio/speech", method: "POST",
+          headers: {"Authorization": "Bearer " + OPENAI_KEY, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body)},
+        }, (resp) => {
+          const chunks = [];
+          resp.on("data", c => chunks.push(c));
+          resp.on("end", () => resp.statusCode === 200 ? resolve(Buffer.concat(chunks)) : reject(new Error(`${resp.statusCode}`)));
+        });
+        r.on("error", reject);
+        r.write(body); r.end();
+      });
+      res.set("Content-Type", "audio/mpeg");
+      res.set("Cache-Control", "public, max-age=3600");
+      res.send(audioBuffer);
+    } else {
+      // English/other: Google Cloud TTS
+      const voiceConfig = GOOGLE_TTS_VOICES[lang] || GOOGLE_TTS_VOICES.en;
+      const [response] = await googleTtsClient.synthesizeSpeech({
+        input: {text},
+        voice: voiceConfig,
+        audioConfig: {audioEncoding: "MP3", speakingRate: 1.05, pitch: 0, effectsProfileId: ["telephony-class-application"]},
+      });
+      res.set("Content-Type", "audio/mpeg");
+      res.set("Cache-Control", "public, max-age=3600");
+      res.send(response.audioContent);
+    }
+  } catch (err) {
+    console.error("[TTS endpoint]", err.message);
+    res.status(500).send("TTS failed");
+  }
+});
 
 // Serve generated audio for Twilio <Play>
 app.get("/audio/:id", (req, res) => {
@@ -65,61 +115,142 @@ setInterval(() => {
   }
 }, 60000);
 
-// Generate TTS via ElevenLabs → store in cache → return audio URL
-async function elevenLabsTTS(text, voiceId) {
-  const vid = voiceId || ELEVENLABS_VOICE_ID;
-  const apiKey = ELEVENLABS_API_KEY;
-  if (!apiKey) throw new Error("ELEVENLABS_API_KEY not set");
-
-  // Use native https to avoid any axios header mangling
-  const https = require("https");
-  // eleven_flash_v2_5: fastest multilingual model (326ms vs 1140ms for multilingual_v2)
-  // Auto-detects Hebrew/Arabic from the text — do NOT pass language_code (causes 400)
-  const body = JSON.stringify({
-    text,
-    model_id: "eleven_flash_v2_5",
-    voice_settings: {stability: 0.45, similarity_boost: 0.78, style: 0.15},
+// Add nikud to Hebrew text via GPT-4o-mini for correct TTS pronunciation
+async function addNikud(text) {
+  const OPENAI_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_KEY) return text;
+  const start = Date.now();
+  return new Promise((resolve) => {
+    const body = JSON.stringify({
+      model: "gpt-4o-mini",
+      messages: [
+        {role: "system", content: `הוסף ניקוד מלא ומדויק לטקסט העברי. החזר רק את הטקסט המנוקד.
+דוגמה: "בטח מה אתה צריך" → "בְּטַח! מָה אַתָּה צָרִיךְ?"
+דוגמה: "מעולה אני יכול לעזור" → "מְעוּלֶּה! אֲנִי יָכוֹל לַעֲזוֹר"
+שים לב: ניקוד מדויק על כל אות. אל תשנה מילים, רק הוסף ניקוד.`},
+        {role: "user", content: text}
+      ],
+      temperature: 0, max_tokens: 300,
+    });
+    const req = require("https").request({
+      hostname: "api.openai.com", path: "/v1/chat/completions", method: "POST",
+      headers: {"Authorization": "Bearer " + OPENAI_KEY, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body)},
+      timeout: 4000,
+    }, (res) => {
+      let d = "";
+      res.on("data", c => d += c);
+      res.on("end", () => {
+        try {
+          const r = JSON.parse(d).choices[0].message.content.trim();
+          console.log(`[Nikud] ${Date.now() - start}ms: "${text.substring(0,30)}..." → "${r.substring(0,30)}..."`);
+          resolve(r);
+        } catch(e) { console.error("[Nikud] parse error, using original"); resolve(text); }
+      });
+    });
+    req.on("error", () => { console.error("[Nikud] request error, using original"); resolve(text); });
+    req.on("timeout", () => { req.destroy(); console.error("[Nikud] timeout, using original"); resolve(text); });
+    req.write(body); req.end();
   });
+}
 
-  const audioBuffer = await new Promise((resolve, reject) => {
-    const req = https.request({
-      hostname: "api.elevenlabs.io",
-      path: `/v1/text-to-speech/${vid}?output_format=ulaw_8000`,
-      method: "POST",
-      headers: {
-        "xi-api-key": apiKey,
-        "Content-Type": "application/json",
-        "Content-Length": Buffer.byteLength(body),
-      },
+// Generate TTS via OpenAI API (best Hebrew pronunciation) → store in cache → return audio URL
+async function openaiTTS(text, voice = "alloy") {
+  const OPENAI_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_KEY) throw new Error("No OpenAI key");
+  const start = Date.now();
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({model: "tts-1", input: text, voice, response_format: "mp3"});
+    const req = require("https").request({
+      hostname: "api.openai.com", path: "/v1/audio/speech", method: "POST",
+      headers: {"Authorization": "Bearer " + OPENAI_KEY, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body)},
       timeout: 8000,
     }, (res) => {
       const chunks = [];
-      res.on("data", (c) => chunks.push(c));
+      res.on("data", c => chunks.push(c));
       res.on("end", () => {
         const buf = Buffer.concat(chunks);
-        if (res.statusCode !== 200) {
-          reject(new Error(`ElevenLabs ${res.statusCode}: ${buf.toString().substring(0, 200)}`));
-        } else {
-          resolve(buf);
-        }
+        if (res.statusCode !== 200) return reject(new Error(`OpenAI TTS ${res.statusCode}`));
+        const ms = Date.now() - start;
+        console.log(`[OpenAI-TTS] OK: ${buf.length} bytes, ${ms}ms, voice=${voice}`);
+        const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        audioCache.set(id, {buffer: buf, contentType: "audio/mpeg", createdAt: Date.now()});
+        const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.us-central1.run.app";
+        resolve(`${cloudRunUrl}/audio/${id}`);
       });
     });
     req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("ElevenLabs timeout")); });
-    req.write(body);
-    req.end();
+    req.on("timeout", () => { req.destroy(); reject(new Error("OpenAI TTS timeout")); });
+    req.write(body); req.end();
   });
+}
 
-  console.log(`[ElevenLabs] TTS OK: ${audioBuffer.length} bytes for "${text.substring(0, 30)}..."`);
+// Generate TTS via Google Cloud TTS API → store in cache → return audio URL
+async function googleTTS(text, lang) {
+  const voiceConfig = GOOGLE_TTS_VOICES[lang] || GOOGLE_TTS_VOICES.en;
+  const start = Date.now();
+  const [response] = await googleTtsClient.synthesizeSpeech({
+    input: {text},
+    voice: voiceConfig,
+    audioConfig: {
+      audioEncoding: "MP3",
+      speakingRate: 1.05,  // slightly faster for natural phone conversation
+      pitch: 0,
+      effectsProfileId: ["telephony-class-application"], // optimized for phone calls
+    },
+  });
+  const ms = Date.now() - start;
+  const audioBuffer = response.audioContent;
+  console.log(`[GoogleTTS] OK: ${audioBuffer.length} bytes, ${ms}ms, voice=${voiceConfig.name}`);
+
   const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
   audioCache.set(id, {
     buffer: audioBuffer,
-    contentType: "audio/basic", // ulaw
+    contentType: "audio/mpeg",
     createdAt: Date.now(),
   });
-  const cloudRunUrl = process.env.CLOUD_RUN_URL || `https://voiceflow-mediastream-900818829902.us-central1.run.app`;
+  const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.us-central1.run.app";
   return `${cloudRunUrl}/audio/${id}`;
 }
+
+// ── Pre-generated filler audio (Chirp3-HD, same voice as responses) ──
+const fillerAudioCache = {}; // {he: [{id, url}], en: [{id, url}]}
+async function preGenerateFillers() {
+  const CLOUD_RUN_URL = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.us-central1.run.app";
+  const fillers = {
+    he: ["רֶגַע...", "כֵּן...", "אוֹקֵיי...", "שְׁנִיָּה..."],
+    en: ["Sure...", "Got it...", "One moment...", "Okay..."],
+  };
+  for (const [lang, phrases] of Object.entries(fillers)) {
+    fillerAudioCache[lang] = [];
+    const voiceConfig = GOOGLE_TTS_VOICES[lang] || GOOGLE_TTS_VOICES.en;
+    for (const phrase of phrases) {
+      try {
+        const [response] = await googleTtsClient.synthesizeSpeech({
+          input: {text: phrase},
+          voice: voiceConfig,
+          audioConfig: {audioEncoding: "MP3", speakingRate: 1.05, pitch: 0, effectsProfileId: ["telephony-class-application"]},
+        });
+        const id = "filler_" + Math.random().toString(36).slice(2) + Date.now().toString(36);
+        audioCache.set(id, {buffer: response.audioContent, contentType: "audio/mpeg", createdAt: Date.now()});
+        fillerAudioCache[lang].push({id, url: `${CLOUD_RUN_URL}/audio/${id}`, phrase});
+        // Don't let these expire
+      } catch (e) {
+        console.error(`[Filler] Failed to pre-generate "${phrase}":`, e.message);
+      }
+    }
+    console.log(`[Filler] Pre-generated ${fillerAudioCache[lang].length} ${lang} fillers`);
+  }
+  // Refresh filler cache entries every 60s so they don't expire
+  setInterval(() => {
+    for (const entries of Object.values(fillerAudioCache)) {
+      for (const e of entries) {
+        const cached = audioCache.get(e.id);
+        if (cached) cached.createdAt = Date.now();
+      }
+    }
+  }, 60000);
+}
+preGenerateFillers().catch(e => console.error("[Filler] Init failed:", e.message));
 
 // ── Latency constants ─────────────────────────────────────────────────
 const BARGE_IN_CONFIDENCE_THRESHOLD = 0.35;
@@ -308,17 +439,17 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
     return r.toString();
   };
 
-  // Try ElevenLabs, fallback to Twilio <Say>
+  // Try OpenAI TTS (Hebrew) or Google TTS (English), fallback to Twilio <Say>
   const ttsAndSend = async (text, reason = "response", hangup = false) => {
-    if (ELEVENLABS_API_KEY) {
-      try {
-        const audioUrl = await elevenLabsTTS(text);
-        const twiml = hangup ? makePlayHangupTwiML(audioUrl) : makePlayTwiML(audioUrl);
-        return await sendTwiML(twiml, reason);
-      } catch (err) {
-        const errBody = err.response?.data ? Buffer.from(err.response.data).toString() : "";
-        console.error(`[${callSessionId}] ElevenLabs TTS failed (${err.response?.status}), falling back to Say:`, err.message, errBody.substring(0, 200));
-      }
+    // Hebrew → OpenAI TTS (Alloy voice, best pronunciation), English → Google Cloud TTS
+    try {
+      const audioUrl = deepgramLang.startsWith("he")
+        ? await openaiTTS(text, "alloy")
+        : await googleTTS(text, deepgramLang);
+      const twiml = hangup ? makePlayHangupTwiML(audioUrl) : makePlayTwiML(audioUrl);
+      return await sendTwiML(twiml, reason);
+    } catch (err) {
+      console.error(`[${callSessionId}] TTS failed, falling back to Say:`, err.message);
     }
     // Fallback: Twilio <Say>
     if (hangup) {
@@ -534,12 +665,13 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
     const isArabic = lang.startsWith("ar");
 
     const langRules = isHebrew
-      ? `CRITICAL: You MUST respond ONLY in Hebrew. Every single word must be in Hebrew. Never use English.
-Sound like a natural, warm Israeli service rep — friendly, direct, casual.
+      ? `CRITICAL: You MUST respond ONLY in Hebrew. Every word in Hebrew. Never English.
+Sound like a professional, warm Israeli service rep — friendly and natural.
 
 Rules:
 - Max 1–2 short sentences per reply.
-- Use casual Hebrew openers: "בטח!", "מעולה!", "אשמח לעזור!", "רגע אחד"
+- Use warm Hebrew openers: "בטח!", "מעולה!", "אשמח לעזור!", "רגע אחד"
+- Be professional but not formal. Use "אני", "אנחנו", not "אנו" or "הנכם".
 - Never use formal language. Use everyday spoken Hebrew.
 - Match caller energy. Fast caller → fast reply.
 - Never ask for information already given in this conversation.
@@ -690,15 +822,7 @@ Today is ${dateStr}. When booking appointments always state the specific date (d
     console.log(`[${callSessionId}] Final: "${text}" (stt ${sttLatency}ms)`);
     llmRunning = true;
 
-    // Send filler phrase immediately — eliminates silence while LLM processes (~1-3s)
-    const FILLERS = {
-      he: ["רגע...", "כן...", "אוקיי...", "אה..."],
-      en: ["Sure...", "Got it...", "One moment...", "Okay..."],
-      ar: ["لحظة...", "حسنًا...", "نعم..."],
-    };
-    const fillerList = FILLERS[deepgramLang] || FILLERS.en;
-    const filler = fillerList[Math.floor(Math.random() * fillerList.length)];
-    sendTwiML(makeSayTwiML(filler), "filler").catch(() => {});
+    // No filler phrases — go straight to LLM response for natural flow
 
     // Detect explicit goodbye from caller — will trigger auto-hangup after bot's reply
     const GOODBYE_RE = /\b(bye|goodbye|good\s*bye|see\s*you|that'?s?\s*all|thanks?\s*(that'?s?\s*all|bye|goodbye)|thank\s*you\s*(bye|goodbye)|shalom|להתראות|ביי|זהו|תודה\s*רבה)\b/i;

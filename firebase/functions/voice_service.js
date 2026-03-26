@@ -1515,6 +1515,9 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
         to: leadNumber,
         from: companyPhone,
         url: webhookUrl,
+        record: true,
+        recordingStatusCallback: `${BASE_FUNCTION_URL}/twilioRecordingCallback?callSessionId=${sessionId}`,
+        recordingStatusCallbackMethod: "POST",
         statusCallback: `${TWILIO_STATUS_WEBHOOK}?callSessionId=${sessionId}`,
         statusCallbackMethod: "POST",
         statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
@@ -1613,6 +1616,9 @@ exports._placeCallInternal = async function(payload, ownerUid) {
     to: number,
     from: companyPhone,
     url: `${TWILIO_VOICE_WEBHOOK}?callSessionId=${sessionId}`,
+    record: true,
+    recordingStatusCallback: `${BASE_FUNCTION_URL}/twilioRecordingCallback?callSessionId=${sessionId}`,
+    recordingStatusCallbackMethod: "POST",
     statusCallback: `${TWILIO_STATUS_WEBHOOK}?callSessionId=${sessionId}`,
     statusCallbackMethod: "POST",
     statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
@@ -2182,11 +2188,10 @@ exports.twilioVoiceWebhook = onRequest(
         language: gatherLanguage,
       });
 
-      // Say greeting first, then start WebSocket media stream to Cloud Run
-      response.say(
-        {voice: voiceId, language: sayLanguage},
-        isHebrew ? wrapSSML(greetingToSay, language) : greetingToSay,
-      );
+      // Play greeting with same Chirp3-HD voice as Cloud Run responses
+      const greetingLang = isHebrew ? "he" : "en";
+      const greetingTtsUrl = `${cloudRunUrl}/tts?lang=${greetingLang}&text=${encodeURIComponent(greetingToSay)}`;
+      response.play(greetingTtsUrl);
       const start = response.start();
       start.stream({
         url: `wss://${cloudRunUrl.replace(/^https?:\/\//, "")}/stream/${finalSessionId}`,
@@ -3066,6 +3071,42 @@ async function _sendPostCallSms(callSessionId) {
   await client.messages.create({body: smsBody, from: fromNumber, to: leadNumber});
   logger.info("Post-call SMS sent", {callSessionId, to: leadNumber, ownKeys: smsCreds.isOwn});
 }
+
+// ── Recording callback — saves recording URL to Firestore call session ──
+exports.twilioRecordingCallback = onRequest(async (req, res) => {
+  try {
+    const body = req.body || {};
+    const callSessionId = req.query.callSessionId || body.callSessionId;
+    const recordingUrl = body.RecordingUrl || "";
+    const recordingSid = body.RecordingSid || "";
+    const recordingDuration = parseInt(body.RecordingDuration || "0", 10);
+    const recordingStatus = body.RecordingStatus || "";
+
+    if (!callSessionId || !recordingUrl) {
+      res.status(200).send("OK");
+      return;
+    }
+
+    console.log(`[RecordingCallback] session=${callSessionId} status=${recordingStatus} duration=${recordingDuration}s url=${recordingUrl}`);
+
+    if (recordingStatus === "completed" && recordingDuration > 0) {
+      const db = getFirestore();
+      await db.collection("call_sessions").doc(callSessionId).update({
+        recordings: FieldValue.arrayUnion({
+          sid: recordingSid,
+          url: `${recordingUrl}.mp3`,
+          duration: recordingDuration,
+          createdAt: new Date().toISOString(),
+        }),
+        updatedAt: FieldValue.serverTimestamp(),
+      });
+      console.log(`[RecordingCallback] Saved recording for ${callSessionId}: ${recordingDuration}s`);
+    }
+  } catch (err) {
+    console.error("[RecordingCallback] Error:", err.message);
+  }
+  res.status(200).send("OK");
+});
 
 exports.twilioStatusCallback = onRequest(async (req, res) => {
   try {

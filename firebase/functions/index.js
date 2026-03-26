@@ -29,6 +29,7 @@ exports.placeCall = voiceService.placeCall;
 exports.twilioVoiceWebhook = voiceService.twilioVoiceWebhook;
 exports.twilioGatherCallback = voiceService.twilioGatherCallback;
 exports.twilioStatusCallback = voiceService.twilioStatusCallback;
+exports.twilioRecordingCallback = voiceService.twilioRecordingCallback;
 const twilioMediaStream = require("./twilio_media_stream.js");
 exports.twilioMediaStream = twilioMediaStream.twilioMediaStream;
 exports.scenarioFlowExecute = voiceService.scenarioFlowExecute;
