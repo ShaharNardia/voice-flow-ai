@@ -64,7 +64,7 @@ app.get("/tts", async (req, res) => {
     if (lang === "he") {
       // Hebrew: OpenAI TTS (Alloy) — best pronunciation
       const OPENAI_KEY = process.env.OPENAI_API_KEY;
-      const body = JSON.stringify({model: "tts-1", input: text, voice: "alloy", response_format: "mp3"});
+      const body = JSON.stringify({model: "tts-1", input: text, voice: "nova", response_format: "mp3"});
       const audioBuffer = await new Promise((resolve, reject) => {
         const r = require("https").request({
           hostname: "api.openai.com", path: "/v1/audio/speech", method: "POST",
@@ -115,6 +115,61 @@ setInterval(() => {
   }
 }, 60000);
 
+// ── Hebrew pronunciation dictionary (loaded from Firestore) ──────────────────
+// Managed via Admin Panel → Pronunciation tab.
+// Fallback hardcoded fixes used if Firestore is unavailable.
+const HARDCODED_FIXES = {
+  "לנסלוט": "לאנסלוט",
+  "Lancelot": "לאנסלוט",
+};
+
+// Cache pronunciation fixes from Firestore (refreshed every 5 min)
+let pronunciationFixesCache = [];
+let pronunciationFixesCacheTime = 0;
+const PRONUNCIATION_CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+async function loadPronunciationFixes() {
+  const now = Date.now();
+  if (now - pronunciationFixesCacheTime < PRONUNCIATION_CACHE_TTL && pronunciationFixesCache.length > 0) {
+    return pronunciationFixesCache;
+  }
+  try {
+    const projectId = process.env.GCLOUD_PROJECT || "voiceflow-ai-202509231639";
+    const url = `https://us-central1-${projectId}.cloudfunctions.net/getPronunciationFixes`;
+    const resp = await new Promise((resolve, reject) => {
+      require("https").get(url, {timeout: 3000}, (res) => {
+        let d = "";
+        res.on("data", c => d += c);
+        res.on("end", () => {
+          try { resolve(JSON.parse(d).fixes || []); }
+          catch { resolve([]); }
+        });
+      }).on("error", () => resolve([]));
+    });
+    pronunciationFixesCache = resp;
+    pronunciationFixesCacheTime = now;
+    console.log(`[Pronunciation] Loaded ${resp.length} fixes from Firestore`);
+    return resp;
+  } catch {
+    return pronunciationFixesCache.length > 0 ? pronunciationFixesCache : [];
+  }
+}
+
+function applyPronunciationFixes(text, firestoreFixes = []) {
+  let fixed = text;
+  // Apply Firestore fixes first (admin-managed)
+  for (const fix of firestoreFixes) {
+    if (fix.original && fix.replacement) {
+      fixed = fixed.replace(new RegExp(fix.original.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), fix.replacement);
+    }
+  }
+  // Apply hardcoded fallbacks
+  for (const [wrong, right] of Object.entries(HARDCODED_FIXES)) {
+    fixed = fixed.replace(new RegExp(wrong.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi"), right);
+  }
+  return fixed;
+}
+
 // Add nikud to Hebrew text via GPT-4o-mini for correct TTS pronunciation
 async function addNikud(text) {
   const OPENAI_KEY = process.env.OPENAI_API_KEY;
@@ -154,7 +209,7 @@ async function addNikud(text) {
 }
 
 // Generate TTS via OpenAI API (best Hebrew pronunciation) → store in cache → return audio URL
-async function openaiTTS(text, voice = "alloy") {
+async function openaiTTS(text, voice = "nova") {
   const OPENAI_KEY = process.env.OPENAI_API_KEY;
   if (!OPENAI_KEY) throw new Error("No OpenAI key");
   const start = Date.now();
@@ -441,10 +496,13 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
 
   // Try OpenAI TTS (Hebrew) or Google TTS (English), fallback to Twilio <Say>
   const ttsAndSend = async (text, reason = "response", hangup = false) => {
-    // Hebrew → OpenAI TTS (Alloy voice, best pronunciation), English → Google Cloud TTS
+    // Apply pronunciation fixes for Hebrew (from Firestore + hardcoded)
+    const pronFixes = deepgramLang.startsWith("he") ? await loadPronunciationFixes() : [];
+    const ttsText = deepgramLang.startsWith("he") ? applyPronunciationFixes(text, pronFixes) : text;
+    // Hebrew → OpenAI TTS (Nova voice, best pronunciation), English → Google Cloud TTS
     try {
       const audioUrl = deepgramLang.startsWith("he")
-        ? await openaiTTS(text, "alloy")
+        ? await openaiTTS(ttsText, "nova")
         : await googleTTS(text, deepgramLang);
       const twiml = hangup ? makePlayHangupTwiML(audioUrl) : makePlayTwiML(audioUrl);
       return await sendTwiML(twiml, reason);
@@ -713,7 +771,12 @@ Stay focused on helping ${company} customers. Engage with any relevant question 
 
 Goal: greet → understand need → collect name + phone + time → confirm → ${companyData.createJobPermission ? "book it" : "pass to team"}.${ast.additionalInstructions ? `\nExtra: ${ast.additionalInstructions}` : ""}
 
-Today is ${dateStr}. When booking appointments always state the specific date (day + month + year) AND time.`;
+Today is ${dateStr}. When booking appointments always state the specific date (day + month + year) AND time.
+
+CRITICAL — Numbers and times: Your output is read aloud by TTS. NEVER write digits. ALWAYS spell out ALL numbers, times, dates, and prices as full words.
+Wrong: "בשעה 10:00", "₪10,000", "26/3", "050-890-8099"
+Correct: "בשעה עשר בבוקר", "עשרת אלפים שקל", "עשרים ושישה במרס", "אפס חמש אפס שמונה תשע אפס שמונה אפס תשע תשע"
+This applies to ALL languages. Never use digits in your response.`;
 
     // Caller identity section
     if (callerCtx.leadNumber) {

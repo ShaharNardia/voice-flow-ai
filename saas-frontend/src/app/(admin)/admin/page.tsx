@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback, createContext, useContext } from "react";
+import React, { useEffect, useState, useMemo, useCallback, createContext, useContext, useRef } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import {
   adminListUsers, adminToggleUser, adminDeleteUser,
@@ -8,6 +8,8 @@ import {
   adminGetSubscriptions, adminOverridePlan,
   adminGetPlanConfig, adminUpdatePlanConfig,
   adminGetBillingConfig, adminUpdateBillingConfig,
+  adminGetPronunciation, adminUpdatePronunciation,
+  type PronunciationFix,
   adminGetSystemSettings, adminUpdateSystemSettings,
   adminGetKeysMeta, adminUpdateKeyMeta,
   adminListAllPhoneNumbers, adminReleasePhoneNumber, adminReassignPhoneNumber,
@@ -62,6 +64,7 @@ const TABS = [
   { id: "apikeys",       label: "API Keys",             icon: Key },
   { id: "settings",      label: "System Settings",      icon: Settings },
   { id: "phone",         label: "Phone & Integrations", icon: Phone },
+  { id: "pronunciation", label: "Pronunciation",        icon: Globe },
 ] as const;
 
 type TabId = typeof TABS[number]["id"];
@@ -1318,6 +1321,174 @@ function IntegrationCard({ name, result }: { name: string; result: IntegrationRe
   );
 }
 
+// ── Tab 7: Pronunciation Training ────────────────────────────────────────────
+
+const CLOUD_RUN_URL = "https://voiceflow-mediastream-900818829902.us-central1.run.app";
+
+function PronunciationTab({ wasLoaded }: { wasLoaded: boolean }) {
+  const showError = useErrorToast();
+  const [fixes, setFixes] = useState<PronunciationFix[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "success" | "error">("idle");
+
+  // New fix form
+  const [newOriginal, setNewOriginal] = useState("");
+  const [newReplacement, setNewReplacement] = useState("");
+  const [newNote, setNewNote] = useState("");
+
+  // TTS preview
+  const [playingId, setPlayingId] = useState<string | null>(null);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    if (!wasLoaded || fixes.length > 0) return;
+    setLoading(true);
+    adminGetPronunciation()
+      .then(data => setFixes(data.fixes || []))
+      .catch(() => {})
+      .finally(() => setLoading(false));
+  }, [wasLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const playTTS = (text: string, id: string) => {
+    if (audioRef.current) { audioRef.current.pause(); }
+    const url = `${CLOUD_RUN_URL}/tts?text=${encodeURIComponent(text)}&lang=he`;
+    const audio = new Audio(url);
+    audioRef.current = audio;
+    setPlayingId(id);
+    audio.play();
+    audio.onended = () => setPlayingId(null);
+    audio.onerror = () => { setPlayingId(null); showError("Failed to play audio"); };
+  };
+
+  const addFix = () => {
+    if (!newOriginal.trim() || !newReplacement.trim()) return;
+    setFixes(prev => [...prev, { original: newOriginal.trim(), replacement: newReplacement.trim(), note: newNote.trim() }]);
+    setNewOriginal(""); setNewReplacement(""); setNewNote("");
+  };
+
+  const removeFix = (idx: number) => {
+    setFixes(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setSaveStatus("idle");
+    try {
+      await adminUpdatePronunciation({ fixes });
+      setSaveStatus("success");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    } catch (e: unknown) { setSaveStatus("error"); showError(e instanceof Error ? e.message : "Failed to save"); }
+    finally { setSaving(false); }
+  };
+
+  if (loading) return <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-neutral-400" /></div>;
+
+  return (
+    <div className="space-y-5 max-w-3xl">
+      <div className="bg-white border border-neutral-200 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-neutral-900 mb-1">Hebrew Pronunciation Training</h3>
+        <p className="text-xs text-neutral-500 mb-4">
+          Add words that the TTS mispronounces. Type the original word, then the phonetic correction.
+          Click 🔊 to hear how each version sounds. Cloud Run applies these fixes automatically.
+        </p>
+
+        {/* Existing fixes */}
+        <div className="space-y-2 mb-4">
+          {fixes.map((fix, idx) => (
+            <div key={idx} className="flex items-center gap-2 bg-neutral-50 rounded-lg px-3 py-2">
+              <span className="text-sm font-medium text-neutral-700 min-w-[100px]">{fix.original}</span>
+              <span className="text-neutral-400">→</span>
+              <span className="text-sm font-medium text-green-700 min-w-[100px]">{fix.replacement}</span>
+              {fix.note && <span className="text-xs text-neutral-400 flex-1">({fix.note})</span>}
+              <button
+                onClick={() => playTTS(fix.original, `orig-${idx}`)}
+                className={`p-1 rounded hover:bg-neutral-200 text-xs ${playingId === `orig-${idx}` ? "bg-red-100" : ""}`}
+                title="Play original"
+              >🔊 מקור</button>
+              <button
+                onClick={() => playTTS(fix.replacement, `fix-${idx}`)}
+                className={`p-1 rounded hover:bg-green-100 text-xs ${playingId === `fix-${idx}` ? "bg-green-200" : ""}`}
+                title="Play fixed"
+              >🔊 תיקון</button>
+              <button onClick={() => removeFix(idx)} className="p-1 text-neutral-400 hover:text-red-500">
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          ))}
+          {fixes.length === 0 && (
+            <p className="text-xs text-neutral-400 text-center py-4">No pronunciation fixes yet. Add your first one below.</p>
+          )}
+        </div>
+
+        {/* Add new fix */}
+        <div className="border-t border-neutral-100 pt-4">
+          <div className="flex gap-2 items-end">
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-neutral-500 mb-1">Original word</label>
+              <input
+                type="text" value={newOriginal} onChange={e => setNewOriginal(e.target.value)}
+                placeholder="לנסלוט"
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                dir="rtl"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-neutral-500 mb-1">Phonetic fix</label>
+              <input
+                type="text" value={newReplacement} onChange={e => setNewReplacement(e.target.value)}
+                placeholder="לאנסלוט"
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
+                dir="rtl"
+              />
+            </div>
+            <div className="flex-1">
+              <label className="block text-xs font-medium text-neutral-500 mb-1">Note (optional)</label>
+              <input
+                type="text" value={newNote} onChange={e => setNewNote(e.target.value)}
+                placeholder="company name"
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
+              />
+            </div>
+            <div className="flex gap-1">
+              {newOriginal && (
+                <button onClick={() => playTTS(newOriginal, "new-orig")}
+                  className={`px-2 py-2 rounded-lg text-xs border ${playingId === "new-orig" ? "bg-red-50 border-red-200" : "border-neutral-200 hover:bg-neutral-50"}`}
+                >🔊</button>
+              )}
+              {newReplacement && (
+                <button onClick={() => playTTS(newReplacement, "new-fix")}
+                  className={`px-2 py-2 rounded-lg text-xs border ${playingId === "new-fix" ? "bg-green-50 border-green-200" : "border-neutral-200 hover:bg-neutral-50"}`}
+                >🔊✓</button>
+              )}
+              <button
+                onClick={addFix}
+                disabled={!newOriginal.trim() || !newReplacement.trim()}
+                className="px-3 py-2 bg-neutral-900 text-white text-xs rounded-lg disabled:opacity-30 hover:bg-neutral-800"
+              >Add</button>
+            </div>
+          </div>
+        </div>
+
+        {/* Save */}
+        <div className="flex items-center gap-3 mt-5 pt-4 border-t border-neutral-100">
+          <button
+            onClick={handleSave} disabled={saving}
+            className="flex items-center gap-2 px-5 py-2.5 bg-neutral-900 text-white text-sm rounded-lg disabled:opacity-50 hover:bg-neutral-800"
+          >
+            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+            Save & Deploy
+          </button>
+          {saveStatus === "success" && <span className="flex items-center gap-1 text-xs text-green-600"><CheckCircle2 className="w-3.5 h-3.5" /> Saved! Cloud Run will use these fixes.</span>}
+          {saveStatus === "error" && <span className="flex items-center gap-1 text-xs text-red-600"><XCircle className="w-3.5 h-3.5" /> Failed to save</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Tab 6: Phone & Integrations ──────────────────────────────────────────────
+
 function PhoneIntegrationsTab({ wasLoaded }: { wasLoaded: boolean }) {
   const showError = useErrorToast();
   const [section, setSection] = useState<PhoneSection>("numbers");
@@ -1673,6 +1844,7 @@ export default function AdminPage() {
         {activeTab === "apikeys" && <ApiKeysTab wasLoaded={loadedTabs.has("apikeys")} />}
         {activeTab === "settings" && <SystemSettingsTab wasLoaded={loadedTabs.has("settings")} />}
         {activeTab === "phone" && <PhoneIntegrationsTab wasLoaded={loadedTabs.has("phone")} />}
+        {activeTab === "pronunciation" && <PronunciationTab wasLoaded={loadedTabs.has("pronunciation")} />}
       </div>
     </ErrorToastProvider>
   );

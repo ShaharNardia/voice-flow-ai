@@ -507,3 +507,67 @@ exports.adminUpdateBillingConfig = onRequest(corsOptions, async (req, res) => {
     res.status(500).json({status: "error", message: "Failed to save billing config"});
   }
 });
+
+// ── Pronunciation Dictionary — Hebrew TTS pronunciation fixes ────────────────
+// Firestore doc: config/pronunciation → { fixes: [{original, replacement, note}] }
+
+exports.adminGetPronunciation = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const db = getFirestore();
+    const doc = await db.collection("config").doc("pronunciation").get();
+    const data = doc.exists ? doc.data() : {fixes: []};
+    res.status(200).json(data);
+  } catch (error) {
+    logger.error("adminGetPronunciation failed", error);
+    res.status(500).json({status: "error", message: "Failed to load pronunciation"});
+  }
+});
+
+exports.adminUpdatePronunciation = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const fixes = body.fixes;
+    if (!Array.isArray(fixes)) {
+      res.status(400).json({status: "error", message: "fixes must be an array"});
+      return;
+    }
+    // Validate each fix
+    const validated = fixes.map(f => ({
+      original: String(f.original || "").trim(),
+      replacement: String(f.replacement || "").trim(),
+      note: String(f.note || "").trim(),
+    })).filter(f => f.original && f.replacement);
+
+    const db = getFirestore();
+    await db.collection("config").doc("pronunciation").set({
+      fixes: validated,
+      updatedAt: FieldValue.serverTimestamp(),
+      updatedBy: uid,
+    });
+    logger.info(`Pronunciation dictionary updated by ${uid}: ${validated.length} fixes`);
+    res.status(200).json({status: "ok", count: validated.length});
+  } catch (error) {
+    logger.error("adminUpdatePronunciation failed", error);
+    res.status(500).json({status: "error", message: "Failed to save pronunciation"});
+  }
+});
+
+// Public endpoint (no auth) for Cloud Run to fetch pronunciation fixes
+exports.getPronunciationFixes = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  try {
+    const db = getFirestore();
+    const doc = await db.collection("config").doc("pronunciation").get();
+    const fixes = doc.exists ? (doc.data().fixes || []) : [];
+    res.status(200).json({fixes});
+  } catch (error) {
+    res.status(500).json({fixes: []});
+  }
+});

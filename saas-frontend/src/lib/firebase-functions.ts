@@ -174,6 +174,17 @@ export const adminGetBillingConfig = () =>
 export const adminUpdateBillingConfig = (data: { config: BillingConfig }) =>
   httpPost<{ status: string }>("/adminUpdateBillingConfig", data);
 
+// ── Pronunciation Dictionary ─────────────────────────────────────────
+export interface PronunciationFix {
+  original: string;
+  replacement: string;
+  note: string;
+}
+export const adminGetPronunciation = () =>
+  httpGet<{ fixes: PronunciationFix[] }>("/adminGetPronunciation");
+export const adminUpdatePronunciation = (data: { fixes: PronunciationFix[] }) =>
+  httpPost<{ status: string; count: number }>("/adminUpdatePronunciation", data);
+
 // ── Knowledge Base ────────────────────────────────────────────────────
 export const knowledgeProcessFile = (data: { assistantId: string; storagePath: string; fileName: string }) =>
   httpPost<{ chunksCreated: number; fileName: string }>("/knowledgeProcessFile", data);
