@@ -630,15 +630,33 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
     return r.toString();
   };
 
-  // Try selected TTS model (Hebrew) or Google TTS (English), fallback to Twilio <Say>
+  // Try per-assistant voice → selected TTS model (Hebrew) → Google TTS (English), fallback to Twilio <Say>
+  // Resolve assistant voice: voiceId comes from assistant.voice (e.g. "openai:nova", "Google.he-IL-Chirp3-HD-Achird")
+  const assistantVoice = assistant.voice || null;
   const ttsAndSend = async (text, reason = "response", hangup = false) => {
     // Apply pronunciation fixes for Hebrew (from Firestore + hardcoded)
     const pronFixes = deepgramLang.startsWith("he") ? await loadPronunciationFixes() : [];
     const ttsText = deepgramLang.startsWith("he") ? applyPronunciationFixes(text, pronFixes) : text;
-    // Hebrew → selected TTS model, English → Google Cloud TTS
     try {
       let audioUrl;
-      if (deepgramLang.startsWith("he") && TTS_MODELS[hebrewTtsModel]) {
+      // Use per-assistant voice if set (format: "openai:nova" or "Google.he-IL-*")
+      if (assistantVoice && assistantVoice.startsWith("openai:")) {
+        const openaiVoiceName = assistantVoice.split(":")[1] || "nova";
+        audioUrl = await openaiTTS(ttsText, openaiVoiceName);
+      } else if (assistantVoice && assistantVoice.startsWith("Google.")) {
+        const voiceName = assistantVoice.replace("Google.", "");
+        const langCode = voiceName.substring(0, 5); // "he-IL" or "en-US"
+        const [response] = await googleTtsClient.synthesizeSpeech({
+          input: {text: ttsText},
+          voice: {languageCode: langCode, name: voiceName},
+          audioConfig: {audioEncoding: "MP3", sampleRateHertz: 24000, speakingRate: 1.05, pitch: 0, effectsProfileId: ["telephony-class-application"]},
+        });
+        const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        audioCache.set(id, {buffer: response.audioContent, contentType: "audio/mpeg", createdAt: Date.now()});
+        const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.us-central1.run.app";
+        audioUrl = `${cloudRunUrl}/audio/${id}`;
+      } else if (deepgramLang.startsWith("he") && TTS_MODELS[hebrewTtsModel]) {
+        // Fallback: global Hebrew TTS model from admin config
         const audioBuf = await generateTTS(ttsText, hebrewTtsModel);
         const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
         audioCache.set(id, {buffer: audioBuf, contentType: "audio/mpeg", createdAt: Date.now()});

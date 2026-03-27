@@ -103,7 +103,15 @@ export default function PhoneNumbersPage() {
     setSaving(true);
     setSaveError("");
     try {
-      await configurePhoneNumber({ phoneNumber: configuring.phoneNumber, assistantId: configAssistantId });
+      // Configure Twilio webhooks (best-effort — may fail if per-company creds not available)
+      try {
+        await configurePhoneNumber({ phoneNumber: configuring.phoneNumber, assistantId: configAssistantId });
+      } catch (twilioErr) {
+        // Twilio webhook config is only needed on first setup; if it fails,
+        // the number likely already has correct webhooks from purchase/sync.
+        console.warn("Twilio webhook config skipped:", twilioErr);
+      }
+      // Always save assistant assignment to Firestore
       const assistant = assistants.find((a) => a.id === configAssistantId);
       await setDoc(doc(db, "phone_numbers", configuring.phoneNumber), {
         assistantId: configAssistantId || "",
@@ -192,7 +200,7 @@ export default function PhoneNumbersPage() {
                       <span className="text-neutral-400">Not assigned</span>
                     )}
                   </td>
-                  <td className="px-5 py-3 text-sm text-neutral-400">{n.country || "US"}</td>
+                  <td className="px-5 py-3 text-sm text-neutral-400">{detectCountry(n.phoneNumber, n.country || "US")}</td>
                   <td className="px-5 py-3">
                     <div className="flex items-center justify-end gap-1">
                       <button

@@ -2140,13 +2140,16 @@ exports.twilioVoiceWebhook = onRequest(
         timestamp: new Date(),
       });
       
-      // Save initial history
-      console.log("[twilioVoiceWebhook] Saving conversation history to Firestore...");
-      await snapshot.ref.set({
+      // Save initial history (non-blocking to avoid delaying greeting TTS)
+      console.log("[twilioVoiceWebhook] Saving conversation history to Firestore (non-blocking)...");
+      snapshot.ref.set({
         conversationHistory,
         updatedAt: FieldValue.serverTimestamp(),
-      }, {merge: true});
-      console.log("[twilioVoiceWebhook] Conversation history saved");
+      }, {merge: true}).then(() => {
+        console.log("[twilioVoiceWebhook] Conversation history saved");
+      }).catch((err) => {
+        console.error("[twilioVoiceWebhook] Failed to save conversation history:", err.message);
+      });
     }
 
     // Ensure language is full code (he-IL) for Twilio Say
@@ -2188,10 +2191,9 @@ exports.twilioVoiceWebhook = onRequest(
         language: gatherLanguage,
       });
 
-      // Play greeting with same Chirp3-HD voice as Cloud Run responses
-      const greetingLang = isHebrew ? "he" : "en";
-      const greetingTtsUrl = `${cloudRunUrl}/tts?lang=${greetingLang}&text=${encodeURIComponent(greetingToSay)}`;
-      response.play(greetingTtsUrl);
+      // Play greeting using Twilio <Say> for instant playback (zero delay).
+      // Subsequent responses use the assistant's selected TTS voice via Cloud Run.
+      response.say({voice: voiceId, language: sayLanguage}, greetingToSay);
       const start = response.start();
       start.stream({
         url: `wss://${cloudRunUrl.replace(/^https?:\/\//, "")}/stream/${finalSessionId}`,
