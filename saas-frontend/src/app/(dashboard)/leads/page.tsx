@@ -1159,7 +1159,10 @@ export default function LeadsPage() {
         setLeads(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Lead)));
         setLoading(false);
       },
-      () => setLoading(false)
+      (err) => {
+        console.error("Leads query failed:", err);
+        setLoading(false);
+      }
     );
     return unsub;
   }, [user, refreshToken]);

@@ -1,17 +1,28 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { collection, query, orderBy, limit, onSnapshot, getDocs, Timestamp } from "firebase/firestore";
+import { collection, query, orderBy, limit, onSnapshot, getDocs, where, Timestamp } from "firebase/firestore";
+import { useAuth } from "@/hooks/useAuth";
 import { db } from "@/lib/firebase";
 import { formatDate, formatPhone, truncate } from "@/lib/utils";
 import Link from "next/link";
-import { PhoneCall, Circle, ChevronRight, Plus, X, Loader2, PhoneOutgoing } from "lucide-react";
+import { PhoneCall, Circle, ChevronRight, Plus, X, Loader2, PhoneOutgoing, Users } from "lucide-react";
 import { placeCall, assistantsList, type Assistant } from "@/lib/firebase-functions";
 
 interface PhoneNumberDoc {
   id: string;
   phoneNumber: string;
   friendlyName?: string;
+  assistantId?: string;
+  assistantName?: string;
+}
+
+interface LeadDoc {
+  id: string;
+  name?: string;
+  phone?: string;
+  email?: string;
+  company?: string;
 }
 
 interface CallSession {
@@ -41,12 +52,14 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default function CallsPage() {
+  const { user } = useAuth();
   const [calls, setCalls] = useState<CallSession[]>([]);
   const [loading, setLoading] = useState(true);
 
   // Place call modal
   const [showPlace, setShowPlace] = useState(false);
   const [toNumber, setToNumber] = useState("");
+  const [leads, setLeads] = useState<LeadDoc[]>([]);
   const [fromNumber, setFromNumber] = useState("");
   const [phoneNumbers, setPhoneNumbers] = useState<PhoneNumberDoc[]>([]);
   const [assistants, setAssistants] = useState<Assistant[]>([]);
@@ -73,19 +86,31 @@ export default function CallsPage() {
     setPlaceError("");
     setPlacedSid("");
     try {
-      const [list, numsSnap] = await Promise.all([
+      const uid = user?.uid;
+      const [list, numsSnap, leadsSnap] = await Promise.all([
         assistantsList().catch(() => [] as Assistant[]),
         getDocs(query(collection(db, "phone_numbers"))),
+        uid ? getDocs(query(collection(db, "leads"), where("ownerId", "==", uid), orderBy("createdAt", "desc"), limit(50))).catch(() => null) : Promise.resolve(null),
       ]);
       setAssistants(list);
-      if (list.length > 0) setSelectedAssistantId(list[0].id);
       const pnums = numsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as PhoneNumberDoc));
       setPhoneNumbers(pnums);
-      if (pnums.length > 0 && !fromNumber) setFromNumber(pnums[0].phoneNumber);
+      if (list.length > 0) {
+        setSelectedAssistantId(list[0].id);
+        // Auto-select assigned phone for the first assistant
+        const assigned = pnums.find((p) => p.assistantId === list[0].id);
+        if (assigned) setFromNumber(assigned.phoneNumber);
+        else if (pnums.length > 0 && !fromNumber) setFromNumber(pnums[0].phoneNumber);
+      } else if (pnums.length > 0 && !fromNumber) {
+        setFromNumber(pnums[0].phoneNumber);
+      }
+      if (leadsSnap) {
+        setLeads(leadsSnap.docs.map((d) => ({ id: d.id, ...d.data() } as LeadDoc)));
+      }
     } catch {
       // non-critical — user can still type manually
     }
-  }, [fromNumber]);
+  }, [fromNumber, user]);
 
   /** Ensure phone number has + prefix (E.164 format) */
   const normalizePhone = (n: string) => {
@@ -172,6 +197,28 @@ export default function CallsPage() {
                   </div>
                 )}
                 <div className="space-y-3">
+                  {leads.length > 0 && (
+                    <div>
+                      <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">
+                        <Users className="w-3 h-3 inline mr-1" />Select Lead
+                      </label>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          const lead = leads.find((l) => l.id === e.target.value);
+                          if (lead?.phone) setToNumber(lead.phone);
+                        }}
+                        className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
+                      >
+                        <option value="">— Choose from saved leads —</option>
+                        {leads.map((l) => (
+                          <option key={l.id} value={l.id}>
+                            {l.name || "No name"} — {l.phone || "No phone"}{l.company ? ` (${l.company})` : ""}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div>
                     <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">To (Lead Number) *</label>
                     <input
@@ -182,35 +229,18 @@ export default function CallsPage() {
                       className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">From (Your Twilio Number) *</label>
-                    {phoneNumbers.length > 0 ? (
-                      <select
-                        value={fromNumber}
-                        onChange={(e) => setFromNumber(e.target.value)}
-                        className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
-                      >
-                        {phoneNumbers.map((n) => (
-                          <option key={n.id} value={n.phoneNumber}>
-                            {n.phoneNumber}{n.friendlyName && n.friendlyName !== n.phoneNumber && !n.friendlyName.replace(/\D/g,"").includes(n.phoneNumber.replace(/\D/g,"")) ? ` — ${n.friendlyName}` : ""}
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <input
-                        value={fromNumber}
-                        onChange={(e) => setFromNumber(e.target.value)}
-                        placeholder="+12125551234"
-                        className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
-                      />
-                    )}
-                  </div>
                   {assistants.length > 0 && (
                     <div>
                       <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">Assistant</label>
                       <select
                         value={selectedAssistantId}
-                        onChange={(e) => setSelectedAssistantId(e.target.value)}
+                        onChange={(e) => {
+                          const aid = e.target.value;
+                          setSelectedAssistantId(aid);
+                          // Auto-select assigned phone number for this assistant
+                          const assigned = phoneNumbers.find((p) => p.assistantId === aid);
+                          if (assigned) setFromNumber(assigned.phoneNumber);
+                        }}
                         className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
                       >
                         {assistants.map((a) => (
@@ -219,6 +249,37 @@ export default function CallsPage() {
                       </select>
                     </div>
                   )}
+                  <div>
+                    <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">From (Twilio Number) *</label>
+                    {(() => {
+                      const assignedPhone = phoneNumbers.find((p) => p.assistantId === selectedAssistantId);
+                      if (assignedPhone) {
+                        return (
+                          <div className="w-full border border-green-200 bg-green-50 rounded-lg px-3 py-2.5 text-sm font-mono text-green-800">
+                            {assignedPhone.phoneNumber} <span className="text-xs text-green-600 font-sans">(assigned to this assistant)</span>
+                          </div>
+                        );
+                      }
+                      return phoneNumbers.length > 0 ? (
+                        <select
+                          value={fromNumber}
+                          onChange={(e) => setFromNumber(e.target.value)}
+                          className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
+                        >
+                          {phoneNumbers.map((n) => (
+                            <option key={n.id} value={n.phoneNumber}>{n.phoneNumber}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <input
+                          value={fromNumber}
+                          onChange={(e) => setFromNumber(e.target.value)}
+                          placeholder="+12125551234"
+                          className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
+                        />
+                      );
+                    })()}
+                  </div>
                 </div>
                 <div className="flex gap-2 mt-5">
                   <button
