@@ -1337,28 +1337,60 @@ function PronunciationTab({ wasLoaded }: { wasLoaded: boolean }) {
   const [newReplacement, setNewReplacement] = useState("");
   const [newNote, setNewNote] = useState("");
 
+  // TTS model selection
+  const [ttsModels, setTtsModels] = useState<Array<{id: string; label: string; provider: string}>>([]);
+  const [selectedModel, setSelectedModel] = useState("openai-nova");
+  const [savingModel, setSavingModel] = useState(false);
+  const [testSentence, setTestSentence] = useState("שלום! אני חן מחברת לנסלוט טכנולוגיות. במה אוכל לעזור לך היום?");
+
   // TTS preview
   const [playingId, setPlayingId] = useState<string | null>(null);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
-    if (!wasLoaded || fixes.length > 0) return;
-    setLoading(true);
-    adminGetPronunciation()
-      .then(data => setFixes(data.fixes || []))
-      .catch(() => {})
-      .finally(() => setLoading(false));
+    if (!wasLoaded) return;
+    // Load fixes
+    if (fixes.length === 0) {
+      setLoading(true);
+      adminGetPronunciation()
+        .then(data => setFixes(data.fixes || []))
+        .catch(() => {})
+        .finally(() => setLoading(false));
+    }
+    // Load TTS models
+    fetch(`${CLOUD_RUN_URL}/tts-models`)
+      .then(r => r.json())
+      .then(data => {
+        setTtsModels(data.models || []);
+        setSelectedModel(data.current || "openai-nova");
+      })
+      .catch(() => {});
   }, [wasLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const playTTS = (text: string, id: string) => {
+  const playTTS = (text: string, id: string, model?: string) => {
     if (audioRef.current) { audioRef.current.pause(); }
-    const url = `${CLOUD_RUN_URL}/tts?text=${encodeURIComponent(text)}&lang=he`;
+    const m = model || selectedModel;
+    const url = `${CLOUD_RUN_URL}/tts?text=${encodeURIComponent(text)}&lang=he&model=${encodeURIComponent(m)}`;
     const audio = new Audio(url);
     audioRef.current = audio;
     setPlayingId(id);
     audio.play();
     audio.onended = () => setPlayingId(null);
     audio.onerror = () => { setPlayingId(null); showError("Failed to play audio"); };
+  };
+
+  const saveModelChoice = async () => {
+    setSavingModel(true);
+    try {
+      await fetch(`${CLOUD_RUN_URL}/tts-models`, {
+        method: "POST",
+        headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({model: selectedModel}),
+      });
+      setSaveStatus("success");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    } catch { showError("Failed to save model"); }
+    finally { setSavingModel(false); }
   };
 
   const addFix = () => {
@@ -1386,11 +1418,65 @@ function PronunciationTab({ wasLoaded }: { wasLoaded: boolean }) {
 
   return (
     <div className="space-y-5 max-w-3xl">
+      {/* TTS Voice Model Selector */}
       <div className="bg-white border border-neutral-200 rounded-xl p-5">
-        <h3 className="text-sm font-semibold text-neutral-900 mb-1">Hebrew Pronunciation Training</h3>
+        <h3 className="text-sm font-semibold text-neutral-900 mb-1">בחירת קול TTS לעברית</h3>
         <p className="text-xs text-neutral-500 mb-4">
-          Add words that the TTS mispronounces. Type the original word, then the phonetic correction.
-          Click 🔊 to hear how each version sounds. Cloud Run applies these fixes automatically.
+          בחר מודל קול, הקלד משפט לבדיקה ושמע איך הוא נשמע. לחץ &quot;שמור כברירת מחדל&quot; כדי להשתמש בו בפונבוט.
+        </p>
+
+        <div className="flex gap-3 items-end mb-3">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-neutral-500 mb-1">מודל קול</label>
+            <select
+              value={selectedModel} onChange={e => setSelectedModel(e.target.value)}
+              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
+            >
+              {ttsModels.length > 0 ? ttsModels.map(m => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              )) : (
+                <>
+                  <option value="openai-nova">OpenAI Nova (נשי, חם)</option>
+                  <option value="openai-alloy">OpenAI Alloy (ניטרלי)</option>
+                  <option value="google-chirp3-achird">Google Chirp3 Achird (גברי)</option>
+                </>
+              )}
+            </select>
+          </div>
+          <button
+            onClick={saveModelChoice} disabled={savingModel}
+            className="flex items-center gap-2 px-4 py-2 bg-neutral-900 text-white text-xs rounded-lg disabled:opacity-50 hover:bg-neutral-800"
+          >
+            {savingModel ? <Loader2 className="w-3 h-3 animate-spin" /> : <Save className="w-3 h-3" />}
+            שמור כברירת מחדל
+          </button>
+        </div>
+
+        <div className="flex gap-2 items-end">
+          <div className="flex-1">
+            <label className="block text-xs font-medium text-neutral-500 mb-1">משפט לבדיקה</label>
+            <input
+              type="text" value={testSentence} onChange={e => setTestSentence(e.target.value)}
+              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200"
+              dir="rtl"
+            />
+          </div>
+          <button
+            onClick={() => playTTS(testSentence, "test-model")}
+            disabled={!testSentence.trim()}
+            className={`px-4 py-2 rounded-lg text-sm border font-medium ${playingId === "test-model" ? "bg-blue-50 border-blue-300 text-blue-700" : "border-neutral-200 hover:bg-neutral-50"}`}
+          >
+            {playingId === "test-model" ? "⏸ מנגן..." : "🔊 השמע"}
+          </button>
+        </div>
+      </div>
+
+      {/* Pronunciation Fixes */}
+      <div className="bg-white border border-neutral-200 rounded-xl p-5">
+        <h3 className="text-sm font-semibold text-neutral-900 mb-1">תיקון הגייה — מילון</h3>
+        <p className="text-xs text-neutral-500 mb-4">
+          הוסף מילים שה-TTS לא מבטא נכון. כתוב את המילה המקורית ואת הכתיב הפונטי המתוקן.
+          לחץ 🔊 לשמוע איך כל גרסה נשמעת. השינויים מוחלים אוטומטית על הפונבוט.
         </p>
 
         {/* Existing fixes */}

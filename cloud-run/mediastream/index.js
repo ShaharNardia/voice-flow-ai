@@ -55,30 +55,88 @@ const GOOGLE_TTS_VOICES = {
 const audioCache = new Map(); // id → {buffer, contentType, createdAt}
 const AUDIO_CACHE_TTL = 120000; // 2 minutes
 
-// On-demand TTS endpoint — used by Firebase voice_service for greeting with same voice
+// TTS Models registry — available for selection via Admin Panel
+const TTS_MODELS = {
+  "openai-nova":    {provider: "openai", voice: "nova",    label: "OpenAI Nova (נשי, חם)"},
+  "openai-alloy":   {provider: "openai", voice: "alloy",   label: "OpenAI Alloy (ניטרלי)"},
+  "openai-shimmer": {provider: "openai", voice: "shimmer", label: "OpenAI Shimmer (נשי, רך)"},
+  "openai-echo":    {provider: "openai", voice: "echo",    label: "OpenAI Echo (גברי)"},
+  "openai-onyx":    {provider: "openai", voice: "onyx",    label: "OpenAI Onyx (גברי עמוק)"},
+  "google-chirp3-achird":  {provider: "google", voice: "he-IL-Chirp3-HD-Achird",  label: "Google Chirp3 Achird (גברי)"},
+  "google-chirp3-aoede":   {provider: "google", voice: "he-IL-Chirp3-HD-Aoede",   label: "Google Chirp3 Aoede (נשי)"},
+  "google-chirp3-kore":    {provider: "google", voice: "he-IL-Chirp3-HD-Kore",    label: "Google Chirp3 Kore (נשי)"},
+  "google-chirp3-puck":    {provider: "google", voice: "he-IL-Chirp3-HD-Puck",    label: "Google Chirp3 Puck (גברי)"},
+  "google-wavenet-b":      {provider: "google", voice: "he-IL-Wavenet-B",         label: "Google Wavenet B (גברי)"},
+  "google-wavenet-a":      {provider: "google", voice: "he-IL-Wavenet-A",         label: "Google Wavenet A (נשי)"},
+};
+
+// Default Hebrew TTS model (can be overridden from Firestore config)
+let hebrewTtsModel = "openai-nova";
+
+// Load preferred TTS model from Firestore
+async function loadTtsModelPreference() {
+  try {
+    const projectId = process.env.GCLOUD_PROJECT || "voiceflow-ai-202509231639";
+    const url = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/config/tts`;
+    const resp = await new Promise((resolve) => {
+      require("https").get(url, {timeout: 3000}, (res) => {
+        let d = "";
+        res.on("data", c => d += c);
+        res.on("end", () => { try { resolve(JSON.parse(d)); } catch { resolve(null); } });
+      }).on("error", () => resolve(null));
+    });
+    if (resp?.fields?.hebrewModel?.stringValue) {
+      hebrewTtsModel = resp.fields.hebrewModel.stringValue;
+      console.log(`[TTS] Hebrew model from Firestore: ${hebrewTtsModel}`);
+    }
+  } catch {}
+}
+loadTtsModelPreference();
+
+// Generate audio for ANY model
+async function generateTTS(text, modelId) {
+  const model = TTS_MODELS[modelId];
+  if (!model) throw new Error(`Unknown TTS model: ${modelId}`);
+
+  if (model.provider === "openai") {
+    const OPENAI_KEY = process.env.OPENAI_API_KEY;
+    const body = JSON.stringify({model: "tts-1", input: text, voice: model.voice, response_format: "mp3"});
+    return new Promise((resolve, reject) => {
+      const r = require("https").request({
+        hostname: "api.openai.com", path: "/v1/audio/speech", method: "POST",
+        headers: {"Authorization": "Bearer " + OPENAI_KEY, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body)},
+        timeout: 8000,
+      }, (resp) => {
+        const chunks = [];
+        resp.on("data", c => chunks.push(c));
+        resp.on("end", () => resp.statusCode === 200 ? resolve(Buffer.concat(chunks)) : reject(new Error(`OpenAI ${resp.statusCode}`)));
+      });
+      r.on("error", reject);
+      r.on("timeout", () => { r.destroy(); reject(new Error("timeout")); });
+      r.write(body); r.end();
+    });
+  } else {
+    // Google Cloud TTS
+    const [response] = await googleTtsClient.synthesizeSpeech({
+      input: {text},
+      voice: {languageCode: "he-IL", name: model.voice},
+      audioConfig: {audioEncoding: "MP3", sampleRateHertz: 24000, speakingRate: 1.05, pitch: 0, effectsProfileId: ["telephony-class-application"]},
+    });
+    return response.audioContent;
+  }
+}
+
+// On-demand TTS endpoint — supports model selection
 app.get("/tts", async (req, res) => {
   const text = req.query.text;
   const lang = req.query.lang || "he";
+  const modelId = req.query.model || (lang === "he" ? hebrewTtsModel : null);
   if (!text) return res.status(400).send("text required");
   try {
-    if (lang === "he") {
-      // Hebrew: OpenAI TTS (Alloy) — best pronunciation
-      const OPENAI_KEY = process.env.OPENAI_API_KEY;
-      const body = JSON.stringify({model: "tts-1", input: text, voice: "nova", response_format: "mp3"});
-      const audioBuffer = await new Promise((resolve, reject) => {
-        const r = require("https").request({
-          hostname: "api.openai.com", path: "/v1/audio/speech", method: "POST",
-          headers: {"Authorization": "Bearer " + OPENAI_KEY, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body)},
-        }, (resp) => {
-          const chunks = [];
-          resp.on("data", c => chunks.push(c));
-          resp.on("end", () => resp.statusCode === 200 ? resolve(Buffer.concat(chunks)) : reject(new Error(`${resp.statusCode}`)));
-        });
-        r.on("error", reject);
-        r.write(body); r.end();
-      });
+    if (modelId && TTS_MODELS[modelId]) {
+      const audioBuffer = await generateTTS(text, modelId);
       res.set("Content-Type", "audio/mpeg");
-      res.set("Cache-Control", "public, max-age=3600");
+      res.set("Cache-Control", "no-cache");
       res.send(audioBuffer);
     } else {
       // English/other: Google Cloud TTS
@@ -89,13 +147,46 @@ app.get("/tts", async (req, res) => {
         audioConfig: {audioEncoding: "MP3", speakingRate: 1.05, pitch: 0, effectsProfileId: ["telephony-class-application"]},
       });
       res.set("Content-Type", "audio/mpeg");
-      res.set("Cache-Control", "public, max-age=3600");
+      res.set("Cache-Control", "no-cache");
       res.send(response.audioContent);
     }
   } catch (err) {
     console.error("[TTS endpoint]", err.message);
     res.status(500).send("TTS failed");
   }
+});
+
+// List available TTS models
+app.get("/tts-models", (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const models = Object.entries(TTS_MODELS).map(([id, m]) => ({id, label: m.label, provider: m.provider}));
+  res.json({models, current: hebrewTtsModel});
+});
+
+// Save TTS model preference to Firestore
+app.post("/tts-models", express.json(), async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const modelId = req.body?.model;
+  if (!modelId || !TTS_MODELS[modelId]) return res.status(400).json({error: "Invalid model"});
+  try {
+    const {Firestore} = require("@google-cloud/firestore");
+    const db = new Firestore({projectId: process.env.GCLOUD_PROJECT || "voiceflow-ai-202509231639"});
+    await db.collection("config").doc("tts").set({hebrewModel: modelId, updatedAt: new Date().toISOString()}, {merge: true});
+    hebrewTtsModel = modelId;
+    console.log(`[TTS] Hebrew model set to: ${modelId}`);
+    res.json({status: "ok", model: modelId});
+  } catch (err) {
+    console.error("[TTS] Failed to save model:", err.message);
+    res.status(500).json({error: err.message});
+  }
+});
+
+// CORS preflight for tts-models POST
+app.options("/tts-models", (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type");
+  res.status(204).send("");
 });
 
 // Serve generated audio for Twilio <Play>
@@ -494,16 +585,23 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
     return r.toString();
   };
 
-  // Try OpenAI TTS (Hebrew) or Google TTS (English), fallback to Twilio <Say>
+  // Try selected TTS model (Hebrew) or Google TTS (English), fallback to Twilio <Say>
   const ttsAndSend = async (text, reason = "response", hangup = false) => {
     // Apply pronunciation fixes for Hebrew (from Firestore + hardcoded)
     const pronFixes = deepgramLang.startsWith("he") ? await loadPronunciationFixes() : [];
     const ttsText = deepgramLang.startsWith("he") ? applyPronunciationFixes(text, pronFixes) : text;
-    // Hebrew → OpenAI TTS (Nova voice, best pronunciation), English → Google Cloud TTS
+    // Hebrew → selected TTS model, English → Google Cloud TTS
     try {
-      const audioUrl = deepgramLang.startsWith("he")
-        ? await openaiTTS(ttsText, "nova")
-        : await googleTTS(text, deepgramLang);
+      let audioUrl;
+      if (deepgramLang.startsWith("he") && TTS_MODELS[hebrewTtsModel]) {
+        const audioBuf = await generateTTS(ttsText, hebrewTtsModel);
+        const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+        audioCache.set(id, {buffer: audioBuf, contentType: "audio/mpeg", createdAt: Date.now()});
+        const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.us-central1.run.app";
+        audioUrl = `${cloudRunUrl}/audio/${id}`;
+      } else {
+        audioUrl = await googleTTS(text, deepgramLang);
+      }
       const twiml = hangup ? makePlayHangupTwiML(audioUrl) : makePlayTwiML(audioUrl);
       return await sendTwiML(twiml, reason);
     } catch (err) {
