@@ -1113,7 +1113,7 @@ This applies to ALL languages. Never use digits in your response.`;
     smart_format: true,
     punctuate: true,
     interim_results: true,
-    endpointing: 200,
+    endpointing: 100,
   };
   // utterance_end_ms causes 400 errors on this Deepgram plan — disabled for all models
   console.log(`[${callSessionId}] Deepgram config: model=${dgOpts.model} lang=${dgOpts.language}`);

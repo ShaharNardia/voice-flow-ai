@@ -3087,14 +3087,16 @@ exports.twilioRecordingCallback = onRequest(async (req, res) => {
       return;
     }
 
-    console.log(`[RecordingCallback] session=${callSessionId} status=${recordingStatus} duration=${recordingDuration}s url=${recordingUrl}`);
+    console.log(`[RecordingCallback] session=${callSessionId} status=${recordingStatus} duration=${recordingDuration}s sid=${recordingSid}`);
 
     if (recordingStatus === "completed" && recordingDuration > 0) {
       const db = getFirestore();
+      // Store proxy URL instead of direct Twilio URL (Twilio URLs require auth)
+      const proxyUrl = `${BASE_FUNCTION_URL}/getRecording?sid=${recordingSid}`;
       await db.collection("call_sessions").doc(callSessionId).update({
         recordings: FieldValue.arrayUnion({
           sid: recordingSid,
-          url: `${recordingUrl}.mp3`,
+          url: proxyUrl,
           duration: recordingDuration,
           createdAt: new Date().toISOString(),
         }),
@@ -3106,6 +3108,29 @@ exports.twilioRecordingCallback = onRequest(async (req, res) => {
     console.error("[RecordingCallback] Error:", err.message);
   }
   res.status(200).send("OK");
+});
+
+// ── Recording proxy — streams Twilio recording without exposing auth ──
+exports.getRecording = onRequest(corsOptions, async (req, res) => {
+  try {
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+    const sid = req.query.sid;
+    if (!sid || !/^RE[a-f0-9]{32}$/.test(sid)) { res.status(400).send("Invalid sid"); return; }
+    // Recording SID is unguessable (32-char hex) — no extra auth needed for playback
+
+    const twilioUrl = `https://api.twilio.com/2010-04-01/Accounts/${TWILIO_ACCOUNT_SID}/Recordings/${sid}.mp3`;
+    const audioResponse = await axios.get(twilioUrl, {
+      auth: {username: TWILIO_ACCOUNT_SID, password: TWILIO_AUTH_TOKEN},
+      responseType: "arraybuffer",
+      timeout: 15000,
+    });
+    res.set("Content-Type", "audio/mpeg");
+    res.set("Cache-Control", "private, max-age=3600");
+    res.send(Buffer.from(audioResponse.data));
+  } catch (err) {
+    console.error("[getRecording] Error:", err.message);
+    res.status(500).send("Failed to fetch recording");
+  }
 });
 
 exports.twilioStatusCallback = onRequest(async (req, res) => {
