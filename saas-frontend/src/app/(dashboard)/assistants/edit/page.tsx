@@ -7,7 +7,7 @@ import { assistantsGet, assistantsUpdate, knowledgeListFiles, knowledgeProcessFi
 import { storage, auth } from "@/lib/firebase";
 import { ref, uploadBytes } from "firebase/storage";
 import Link from "next/link";
-import { ArrowLeft, BookOpen, FileText, Link2, Loader2, RefreshCw, Save, Settings, Trash2, Type, Upload } from "lucide-react";
+import { ArrowLeft, BookOpen, FileText, Link2, Loader2, Play, RefreshCw, Save, Settings, Square, Trash2, Type, Upload, Volume2 } from "lucide-react";
 
 const VOICES_BY_LANG: Record<string, { value: string; label: string }[]> = {
   "en-US": [
@@ -34,6 +34,13 @@ const VOICES_BY_LANG: Record<string, { value: string; label: string }[]> = {
     { value: "Polly.Russell", label: "Polly Russell (Male)" },
   ],
   "he-IL": [
+    { value: "openai:nova", label: "OpenAI Nova (Female, Recommended)" },
+    { value: "openai:alloy", label: "OpenAI Alloy (Neutral)" },
+    { value: "openai:shimmer", label: "OpenAI Shimmer (Female)" },
+    { value: "openai:echo", label: "OpenAI Echo (Male)" },
+    { value: "openai:onyx", label: "OpenAI Onyx (Male, Deep)" },
+    { value: "Google.he-IL-Chirp3-HD-Achird", label: "Google Chirp3 Achird (Male)" },
+    { value: "Google.he-IL-Chirp3-HD-Kore", label: "Google Chirp3 Kore (Female)" },
     { value: "Google.he-IL-Wavenet-D", label: "Google Wavenet-D (Male)" },
     { value: "Google.he-IL-Wavenet-A", label: "Google Wavenet-A (Female)" },
     { value: "Google.he-IL-Wavenet-B", label: "Google Wavenet-B (Male)" },
@@ -71,6 +78,35 @@ function AssistantEdit() {
   const [kbError, setKbError] = useState("");
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // TTS preview state
+  const [previewPlaying, setPreviewPlaying] = useState(false);
+  const [previewText, setPreviewText] = useState("");
+  const previewAudioRef = useRef<HTMLAudioElement | null>(null);
+
+  const playPreview = async (text?: string) => {
+    if (previewPlaying && previewAudioRef.current) {
+      previewAudioRef.current.pause();
+      previewAudioRef.current = null;
+      setPreviewPlaying(false);
+      return;
+    }
+    const sampleText = text || previewText || assistant?.firstMessage || "שלום! אני הבוט של החברה. איך אוכל לעזור לך היום?";
+    const voice = assistant?.voice || "openai:nova";
+    setPreviewPlaying(true);
+    try {
+      const CLOUD_RUN = "https://voiceflow-mediastream-900818829902.us-central1.run.app";
+      const res = await fetch(`${CLOUD_RUN}/tts-preview?text=${encodeURIComponent(sampleText)}&voice=${encodeURIComponent(voice)}`);
+      if (!res.ok) throw new Error("TTS failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      previewAudioRef.current = audio;
+      audio.onended = () => { setPreviewPlaying(false); URL.revokeObjectURL(url); };
+      audio.onerror = () => { setPreviewPlaying(false); URL.revokeObjectURL(url); };
+      await audio.play();
+    } catch { setPreviewPlaying(false); }
+  };
 
   // URL knowledge source state
   const [urlInput, setUrlInput] = useState("");
@@ -361,6 +397,35 @@ function AssistantEdit() {
                   ))}
                 </select>
               </div>
+            </div>
+
+            {/* Voice Preview */}
+            <div className="bg-neutral-50 border border-neutral-200 rounded-lg p-4 space-y-3">
+              <div className="flex items-center gap-2">
+                <Volume2 className="w-4 h-4 text-[#F22F46]" />
+                <span className="text-xs font-medium text-neutral-600 uppercase tracking-wide">Voice Preview</span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={previewText}
+                  onChange={(e) => setPreviewText(e.target.value)}
+                  placeholder={assistant.firstMessage || "שלום! אני הבוט של החברה. איך אוכל לעזור לך היום?"}
+                  className="flex-1 border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F22F46]"
+                />
+                <button
+                  onClick={() => playPreview()}
+                  className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
+                    previewPlaying
+                      ? "bg-neutral-800 text-white"
+                      : "bg-[#F22F46] text-white hover:bg-[#d41e35]"
+                  }`}
+                >
+                  {previewPlaying ? <Square className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                  {previewPlaying ? "Stop" : "Play"}
+                </button>
+              </div>
+              <p className="text-xs text-neutral-400">Type custom text or leave empty to preview the opening greeting</p>
             </div>
 
             {/* Opening Greeting */}

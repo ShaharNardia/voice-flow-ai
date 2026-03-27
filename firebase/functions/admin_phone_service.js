@@ -13,6 +13,21 @@ const {extractUidFromRequest} = require("./security_utils");
 const twilio = require("twilio");
 const axios = require("axios");
 
+/** Detect country from phone E.164 prefix (Twilio isoCountry is sometimes wrong) */
+function detectCountryFromNumber(phoneNumber, twilioCountry) {
+  if (phoneNumber.startsWith("+972")) return "IL";
+  if (phoneNumber.startsWith("+44"))  return "GB";
+  if (phoneNumber.startsWith("+49"))  return "DE";
+  if (phoneNumber.startsWith("+33"))  return "FR";
+  if (phoneNumber.startsWith("+61"))  return "AU";
+  if (phoneNumber.startsWith("+55"))  return "BR";
+  if (phoneNumber.startsWith("+91"))  return "IN";
+  if (phoneNumber.startsWith("+81"))  return "JP";
+  if (phoneNumber.startsWith("+86"))  return "CN";
+  if (phoneNumber.startsWith("+1"))   return "US";
+  return twilioCountry || "US";
+}
+
 // ── CORS ─────────────────────────────────────────────────────────────────────
 const corsOptions = {
   cors: [
@@ -127,7 +142,7 @@ exports.adminListAllPhoneNumbers = onRequest(corsOptions, async (req, res) => {
         sid: tn.sid,
         phoneNumber: tn.phoneNumber,
         friendlyName: tn.friendlyName || tn.phoneNumber,
-        country: tn.isoCountry || "US",
+        country: detectCountryFromNumber(tn.phoneNumber, tn.isoCountry),
         voiceUrl: tn.voiceUrl || null,
         smsUrl: tn.smsUrl || null,
         ownerId: info.ownerId || null,

@@ -74,13 +74,26 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ── Lead collection ───────────────────────────────────────────
-    // Company members can read/write leads belonging to their company.
+    // ── Lead collection (both legacy "Lead" and new "leads") ──────
     match /Lead/{leadId} {
       allow create: if isAuthenticated();
       allow read:   if isAuthenticated();
       allow update: if isAuthenticated();
       allow delete: if isAdmin();
+    }
+    match /leads/{leadId} {
+      allow create: if isAuthenticated();
+      allow read:   if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
+    }
+
+    // ── Campaigns collection ──────────────────────────────────────
+    match /campaigns/{campaignId} {
+      allow create: if isAuthenticated();
+      allow read:   if isAuthenticated();
+      allow update: if isAuthenticated();
+      allow delete: if isAuthenticated();
     }
 
     // ── Call / CallLogs / CallSessions ─────────────────────────────

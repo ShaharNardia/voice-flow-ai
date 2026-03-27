@@ -181,6 +181,51 @@ app.post("/tts-models", express.json(), async (req, res) => {
   }
 });
 
+// TTS preview — accepts voice in format "openai:nova" or "Google.he-IL-Wavenet-D"
+app.get("/tts-preview", async (req, res) => {
+  res.set("Access-Control-Allow-Origin", "*");
+  const text = req.query.text;
+  const voice = req.query.voice || "openai:nova";
+  if (!text) return res.status(400).send("text required");
+  try {
+    if (voice.startsWith("openai:")) {
+      // OpenAI TTS
+      const openaiVoice = voice.split(":")[1] || "nova";
+      const audioBuffer = await new Promise((resolve, reject) => {
+        const body = JSON.stringify({model: "tts-1", input: text, voice: openaiVoice, response_format: "mp3"});
+        const r = require("https").request({
+          hostname: "api.openai.com", path: "/v1/audio/speech", method: "POST",
+          headers: {"Authorization": "Bearer " + process.env.OPENAI_API_KEY, "Content-Type": "application/json", "Content-Length": Buffer.byteLength(body)},
+        }, (resp) => {
+          const chunks = [];
+          resp.on("data", c => chunks.push(c));
+          resp.on("end", () => resp.statusCode === 200 ? resolve(Buffer.concat(chunks)) : reject(new Error(`OpenAI ${resp.statusCode}`)));
+        });
+        r.on("error", reject);
+        r.write(body); r.end();
+      });
+      res.set("Content-Type", "audio/mpeg");
+      res.send(audioBuffer);
+    } else if (voice.startsWith("Google.")) {
+      // Google Cloud TTS — voice format: "Google.he-IL-Wavenet-D"
+      const voiceName = voice.replace("Google.", "");
+      const langCode = voiceName.substring(0, 5); // "he-IL" or "en-US"
+      const [response] = await googleTtsClient.synthesizeSpeech({
+        input: {text},
+        voice: {languageCode: langCode, name: voiceName},
+        audioConfig: {audioEncoding: "MP3", sampleRateHertz: 24000},
+      });
+      res.set("Content-Type", "audio/mpeg");
+      res.send(response.audioContent);
+    } else {
+      res.status(400).send("Unknown voice format");
+    }
+  } catch (err) {
+    console.error("[TTS-preview]", err.message);
+    res.status(500).send("TTS failed");
+  }
+});
+
 // CORS preflight for tts-models POST
 app.options("/tts-models", (req, res) => {
   res.set("Access-Control-Allow-Origin", "*");
