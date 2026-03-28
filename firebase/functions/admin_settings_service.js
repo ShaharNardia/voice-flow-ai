@@ -571,3 +571,186 @@ exports.getPronunciationFixes = onRequest(corsOptions, async (req, res) => {
     res.status(500).json({fixes: []});
   }
 });
+
+// ══════════════════════════════════════════════════════════════════
+// ── Cost Tracking & Customer Pricing ─────────────────────────────
+// ══════════════════════════════════════════════════════════════════
+
+const DEFAULT_RATE_CARD = {
+  twilio: {costPerMinute: 0.013},
+  openai: {costPerPromptToken1K: 0.00015, costPerCompletionToken1K: 0.0006, costPerTtsChar1K: 0.015},
+  deepgram: {costPerMinute: 0.0043},
+  googleTts: {costPerChar1K: 0.016},
+  currency: "USD",
+};
+
+const DEFAULT_CUSTOMER_PRICING = {
+  defaultModel: "markup",
+  defaultMarkupPercent: 30,
+  defaultFixedPerMinute: 0.50,
+  currency: "USD",
+  overrides: {},
+};
+
+// ── Rate Card CRUD ───────────────────────────────────────────────
+
+exports.adminGetRateCard = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const db = getFirestore();
+    const doc = await db.collection("config").doc("rateCard").get();
+    res.status(200).json(doc.exists ? {...DEFAULT_RATE_CARD, ...doc.data()} : DEFAULT_RATE_CARD);
+  } catch (error) {
+    logger.error("adminGetRateCard error", error);
+    res.status(500).json({status: "error", message: error.message});
+  }
+});
+
+exports.adminUpdateRateCard = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({status: "error", message: "POST only"}); return; }
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const rc = body.rateCard || body;
+    // Validate numeric fields
+    const validate = (obj, path) => {
+      for (const [k, v] of Object.entries(obj)) {
+        if (typeof v === "object" && v !== null) validate(v, `${path}.${k}`);
+        else if (typeof v === "number" && (v < 0 || v > 100)) throw new Error(`${path}.${k} out of range`);
+      }
+    };
+    validate(rc, "rateCard");
+    const db = getFirestore();
+    await db.collection("config").doc("rateCard").set({...rc, updatedAt: FieldValue.serverTimestamp(), updatedBy: uid}, {merge: true});
+    res.status(200).json({status: "ok"});
+  } catch (error) {
+    logger.error("adminUpdateRateCard error", error);
+    res.status(500).json({status: "error", message: error.message});
+  }
+});
+
+// ── Customer Pricing CRUD ────────────────────────────────────────
+
+exports.adminGetCustomerPricing = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const db = getFirestore();
+    const doc = await db.collection("config").doc("customerPricing").get();
+    res.status(200).json(doc.exists ? {...DEFAULT_CUSTOMER_PRICING, ...doc.data()} : DEFAULT_CUSTOMER_PRICING);
+  } catch (error) {
+    logger.error("adminGetCustomerPricing error", error);
+    res.status(500).json({status: "error", message: error.message});
+  }
+});
+
+exports.adminUpdateCustomerPricing = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({status: "error", message: "POST only"}); return; }
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const data = {};
+    if (body.defaultModel && ["markup", "fixedPerMinute"].includes(body.defaultModel)) data.defaultModel = body.defaultModel;
+    if (typeof body.defaultMarkupPercent === "number") {
+      if (body.defaultMarkupPercent < 0 || body.defaultMarkupPercent > 500) throw new Error("Markup must be 0-500%");
+      data.defaultMarkupPercent = body.defaultMarkupPercent;
+    }
+    if (typeof body.defaultFixedPerMinute === "number") {
+      if (body.defaultFixedPerMinute < 0 || body.defaultFixedPerMinute > 100) throw new Error("Fixed rate must be 0-100");
+      data.defaultFixedPerMinute = body.defaultFixedPerMinute;
+    }
+    if (body.currency) data.currency = body.currency;
+    if (body.overrides && typeof body.overrides === "object") data.overrides = body.overrides;
+    data.updatedAt = FieldValue.serverTimestamp();
+    data.updatedBy = uid;
+    const db = getFirestore();
+    await db.collection("config").doc("customerPricing").set(data, {merge: true});
+    res.status(200).json({status: "ok"});
+  } catch (error) {
+    logger.error("adminUpdateCustomerPricing error", error);
+    res.status(500).json({status: "error", message: error.message});
+  }
+});
+
+// ── Cost Dashboard Query ─────────────────────────────────────────
+
+exports.adminGetCostDashboard = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  const uid = await requireAdmin(req, res);
+  if (!uid) return;
+  try {
+    const db = getFirestore();
+    const from = req.query.from || new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString();
+    const to = req.query.to || new Date().toISOString();
+    const userId = req.query.userId || null;
+
+    let q = db.collection("call_sessions")
+      .where("createdAt", ">=", new Date(from))
+      .where("createdAt", "<=", new Date(to));
+    if (userId) q = q.where("ownerId", "==", userId);
+
+    const snap = await q.get();
+    const byService = {twilio: 0, llm: 0, stt: 0, tts: 0};
+    const byUserMap = {};
+    let totalCost = 0, totalRevenue = 0, totalMinutes = 0;
+    const calls = [];
+
+    snap.forEach((doc) => {
+      const d = doc.data();
+      const c = d.costs || {};
+      const minutes = (d.duration || 0) / 60;
+      totalMinutes += minutes;
+
+      if (c.twilio) byService.twilio += c.twilio.cost || 0;
+      if (c.llm) byService.llm += c.llm.cost || 0;
+      if (c.stt) byService.stt += c.stt.cost || 0;
+      if (c.tts) byService.tts += c.tts.cost || 0;
+      totalCost += c.totalCost || 0;
+      totalRevenue += c.customerCharge || 0;
+
+      const oid = d.ownerId || "unknown";
+      if (!byUserMap[oid]) byUserMap[oid] = {uid: oid, email: d.ownerEmail || oid, calls: 0, minutes: 0, cost: 0, revenue: 0};
+      byUserMap[oid].calls += 1;
+      byUserMap[oid].minutes += minutes;
+      byUserMap[oid].cost += c.totalCost || 0;
+      byUserMap[oid].revenue += c.customerCharge || 0;
+
+      calls.push({id: doc.id, createdAt: d.createdAt?.toDate?.()?.toISOString() || "", ownerId: oid, duration: d.duration || 0, costs: c});
+    });
+
+    res.status(200).json({
+      summary: {totalCost: +totalCost.toFixed(4), totalRevenue: +totalRevenue.toFixed(4), profit: +(totalRevenue - totalCost).toFixed(4), totalCalls: snap.size, totalMinutes: +totalMinutes.toFixed(1)},
+      byService: {twilio: +byService.twilio.toFixed(4), llm: +byService.llm.toFixed(4), stt: +byService.stt.toFixed(4), tts: +byService.tts.toFixed(4)},
+      byUser: Object.values(byUserMap).map((u) => ({...u, minutes: +u.minutes.toFixed(1), cost: +u.cost.toFixed(4), revenue: +u.revenue.toFixed(4)})),
+      calls: calls.slice(0, 200),
+    });
+  } catch (error) {
+    logger.error("adminGetCostDashboard error", error);
+    res.status(500).json({status: "error", message: error.message});
+  }
+});
+
+// Public endpoint for Cloud Run to fetch rate card + customer pricing
+exports.getCostConfig = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  try {
+    const db = getFirestore();
+    const [rcDoc, cpDoc] = await Promise.all([
+      db.collection("config").doc("rateCard").get(),
+      db.collection("config").doc("customerPricing").get(),
+    ]);
+    res.status(200).json({
+      rateCard: rcDoc.exists ? {...DEFAULT_RATE_CARD, ...rcDoc.data()} : DEFAULT_RATE_CARD,
+      customerPricing: cpDoc.exists ? {...DEFAULT_CUSTOMER_PRICING, ...cpDoc.data()} : DEFAULT_CUSTOMER_PRICING,
+    });
+  } catch (error) {
+    res.status(500).json({rateCard: DEFAULT_RATE_CARD, customerPricing: DEFAULT_CUSTOMER_PRICING});
+  }
+});

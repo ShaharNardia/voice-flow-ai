@@ -14,18 +14,21 @@ import {
   adminGetKeysMeta, adminUpdateKeyMeta,
   adminListAllPhoneNumbers, adminReleasePhoneNumber, adminReassignPhoneNumber,
   adminCheckIntegrations,
+  adminGetRateCard, adminUpdateRateCard,
+  adminGetCustomerPricing, adminUpdateCustomerPricing,
+  adminGetCostDashboard,
   type AdminUser, type Assistant, type AdminCallSession,
   type AdminSubscriptionUser, type PlanTier,
   type AllPlanConfigs, type PlanConfig,
   type AllKeysMeta, type SystemSettings,
-  type BillingConfig,
+  type BillingConfig, type RateCard, type CustomerPricingConfig, type CostDashboardResult,
   type AdminPhoneNumber, type AllIntegrationResults, type IntegrationResult,
 } from "@/lib/firebase-functions";
 import {
   Loader2, Users, ShieldCheck, ShieldOff, Trash2, KeyRound, Eye,
   UserPlus, X, Copy, Check, Phone, Bot, CreditCard, BarChart3,
   Key, Settings, ExternalLink, AlertTriangle, Save, RotateCcw,
-  CheckCircle2, XCircle, Info, RefreshCw, Globe, Wifi, WifiOff,
+  CheckCircle2, XCircle, Info, RefreshCw, Globe, Wifi, WifiOff, DollarSign, TrendingUp,
 } from "lucide-react";
 
 // ── Error toast context ───────────────────────────────────────────────────────
@@ -65,6 +68,7 @@ const TABS = [
   { id: "settings",      label: "System Settings",      icon: Settings },
   { id: "phone",         label: "Phone & Integrations", icon: Phone },
   { id: "pronunciation", label: "Pronunciation",        icon: Globe },
+  { id: "costs",         label: "Costs & Revenue",      icon: DollarSign },
 ] as const;
 
 type TabId = typeof TABS[number]["id"];
@@ -1888,6 +1892,222 @@ function PhoneIntegrationsTab({ wasLoaded }: { wasLoaded: boolean }) {
   );
 }
 
+// ── Costs & Revenue Tab ───────────────────────────────────────────────────────
+
+function CostsTab({ wasLoaded }: { wasLoaded: boolean }) {
+  const showError = useErrorToast();
+  const [loading, setLoading] = useState(false);
+  const [dashboard, setDashboard] = useState<CostDashboardResult | null>(null);
+  const [period, setPeriod] = useState<"today" | "week" | "month">("month");
+  const [rateCard, setRateCard] = useState<RateCard | null>(null);
+  const [rcEditing, setRcEditing] = useState(false);
+  const [rcSaving, setRcSaving] = useState(false);
+  const [pricing, setPricing] = useState<CustomerPricingConfig | null>(null);
+  const [pricingSaving, setPricingSaving] = useState(false);
+
+  const getDateRange = useCallback((p: string) => {
+    const now = new Date();
+    const to = now.toISOString();
+    if (p === "today") return { from: new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString(), to };
+    if (p === "week") { const d = new Date(now); d.setDate(d.getDate() - 7); return { from: d.toISOString(), to }; }
+    return { from: new Date(now.getFullYear(), now.getMonth(), 1).toISOString(), to };
+  }, []);
+
+  const loadDashboard = useCallback(async (p: string) => {
+    setLoading(true);
+    try {
+      const range = getDateRange(p);
+      const [dash, rc, cp] = await Promise.all([
+        adminGetCostDashboard(range),
+        adminGetRateCard(),
+        adminGetCustomerPricing(),
+      ]);
+      setDashboard(dash);
+      setRateCard(rc);
+      setPricing(cp);
+    } catch (e) { showError(e instanceof Error ? e.message : "Failed to load costs"); }
+    finally { setLoading(false); }
+  }, [getDateRange, showError]);
+
+  useEffect(() => { if (wasLoaded) loadDashboard(period); }, [wasLoaded]); // eslint-disable-line
+
+  const handlePeriod = (p: "today" | "week" | "month") => { setPeriod(p); loadDashboard(p); };
+
+  const saveRateCard = async () => {
+    if (!rateCard) return;
+    setRcSaving(true);
+    try { await adminUpdateRateCard({ rateCard }); setRcEditing(false); } catch (e) { showError(e instanceof Error ? e.message : "Failed"); }
+    finally { setRcSaving(false); }
+  };
+
+  const savePricing = async () => {
+    if (!pricing) return;
+    setPricingSaving(true);
+    try { await adminUpdateCustomerPricing(pricing); } catch (e) { showError(e instanceof Error ? e.message : "Failed"); }
+    finally { setPricingSaving(false); }
+  };
+
+  const s = dashboard?.summary;
+  const bs = dashboard?.byService;
+
+  return (
+    <div className="space-y-6">
+      {/* Period selector */}
+      <div className="flex items-center gap-3">
+        <h2 className="text-lg font-semibold text-neutral-900">Costs & Revenue</h2>
+        <div className="flex gap-1 bg-neutral-100 rounded-lg p-0.5">
+          {(["today", "week", "month"] as const).map(p => (
+            <button key={p} onClick={() => handlePeriod(p)}
+              className={`px-3 py-1 text-xs font-medium rounded-md transition-colors ${period === p ? "bg-white shadow text-neutral-900" : "text-neutral-500 hover:text-neutral-700"}`}
+            >{p === "today" ? "Today" : p === "week" ? "This Week" : "This Month"}</button>
+          ))}
+        </div>
+        <button onClick={() => loadDashboard(period)} className="ml-auto text-neutral-400 hover:text-neutral-600"><RefreshCw className="w-4 h-4" /></button>
+      </div>
+
+      {loading ? <div className="text-center py-12 text-neutral-400 text-sm">Loading costs...</div> : s && (
+        <>
+          {/* Summary cards */}
+          <div className="grid grid-cols-4 gap-4">
+            {[
+              { label: "Total Cost", value: `$${s.totalCost.toFixed(2)}`, color: "text-red-600" },
+              { label: "Revenue", value: `$${s.totalRevenue.toFixed(2)}`, color: "text-green-600" },
+              { label: "Profit", value: `$${s.profit.toFixed(2)}`, color: s.profit >= 0 ? "text-green-600" : "text-red-600" },
+              { label: "Calls", value: `${s.totalCalls} (${s.totalMinutes.toFixed(0)} min)`, color: "text-neutral-800" },
+            ].map(c => (
+              <div key={c.label} className="bg-white border border-neutral-200 rounded-xl p-4">
+                <p className="text-xs text-neutral-500 uppercase tracking-wide">{c.label}</p>
+                <p className={`text-xl font-bold mt-1 ${c.color}`}>{c.value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Cost by service */}
+          {bs && (
+            <div className="bg-white border border-neutral-200 rounded-xl p-5">
+              <h3 className="text-sm font-semibold text-neutral-700 mb-3">Cost by Service</h3>
+              <div className="grid grid-cols-4 gap-3">
+                {[
+                  { name: "Twilio (Calls)", cost: bs.twilio, icon: "📞" },
+                  { name: "OpenAI (LLM)", cost: bs.llm, icon: "🧠" },
+                  { name: "Deepgram (STT)", cost: bs.stt, icon: "🎙️" },
+                  { name: "TTS", cost: bs.tts, icon: "🔊" },
+                ].map(svc => {
+                  const pct = s.totalCost > 0 ? (svc.cost / s.totalCost * 100).toFixed(0) : "0";
+                  return (
+                    <div key={svc.name} className="bg-neutral-50 rounded-lg p-3">
+                      <div className="flex items-center gap-2 text-sm text-neutral-600">{svc.icon} {svc.name}</div>
+                      <p className="text-lg font-semibold text-neutral-900 mt-1">${svc.cost.toFixed(4)}</p>
+                      <div className="w-full bg-neutral-200 rounded-full h-1.5 mt-2">
+                        <div className="bg-[#F22F46] rounded-full h-1.5" style={{ width: `${pct}%` }} />
+                      </div>
+                      <p className="text-[10px] text-neutral-400 mt-0.5">{pct}% of total</p>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Cost by user */}
+          {dashboard.byUser.length > 0 && (
+            <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
+              <h3 className="text-sm font-semibold text-neutral-700 p-4 border-b">Cost by User</h3>
+              <table className="w-full text-sm">
+                <thead><tr className="bg-neutral-50 text-neutral-500 text-xs uppercase">
+                  <th className="px-4 py-2 text-left">User</th><th className="px-4 py-2 text-right">Calls</th>
+                  <th className="px-4 py-2 text-right">Minutes</th><th className="px-4 py-2 text-right">Cost</th>
+                  <th className="px-4 py-2 text-right">Revenue</th><th className="px-4 py-2 text-right">Profit</th>
+                </tr></thead>
+                <tbody>
+                  {dashboard.byUser.map(u => (
+                    <tr key={u.uid} className="border-t border-neutral-100 hover:bg-neutral-50">
+                      <td className="px-4 py-2 font-mono text-xs">{u.email}</td>
+                      <td className="px-4 py-2 text-right">{u.calls}</td>
+                      <td className="px-4 py-2 text-right">{u.minutes}</td>
+                      <td className="px-4 py-2 text-right text-red-600">${u.cost.toFixed(4)}</td>
+                      <td className="px-4 py-2 text-right text-green-600">${u.revenue.toFixed(4)}</td>
+                      <td className={`px-4 py-2 text-right font-medium ${u.revenue - u.cost >= 0 ? "text-green-600" : "text-red-600"}`}>${(u.revenue - u.cost).toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* Rate Card Editor */}
+      {rateCard && (
+        <div className="bg-white border border-neutral-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-neutral-700">⚙️ Rate Card (Provider Costs)</h3>
+            {!rcEditing ? (
+              <button onClick={() => setRcEditing(true)} className="text-xs text-[#0066CC] hover:underline">Edit</button>
+            ) : (
+              <div className="flex gap-2">
+                <button onClick={() => setRcEditing(false)} className="text-xs text-neutral-500">Cancel</button>
+                <button onClick={saveRateCard} disabled={rcSaving} className="text-xs bg-[#F22F46] text-white px-3 py-1 rounded-md hover:bg-[#d9243b] disabled:opacity-50">
+                  {rcSaving ? "Saving..." : "Save"}
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="grid grid-cols-4 gap-3 text-xs">
+            {[
+              { label: "Twilio $/min", val: rateCard.twilio?.costPerMinute, set: (v: number) => setRateCard({...rateCard, twilio: {...rateCard.twilio, costPerMinute: v}}) },
+              { label: "OpenAI prompt $/1K tok", val: rateCard.openai?.costPerPromptToken1K, set: (v: number) => setRateCard({...rateCard, openai: {...rateCard.openai, costPerPromptToken1K: v}}) },
+              { label: "OpenAI completion $/1K tok", val: rateCard.openai?.costPerCompletionToken1K, set: (v: number) => setRateCard({...rateCard, openai: {...rateCard.openai, costPerCompletionToken1K: v}}) },
+              { label: "OpenAI TTS $/1K chars", val: rateCard.openai?.costPerTtsChar1K, set: (v: number) => setRateCard({...rateCard, openai: {...rateCard.openai, costPerTtsChar1K: v}}) },
+              { label: "Deepgram $/min", val: rateCard.deepgram?.costPerMinute, set: (v: number) => setRateCard({...rateCard, deepgram: {...rateCard.deepgram, costPerMinute: v}}) },
+              { label: "Google TTS $/1K chars", val: rateCard.googleTts?.costPerChar1K, set: (v: number) => setRateCard({...rateCard, googleTts: {...rateCard.googleTts, costPerChar1K: v}}) },
+            ].map(f => (
+              <div key={f.label}>
+                <label className="block text-neutral-500 mb-1">{f.label}</label>
+                <input type="number" step="0.0001" value={f.val ?? 0} disabled={!rcEditing}
+                  onChange={e => f.set(parseFloat(e.target.value) || 0)}
+                  className="w-full border border-neutral-200 rounded px-2 py-1.5 text-xs font-mono disabled:bg-neutral-50 disabled:text-neutral-400" />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Customer Pricing Config */}
+      {pricing && (
+        <div className="bg-white border border-neutral-200 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-sm font-semibold text-neutral-700">💰 Customer Pricing</h3>
+            <button onClick={savePricing} disabled={pricingSaving} className="text-xs bg-[#F22F46] text-white px-3 py-1 rounded-md hover:bg-[#d9243b] disabled:opacity-50">
+              {pricingSaving ? "Saving..." : "Save"}
+            </button>
+          </div>
+          <div className="grid grid-cols-3 gap-4 text-sm">
+            <div>
+              <label className="block text-xs text-neutral-500 mb-1">Default Model</label>
+              <select value={pricing.defaultModel} onChange={e => setPricing({...pricing, defaultModel: e.target.value as "markup" | "fixedPerMinute"})}
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm">
+                <option value="markup">Markup % on actual cost</option>
+                <option value="fixedPerMinute">Fixed price per minute</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs text-neutral-500 mb-1">Default Markup %</label>
+              <input type="number" value={pricing.defaultMarkupPercent} onChange={e => setPricing({...pricing, defaultMarkupPercent: parseFloat(e.target.value) || 0})}
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm font-mono" />
+            </div>
+            <div>
+              <label className="block text-xs text-neutral-500 mb-1">Default Fixed $/min</label>
+              <input type="number" step="0.01" value={pricing.defaultFixedPerMinute} onChange={e => setPricing({...pricing, defaultFixedPerMinute: parseFloat(e.target.value) || 0})}
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm font-mono" />
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Main AdminPage ────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -1931,6 +2151,7 @@ export default function AdminPage() {
         {activeTab === "settings" && <SystemSettingsTab wasLoaded={loadedTabs.has("settings")} />}
         {activeTab === "phone" && <PhoneIntegrationsTab wasLoaded={loadedTabs.has("phone")} />}
         {activeTab === "pronunciation" && <PronunciationTab wasLoaded={loadedTabs.has("pronunciation")} />}
+        {activeTab === "costs" && <CostsTab wasLoaded={loadedTabs.has("costs")} />}
       </div>
     </ErrorToastProvider>
   );

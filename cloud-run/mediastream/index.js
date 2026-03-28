@@ -291,6 +291,36 @@ async function loadPronunciationFixes() {
   }
 }
 
+// ── Cost config cache (rate card + customer pricing) ──────────────
+let costConfigCache = null;
+let costConfigCacheTime = 0;
+
+async function loadCostConfig() {
+  const now = Date.now();
+  if (now - costConfigCacheTime < PRONUNCIATION_CACHE_TTL && costConfigCache) {
+    return costConfigCache;
+  }
+  try {
+    const projectId = process.env.GCLOUD_PROJECT || "voiceflow-ai-202509231639";
+    const url = `https://us-central1-${projectId}.cloudfunctions.net/getCostConfig`;
+    const resp = await new Promise((resolve, reject) => {
+      require("https").get(url, {timeout: 3000}, (res) => {
+        let d = "";
+        res.on("data", c => d += c);
+        res.on("end", () => {
+          try { resolve(JSON.parse(d)); }
+          catch { resolve({}); }
+        });
+      }).on("error", () => resolve({}));
+    });
+    costConfigCache = resp;
+    costConfigCacheTime = now;
+    return resp;
+  } catch {
+    return costConfigCache || {};
+  }
+}
+
 function applyPronunciationFixes(text, firestoreFixes = []) {
   let fixed = text;
   // Apply Firestore fixes first (admin-managed)
@@ -529,6 +559,13 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
   let pendingTranscriptText = ""; // accumulated text during debounce window
   let knowledgePrefetch = null; // {query, promise} — started on high-confidence interim
   let callEnding = false; // set true after goodbye TwiML sent — stops further transcript processing
+  const callStartTime = Date.now();
+
+  // ── Cost tracking ──────────────────────────────────────────────
+  const costTracker = {
+    llmPromptTokens: 0, llmCompletionTokens: 0, llmTurns: 0,
+    ttsCharacters: 0, ttsProvider: "",
+  };
 
   // Pre-check: does this assistant have any knowledge chunks?
   // Cached once at session open to avoid embedding API calls on every turn.
@@ -637,11 +674,14 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
     // Apply pronunciation fixes for Hebrew (from Firestore + hardcoded)
     const pronFixes = deepgramLang.startsWith("he") ? await loadPronunciationFixes() : [];
     const ttsText = deepgramLang.startsWith("he") ? applyPronunciationFixes(text, pronFixes) : text;
+    // Track TTS characters for cost calculation
+    costTracker.ttsCharacters += ttsText.length;
     try {
       let audioUrl;
       // Use per-assistant voice if set (format: "openai:nova" or "Google.he-IL-*")
       if (assistantVoice && assistantVoice.startsWith("openai:")) {
         const openaiVoiceName = assistantVoice.split(":")[1] || "nova";
+        costTracker.ttsProvider = "openai";
         audioUrl = await openaiTTS(ttsText, openaiVoiceName);
       } else if (assistantVoice && assistantVoice.startsWith("Google.")) {
         const voiceName = assistantVoice.replace("Google.", "");
@@ -805,10 +845,15 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
       },
     );
     const choice = resp.data.choices[0];
+    const usage = resp.data.usage || {};
+    // Accumulate cost tracking
+    costTracker.llmPromptTokens += usage.prompt_tokens || 0;
+    costTracker.llmCompletionTokens += usage.completion_tokens || 0;
+    costTracker.llmTurns += 1;
     return {
       text: choice.message.content || null,
       toolCalls: choice.message.tool_calls || [],
-      tokensUsed: resp.data.usage?.total_tokens || 0,
+      tokensUsed: usage.total_tokens || 0,
     };
   }
 
@@ -1279,13 +1324,62 @@ This applies to ALL languages. Never use digits in your response.`;
   console.log(`[${callSessionId}] Setup complete, flushing ${messageBuffer.length} buffered messages`);
   for (const msg of messageBuffer) dispatchMessage(msg);
 
-  ws.on("close", () => {
+  ws.on("close", async () => {
     console.log(`[${callSessionId}] WebSocket closed`);
     if (pendingTranscriptTimer) { clearTimeout(pendingTranscriptTimer); pendingTranscriptTimer = null; }
     if (deepgramConnection?.finish) {
       try { deepgramConnection.finish(); } catch (_) {}
     }
     if (callSid) activeConnections.delete(callSid);
+
+    // ── Write cost data to Firestore ──────────────────────────────
+    try {
+      const callDurationMin = (Date.now() - callStartTime) / 60000;
+      const rc = await loadCostConfig();
+      const rateCard = rc.rateCard || {};
+      const tw = rateCard.twilio || {costPerMinute: 0.013};
+      const oai = rateCard.openai || {costPerPromptToken1K: 0.00015, costPerCompletionToken1K: 0.0006, costPerTtsChar1K: 0.015};
+      const dg = rateCard.deepgram || {costPerMinute: 0.0043};
+      const gTts = rateCard.googleTts || {costPerChar1K: 0.016};
+
+      const costs = {
+        twilio: {minutes: +callDurationMin.toFixed(2), cost: +(callDurationMin * tw.costPerMinute).toFixed(6)},
+        llm: {
+          promptTokens: costTracker.llmPromptTokens, completionTokens: costTracker.llmCompletionTokens,
+          turns: costTracker.llmTurns,
+          cost: +((costTracker.llmPromptTokens / 1000 * oai.costPerPromptToken1K) + (costTracker.llmCompletionTokens / 1000 * oai.costPerCompletionToken1K)).toFixed(6),
+        },
+        stt: {minutes: +callDurationMin.toFixed(2), cost: +(callDurationMin * dg.costPerMinute).toFixed(6)},
+        tts: {
+          characters: costTracker.ttsCharacters, provider: costTracker.ttsProvider || "openai",
+          cost: +(costTracker.ttsCharacters / 1000 * (costTracker.ttsProvider === "google" ? gTts.costPerChar1K : oai.costPerTtsChar1K)).toFixed(6),
+        },
+      };
+      costs.totalCost = +(costs.twilio.cost + costs.llm.cost + costs.stt.cost + costs.tts.cost).toFixed(6);
+
+      // Customer charge based on pricing config
+      const cp = rc.customerPricing || {};
+      const ownerId = data.ownerId || "";
+      const override = (cp.overrides || {})[ownerId];
+      const model = override?.model || cp.defaultModel || "markup";
+      const markupPct = override?.markupPercent ?? cp.defaultMarkupPercent ?? 30;
+      const fixedRate = override?.fixedPerMinute ?? cp.defaultFixedPerMinute ?? 0.50;
+
+      if (model === "markup") {
+        costs.customerCharge = +(costs.totalCost * (1 + markupPct / 100)).toFixed(6);
+      } else {
+        costs.customerCharge = +(callDurationMin * fixedRate).toFixed(6);
+      }
+      costs.pricingModel = model;
+      costs.pricingValue = model === "markup" ? markupPct : fixedRate;
+      costs.currency = rateCard.currency || "USD";
+      costs.calculatedAt = new Date().toISOString();
+
+      await sessionRef.set({costs, duration: Math.round(callDurationMin * 60)}, {merge: true});
+      console.log(`[${callSessionId}] Costs: $${costs.totalCost} → charge $${costs.customerCharge} (${model})`);
+    } catch (costErr) {
+      console.error(`[${callSessionId}] Cost calculation failed:`, costErr.message);
+    }
   });
 
   ws.on("error", (err) => {

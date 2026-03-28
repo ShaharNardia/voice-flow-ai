@@ -538,3 +538,42 @@ export interface Appointment {
   createdAt?: unknown;
   status?: string;
 }
+
+// ── Cost Tracking & Customer Pricing ────────────────────────────
+
+export interface RateCard {
+  twilio: { costPerMinute: number };
+  openai: { costPerPromptToken1K: number; costPerCompletionToken1K: number; costPerTtsChar1K: number };
+  deepgram: { costPerMinute: number };
+  googleTts: { costPerChar1K: number };
+  currency: string;
+}
+
+export interface CustomerPricingOverride {
+  model: "markup" | "fixedPerMinute";
+  markupPercent: number | null;
+  fixedPerMinute: number | null;
+  displayName?: string;
+}
+
+export interface CustomerPricingConfig {
+  defaultModel: "markup" | "fixedPerMinute";
+  defaultMarkupPercent: number;
+  defaultFixedPerMinute: number;
+  currency: string;
+  overrides: Record<string, CustomerPricingOverride>;
+}
+
+export interface CostDashboardResult {
+  summary: { totalCost: number; totalRevenue: number; profit: number; totalCalls: number; totalMinutes: number };
+  byService: { twilio: number; llm: number; stt: number; tts: number };
+  byUser: Array<{ uid: string; email: string; calls: number; minutes: number; cost: number; revenue: number }>;
+  calls: Array<{ id: string; createdAt: string; ownerId: string; duration: number; costs: Record<string, unknown> }>;
+}
+
+export const adminGetRateCard = () => httpGet<RateCard>("/adminGetRateCard");
+export const adminUpdateRateCard = (data: { rateCard: RateCard }) => httpPost<{ status: string }>("/adminUpdateRateCard", data);
+export const adminGetCustomerPricing = () => httpGet<CustomerPricingConfig>("/adminGetCustomerPricing");
+export const adminUpdateCustomerPricing = (data: Partial<CustomerPricingConfig>) => httpPost<{ status: string }>("/adminUpdateCustomerPricing", data);
+export const adminGetCostDashboard = (params: { from: string; to: string; userId?: string }) =>
+  httpGet<CostDashboardResult>(`/adminGetCostDashboard?from=${encodeURIComponent(params.from)}&to=${encodeURIComponent(params.to)}${params.userId ? `&userId=${encodeURIComponent(params.userId)}` : ""}`);
