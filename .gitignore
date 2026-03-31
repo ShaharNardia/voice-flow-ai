@@ -98,6 +98,7 @@ firebase-debug.*.log
 
 # Playwright saved auth (per-machine; contains session cookies)
 tests/ui/.auth/
+tests/ui/playwright-report/
 
 # Node modules
 node_modules/
