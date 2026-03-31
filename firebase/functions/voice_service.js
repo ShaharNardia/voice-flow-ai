@@ -31,6 +31,11 @@ const REGION = "us-central1";
 const PROJECT_ID = process.env.GCLOUD_PROJECT;
 const BASE_FUNCTION_URL = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net`;
 
+// Cloud Run WebSocket service for real-time Twilio Media Streams (Deepgram STT)
+const CLOUD_RUN_URL = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.us-central1.run.app";
+// Convert https:// → wss:// for WebSocket connections
+const CLOUD_RUN_WSS = CLOUD_RUN_URL.replace(/^https?:\/\//, "wss://");
+
 // CORS configuration for Firebase Functions v2
 const corsOptions = {
   cors: [
@@ -150,8 +155,8 @@ const MESSAGES = {
 // Neural2 NOT available for Hebrew on Twilio — causes APPLICATION ERROR.
 // Using WaveNet which is the best available. Hebrew male: B, D
 const DEFAULT_VOICES = {
-  "he": "Google.he-IL-Wavenet-D",
-  "he-IL": "Google.he-IL-Wavenet-D",
+  "he": "Google.he-IL-Neural2-A",
+  "he-IL": "Google.he-IL-Neural2-A",
   "en": "Polly.Joanna",
   "en-US": "Polly.Joanna",
   "en-GB": "Polly.Amy",
@@ -159,8 +164,8 @@ const DEFAULT_VOICES = {
   "ar-XA": "Google.ar-XA-Wavenet-A",
 };
 
-// Default Hebrew voice (male WaveNet-D — best available on Twilio for Hebrew)
-const DEFAULT_HEBREW_VOICE = "Google.he-IL-Wavenet-D";
+// Default Hebrew voice (female Neural2-A — significantly more natural than WaveNet)
+const DEFAULT_HEBREW_VOICE = "Google.he-IL-Neural2-A";
 // Default English voice (for backward compatibility)
 const DEFAULT_ENGLISH_VOICE = "Polly.Joanna";
 
@@ -336,6 +341,85 @@ const twilioClient =
   TWILIO_ACCOUNT_SID && TWILIO_AUTH_TOKEN
     ? twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
     : null;
+
+// ── Admin Key Fallback (Issue 6) ─────────────────────────────────────────────
+// Priority: 1) Company's own Twilio keys → 2) Admin SystemSettings/keys → 3) .env
+async function getEffectiveTwilioCredentials(companyId) {
+  const db = getFirestore();
+
+  // 1. Company-specific credentials
+  if (companyId) {
+    try {
+      const cd = await db.collection("Company").doc(String(companyId)).get();
+      if (cd.exists) {
+        const d = cd.data();
+        if (d.twilioAccountSid && d.twilioAuthToken) {
+          return {
+            accountSid: d.twilioAccountSid,
+            authToken: d.twilioAuthToken,
+            defaultFrom: d.twilioDefaultFrom || TWILIO_DEFAULT_FROM,
+            isOwn: true,
+          };
+        }
+      }
+    } catch (_) {}
+  }
+
+  // 2. Admin SystemSettings fallback
+  try {
+    const settingsDoc = await db.collection("SystemSettings").doc("keys").get();
+    if (settingsDoc.exists) {
+      const s = settingsDoc.data();
+      if (s.twilioAccountSid && s.twilioAuthToken) {
+        return {
+          accountSid: s.twilioAccountSid,
+          authToken: s.twilioAuthToken,
+          defaultFrom: s.twilioDefaultFrom || TWILIO_DEFAULT_FROM,
+          isOwn: false,
+        };
+      }
+    }
+  } catch (_) {}
+
+  // 3. Env var fallback
+  return {
+    accountSid: TWILIO_ACCOUNT_SID,
+    authToken: TWILIO_AUTH_TOKEN,
+    defaultFrom: TWILIO_DEFAULT_FROM,
+    isOwn: false,
+  };
+}
+
+// ── Credit Check (Issue 7) ────────────────────────────────────────────────────
+// Returns {allowed: true} or {allowed: false, reason: "credit_exhausted", userId}
+async function checkUserCredit(companyId) {
+  if (!companyId) return {allowed: true};
+  const db = getFirestore();
+  try {
+    const cd = await db.collection("Company").doc(String(companyId)).get();
+    if (!cd.exists) return {allowed: true};
+    const companyData = cd.data();
+    const userRef = companyData.userId; // DocumentReference or string
+    if (!userRef) return {allowed: true};
+    const userDoc = typeof userRef === "string"
+      ? await db.collection("user").doc(userRef).get()
+      : await userRef.get();
+    if (!userDoc.exists) return {allowed: true};
+    const u = userDoc.data();
+    // Only check credit for basic/unsubscribed plans
+    const isBasic = u.subscriptionPlan === "basic" || (!u.subscribed && !u.stripe_subscription_status);
+    if (!isBasic) return {allowed: true};
+    const credit = u.creditBalance || 0;
+    const expired = u.creditExpiresAt && u.creditExpiresAt.toDate && u.creditExpiresAt.toDate() < new Date();
+    if (credit <= 0 || expired) {
+      return {allowed: false, reason: "credit_exhausted", userId: userDoc.id};
+    }
+    return {allowed: true, userId: userDoc.id, credit};
+  } catch (e) {
+    logger.warn("Credit check error:", e.message);
+    return {allowed: true}; // fail open — don't block calls on system errors
+  }
+}
 
 function getJsonBody(req) {
   if (!req.body) {
@@ -843,9 +927,12 @@ exports.assistantsList = onRequest(corsOptions, async (req, res) => {
       const data = doc.data();
       return {
         id: doc.id,
-        name: data.name,
+        name: data.name || data.assistantName || "(Unnamed)",
+        assistantName: data.assistantName || data.name || "(Unnamed)",
         firstMessage: data.firstMessage,
         language: data.language,
+        voice: data.voice || null,
+        isActive: data.isActive !== false,
         assistant: data.definition,
         metadata: {
           ownerId: data.ownerId || null,
@@ -1169,7 +1256,18 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
   try {
     const payload = getJsonBody(req);
 
-    const leadNumber = payload.number || payload.leadPhone;
+    const rawLeadNumber = payload.number || payload.leadPhone;
+    // Normalize: strip spaces/dashes, add + if missing (e.g. 972... → +972...)
+    const leadNumber = rawLeadNumber
+      ? (() => {
+          const stripped = String(rawLeadNumber).replace(/[\s\-()]/g, "");
+          if (stripped.startsWith("+")) return stripped;
+          if (stripped.startsWith("00")) return "+" + stripped.slice(2);
+          // If starts with country code digits (e.g. 972, 1, 44) without +
+          if (/^\d{10,15}$/.test(stripped)) return "+" + stripped;
+          return stripped; // already formatted or short local number
+        })()
+      : null;
     if (!leadNumber) {
       res.status(400).json({
         status: "error",
@@ -1178,23 +1276,62 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
       return;
     }
 
-    const companyId = payload.companyId || null;
+    let companyId = payload.companyId || null;
     const assistantId = payload.assistantId || payload.assistant?.id || null;
-    const rawAssistantDefinition = payload.assistantJson || payload.assistant || {};
-    
+    let rawAssistantDefinition = payload.assistantJson || payload.assistant || {};
+
+    // If assistantId provided but definition incomplete, fetch from Firestore
+    if (assistantId && (!rawAssistantDefinition.firstMessage && !rawAssistantDefinition.inboundmessage && !rawAssistantDefinition.outboundmessage)) {
+      try {
+        const db = getFirestore();
+        const aDoc = await db.collection("assistants").doc(assistantId).get();
+        if (aDoc.exists) {
+          const aData = aDoc.data();
+          // Merge fetched data; payload fields take precedence
+          rawAssistantDefinition = { ...aData, ...(aData.definition || {}), ...rawAssistantDefinition };
+          if (!companyId) companyId = aData.companyId || null;
+        }
+      } catch (fetchErr) {
+        logger.warn("[placeCall] Could not fetch assistant doc", { assistantId, err: fetchErr.message });
+      }
+    }
+
+    // Issue 7: Credit check — block BASIC users with exhausted credit
+    const creditCheck = await checkUserCredit(companyId);
+    if (!creditCheck.allowed) {
+      res.status(402).json({
+        status: "error",
+        code: "credit_exhausted",
+        message: "הקרדיט שלך נגמר. שדרג לחבילת Pro כדי להמשיך בשיחות.",
+        messageEn: "Your free credit has been exhausted. Upgrade to Pro to continue placing calls.",
+      });
+      return;
+    }
+
     // Check if company uses Asterisk
     const asteriskConfig = await asteriskService.getAsteriskConfig(companyId);
     const useAsterisk = asteriskConfig !== null;
-    
-    // For Twilio, require Twilio credentials
-    if (!useAsterisk && !requireTwilio(res)) {
-      return;
+
+    // Issue 6: Get effective Twilio credentials (company own → admin fallback → env)
+    let effectiveTwilioClient = twilioClient;
+    let effectiveFromNumber = TWILIO_DEFAULT_FROM;
+    if (!useAsterisk) {
+      const creds = await getEffectiveTwilioCredentials(companyId);
+      if (!creds.accountSid || !creds.authToken) {
+        res.status(400).json({
+          status: "error",
+          message: "Twilio credentials not configured. Add your Twilio keys in Settings or contact your administrator.",
+        });
+        return;
+      }
+      effectiveTwilioClient = twilio(creds.accountSid, creds.authToken);
+      effectiveFromNumber = creds.defaultFrom;
     }
-    
+
     const companyPhone =
       payload.companyPhone ||
       payload.companyPhoneNumber ||
-      (useAsterisk ? asteriskConfig.defaultCallerId : TWILIO_DEFAULT_FROM);
+      (useAsterisk ? asteriskConfig.defaultCallerId : effectiveFromNumber);
 
     if (!companyPhone) {
       res.status(400).json({
@@ -1224,11 +1361,15 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
     );
     
     // Create processed assistant definition with replaced placeholders
-    const assistantDefinition = {
+    // Strip undefined values to avoid Firestore write errors
+    const rawMerged = {
       ...rawAssistantDefinition,
       firstMessage: processedFirstMessage,
-      originalFirstMessage: rawAssistantDefinition.firstMessage,
+      originalFirstMessage: rawAssistantDefinition.firstMessage || null,
     };
+    const assistantDefinition = Object.fromEntries(
+      Object.entries(rawMerged).filter(([, v]) => v !== undefined)
+    );
 
     // Check for scenario-based call
     const scenarioId = payload.scenarioId || null;
@@ -1328,7 +1469,7 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
         ? `${BASE_FUNCTION_URL}/scenarioFlowExecute?callSessionId=${sessionId}`
         : `${TWILIO_VOICE_WEBHOOK}?callSessionId=${sessionId}`;
       
-      const twilioCall = await twilioClient.calls.create({
+      const twilioCall = await effectiveTwilioClient.calls.create({
         to: leadNumber,
         from: companyPhone,
         url: webhookUrl,
@@ -1906,19 +2047,17 @@ exports.twilioVoiceWebhook = onRequest(
       const callbackUrl = `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`;
 
       if (isHebrew) {
-        // HEBREW: Twilio STT does NOT support Hebrew reliably.
-        // Use <Say> + <Record> → download recording → Deepgram REST API for transcription.
-        // No barge-in with Record, but at least Hebrew is correctly recognized.
+        // HEBREW: Use Twilio Media Streams → Cloud Run WebSocket → Deepgram real-time STT
+        // This provides sub-second STT latency (vs 7-8s with <Record>).
+        // The Cloud Run service at /stream/:callSessionId handles all subsequent turns
+        // via Twilio REST API TwiML updates — no callbacks needed.
+        // Stream persists for the full call; we do NOT re-include <Start><Stream> in updates.
+        const streamUrl = `${CLOUD_RUN_WSS}/stream/${finalSessionId}`;
+        logger.info("[twilioVoiceWebhook] Hebrew streaming URL", {streamUrl, callSessionId: finalSessionId});
+        const start = response.start();
+        start.stream({url: streamUrl});
         response.say({voice: voiceId, language: sayLanguage}, wrapSSML(greetingToSay, language));
-        response.record({
-          action: `${callbackUrl}&source=record`,
-          method: "POST",
-          maxLength: 15,
-          timeout: 4,
-          playBeep: false,
-          trim: "do-not-trim",
-          transcribe: false,
-        });
+        response.pause({length: "120"}); // Keep call alive; Cloud Run handles all further interaction
       } else {
         // NON-HEBREW: Use Gather with nested Say for barge-in
         const gather = response.gather({
@@ -1936,7 +2075,7 @@ exports.twilioVoiceWebhook = onRequest(
         callSid: callSid || "unknown",
         callSessionId: finalSessionId,
         language: gatherLanguage,
-        mode: isHebrew ? "record+deepgram" : "gather",
+        mode: isHebrew ? "mediastream+deepgram-realtime" : "gather",
         greetingLength: greetingToSay.length,
       });
     } catch (gatherError) {
@@ -1956,9 +2095,13 @@ exports.twilioVoiceWebhook = onRequest(
       }
     }
 
-    // Safety net: If Record/Gather times out or callback fails, redirect back
-    response.redirect({method: "POST"},
-      `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`);
+    // Safety net: Only for non-Hebrew (Gather timeout fallback).
+    // Hebrew uses <Start><Stream> → Cloud Run WebSocket handles all turns directly.
+    // A redirect here would interfere with the stream. Use gatherLanguage (outer scope).
+    if (!gatherLanguage?.startsWith("he")) {
+      response.redirect({method: "POST"},
+        `${BASE_FUNCTION_URL}/twilioGatherCallback?callSessionId=${finalSessionId}`);
+    }
 
     // Update session status
     try {
@@ -2068,7 +2211,7 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
 
         // Transcribe with Deepgram REST API (nova-3 supports Hebrew natively)
         const dgResponse = await axios.post(
-          "https://api.deepgram.com/v1/listen?language=he&model=nova-3&smart_format=true&punctuate=true",
+          "https://api.deepgram.com/v1/listen?language=he&model=nova-2&smart_format=true&punctuate=true",
           audioResponse.data,
           {
             headers: {
@@ -2217,8 +2360,8 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         response.record({
           action: `${callbackUrl}&source=record`,
           method: "POST",
-          maxLength: 15,
-          timeout: 4,
+          maxLength: 30,
+          timeout: 2,
           playBeep: false,
           trim: "do-not-trim",
           transcribe: false,
@@ -2500,7 +2643,22 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
       shouldHangup,
       conversationHistoryLength: conversationHistory.length,
     });
-    
+
+    // Prepend a Hebrew filler so the response sounds immediate and natural.
+    // The Record→Deepgram→LLM pipeline takes ~4-6s; starting with a short
+    // acknowledgment bridges the silence and avoids sounding like the system
+    // didn't hear the user.
+    if (language?.startsWith("he") && aiResponse && !shouldHangup) {
+      const heFillers = ["כן, ", "אוקיי! ", "הבנתי — ", "בסדר! ", "רגע, "];
+      const alreadyStartsWithFiller = heFillers.some((f) =>
+        aiResponse.startsWith(f.trimEnd()) || aiResponse.startsWith(f.trim())
+      );
+      if (!alreadyStartsWithFiller) {
+        const filler = heFillers[Math.floor(Math.random() * heFillers.length)];
+        aiResponse = filler + aiResponse;
+      }
+    }
+
     // Say the AI response
     // Ensure language is full code (he-IL) for Twilio Say
     const sayLanguage = language === "he" ? "he-IL" : language;
@@ -2535,8 +2693,8 @@ exports.twilioGatherCallback = onRequest(async (req, res) => {
         response.record({
           action: `${callbackUrl}&source=record`,
           method: "POST",
-          maxLength: 15,
-          timeout: 4,
+          maxLength: 30,
+          timeout: 2,
           playBeep: false,
           trim: "do-not-trim",
           transcribe: false,

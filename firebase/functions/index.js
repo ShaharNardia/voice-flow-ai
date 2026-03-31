@@ -75,3 +75,12 @@ exports.setupIsraeliPhoneHttp = setupIsraeliPhone.setupIsraeliPhoneHttp;
 // Health Check & Monitoring
 const healthCheck = require("./health_check.js");
 exports.healthCheck = healthCheck.healthCheck;
+
+// Knowledge base (RAG)
+const knowledgeService = require("./knowledge_service.js");
+exports.knowledgeProcessFile = knowledgeService.knowledgeProcessFile;
+exports.knowledgeProcessUrl = knowledgeService.knowledgeProcessUrl;
+exports.knowledgeProcessText = knowledgeService.knowledgeProcessText;
+exports.knowledgeListFiles = knowledgeService.knowledgeListFiles;
+exports.knowledgeDeleteFile = knowledgeService.knowledgeDeleteFile;
+exports.knowledgeSync = knowledgeService.knowledgeSync;
