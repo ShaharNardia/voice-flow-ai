@@ -46,8 +46,8 @@ service cloud.firestore {
     // ── Users collection (new plural — multi-tenant) ──────────────
     match /users/{userId} {
       allow create: if isAuthenticated() && request.auth.uid == userId;
-      allow read:   if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow update: if isAdmin();
+      allow read:   if isAuthenticated();
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
       allow delete: if false;
     }
 
