@@ -105,7 +105,7 @@ interface PlanUsage {
 
 export default function DashboardPage() {
   const { user } = useAuth();
-  const { isBasic, limits } = usePlan();
+  const { isBasic, loading: planLoading, limits } = usePlan();
   const [recentCalls, setRecentCalls] = useState<CallSession[]>([]);
   const [allCalls, setAllCalls] = useState<CallSession[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,13 +150,13 @@ export default function DashboardPage() {
     };
   }, [user]);
 
-  // Load plan usage for BASIC users
+  // Load plan usage for BASIC users (only after plan is confirmed loaded)
   useEffect(() => {
-    if (!user || !isBasic) return;
+    if (!user || planLoading || !isBasic) return;
     getUserPlan().then((data) => {
       setPlanUsage(data.usage as PlanUsage);
     }).catch(() => {});
-  }, [user, isBasic]);
+  }, [user, isBasic, planLoading]);
 
   const liveCalls = allCalls.filter((c) => c.status === "in-progress").length;
   const todayCalls = allCalls.filter((c) => {

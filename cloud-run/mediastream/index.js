@@ -929,16 +929,20 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
     const isArabic = lang.startsWith("ar");
 
     const langRules = isHebrew
-      ? `CRITICAL: You MUST respond ONLY in Hebrew. Every word in Hebrew. Never English.
+      ? `CRITICAL: You MUST respond ONLY in Hebrew with FULL nikud (ניקוד) on every word.
+Your output is read aloud by a TTS engine. Without nikud, the TTS mispronounces Hebrew words.
+
+Example: "בְּטַח! אֶשְׂמַח לַעֲזוֹר. מָה אַתָּה צָרִיךְ?" — NOT "בטח! אשמח לעזור. מה אתה צריך?"
+
 Sound like a professional, warm Israeli service rep — friendly and natural.
 
 Rules:
+- EVERY Hebrew word MUST have nikud. This is critical.
 - Max 1–2 short sentences per reply.
-- Use warm Hebrew openers: "בטח!", "מעולה!", "אשמח לעזור!", "רגע אחד"
-- Be professional but not formal. Use "אני", "אנחנו", not "אנו" or "הנכם".
-- Never use formal language. Use everyday spoken Hebrew.
-- Match caller energy. Fast caller → fast reply.
-- Never ask for information already given in this conversation.
+- Use warm openers: "בְּטַח!", "מְעוּלֶּה!", "אֶשְׂמַח לַעֲזוֹר!", "רֶגַע אֶחָד"
+- Be professional but not formal. Use "אֲנִי", "אֲנַחְנוּ", not "אָנוּ" or "הִנְּכֶם".
+- All numbers as words with nikud: "עֲשָׂרָה", "עֶשְׂרִים", never "10" or "20".
+- All times as words: "עֶשֶׂר בַּבֹּקֶר", never "10:00".
 - When the customer says שלום, להתראות, תודה, or the conversation is clearly done — use end_call immediately.`
       : isArabic
       ? `CRITICAL: You MUST respond ONLY in Arabic. Every single word must be in Arabic. Never use English or Hebrew.
@@ -1094,7 +1098,7 @@ This applies to ALL languages. Never use digits in your response.`;
     // No filler phrases — go straight to LLM response for natural flow
 
     // Detect explicit goodbye from caller — will trigger auto-hangup after bot's reply
-    const GOODBYE_RE = /\b(bye|goodbye|good\s*bye|see\s*you|that'?s?\s*all|thanks?\s*(that'?s?\s*all|bye|goodbye)|thank\s*you\s*(bye|goodbye)|shalom|להתראות|ביי|זהו|תודה\s*רבה)\b/i;
+    const GOODBYE_RE = /\b(bye|goodbye|good\s*bye|see\s*you|that'?s?\s*all|thanks?\s*(that'?s?\s*all|bye|goodbye)|thank\s*you\s*(bye|goodbye)|shalom|להתראות|ביי|ביביי|זהו|זה הכל|תודה\s*רבה|תודה\s*וביי|תודה\s*ושלום|יום\s*טוב|לילה\s*טוב|נתראה|סיימנו|אין\s*לי\s*עוד\s*שאלות)\b/i;
     const callerSaidGoodbye = GOODBYE_RE.test(text);
     executeTool._shouldHangup = false; // reset per-turn
 
@@ -1173,7 +1177,10 @@ This applies to ALL languages. Never use digits in your response.`;
       aiText = aiText || "Is there anything else I can help you with?";
       history.push({role: "assistant", content: aiText, timestamp: new Date()});
 
-      const shouldHangup = executeTool._shouldHangup || callerSaidGoodbye;
+      // Also detect if BOT's response is a goodbye
+      const BOT_GOODBYE_RE = /\b(goodbye|bye|have a great day|talk soon|להתראות|יום נהדר|נשמע בקרוב|ניצור איתך קשר|שיהיה לך)\b/i;
+      const botSaidGoodbye = BOT_GOODBYE_RE.test(aiText);
+      const shouldHangup = executeTool._shouldHangup || callerSaidGoodbye || botSaidGoodbye;
 
       if (shouldHangup) {
         // Block all further transcript processing while Twilio plays goodbye and hangs up
