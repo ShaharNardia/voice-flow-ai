@@ -61,6 +61,20 @@
       ]
     },
     {
+      "collectionGroup": "call_sessions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "ownerId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "Lead",
       "queryScope": "COLLECTION",
       "fields": [
