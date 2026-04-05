@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { doc, getDoc } from "firebase/firestore";
+import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { onAuthChange, type User } from "@/lib/firebase-auth";
 import { db } from "@/lib/firebase";
 
@@ -14,11 +14,22 @@ export interface AuthUser extends User {
 async function fetchRole(uid: string): Promise<AuthRole> {
   // Check new `users` collection first, then legacy `user` collection
   try {
-    const newDoc = await getDoc(doc(db, "users", uid));
-    if (newDoc.exists()) return (newDoc.data().role as AuthRole) || "user";
+    const newDocSnap = await getDoc(doc(db, "users", uid));
+    if (newDocSnap.exists()) {
+      const role = newDocSnap.data().role;
+      console.log("[useAuth] fetchRole:", uid, "role:", role);
+      return (role as AuthRole) || "user";
+    }
     const legacyDoc = await getDoc(doc(db, "user", uid));
-    if (legacyDoc.exists()) return (legacyDoc.data().role as AuthRole) || "user";
-  } catch { /* proceed with default */ }
+    if (legacyDoc.exists()) {
+      const role = legacyDoc.data().role;
+      console.log("[useAuth] fetchRole (legacy):", uid, "role:", role);
+      return (role as AuthRole) || "user";
+    }
+    console.warn("[useAuth] No user doc found for:", uid);
+  } catch (err) {
+    console.error("[useAuth] fetchRole error:", err);
+  }
   return "user";
 }
 
@@ -27,16 +38,35 @@ export function useAuth() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const unsubscribe = onAuthChange(async (firebaseUser) => {
+    let unsubFirestore: (() => void) | null = null;
+
+    const unsubAuth = onAuthChange((firebaseUser) => {
+      if (unsubFirestore) { unsubFirestore(); unsubFirestore = null; }
+
       if (firebaseUser) {
-        const role = await fetchRole(firebaseUser.uid);
-        setUser({ ...firebaseUser, role } as AuthUser);
+        // Listen for real-time role changes from Firestore
+        unsubFirestore = onSnapshot(doc(db, "users", firebaseUser.uid), (snap) => {
+          const role: AuthRole = snap.exists() ? ((snap.data().role as AuthRole) || "user") : "user";
+          setUser({ ...firebaseUser, role } as AuthUser);
+          setLoading(false);
+        }, (err) => {
+          console.error("[useAuth] onSnapshot error:", err);
+          // Fallback: try one-time read
+          fetchRole(firebaseUser.uid).then((role) => {
+            setUser({ ...firebaseUser, role } as AuthUser);
+            setLoading(false);
+          });
+        });
       } else {
         setUser(null);
+        setLoading(false);
       }
-      setLoading(false);
     });
-    return unsubscribe;
+
+    return () => {
+      unsubAuth();
+      if (unsubFirestore) unsubFirestore();
+    };
   }, []);
 
   return { user, loading, isAuthenticated: !!user, role: user?.role ?? ("user" as AuthRole) };
