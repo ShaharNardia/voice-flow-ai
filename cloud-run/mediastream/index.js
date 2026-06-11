@@ -4145,10 +4145,20 @@ This applies to ALL languages. Never use digits in your response.`;
       console.log(`[${callSessionId}] STT noise drop (conf=${confidence.toFixed(2)} < ${FINAL_TRANSCRIPT_MIN_CONFIDENCE}): "${text}"`);
       return;
     }
-    // 2. Word-count gate: a single unrecognised word is nearly always a noise
-    //    artifact or breath sound.  Known short commands (yes/no/bye/…) bypass.
+    // 2. Word-count gate: a single unrecognised word is often a noise artifact
+    //    or breath sound — but NOT always. Legitimate single-word answers we
+    //    must keep: known short commands (yes/no/bye), anything NUMERIC (a bus
+    //    stop id like "985", a quantity, a code), and high-confidence single
+    //    words (callers answer "what's your station number?" with one token).
+    //    Dropping "985" here meant the bus-info tool never received the stop id
+    //    and the caller thought the API was broken.
     const _wordCount = text.trim().split(/\s+/).length;
-    if (_wordCount < FINAL_TRANSCRIPT_MIN_WORDS && !SHORT_COMMAND_RE.test(text.trim())) {
+    const _isNumeric = /\d/.test(text);
+    const _highConf  = confidence >= 0.85;
+    if (_wordCount < FINAL_TRANSCRIPT_MIN_WORDS
+        && !SHORT_COMMAND_RE.test(text.trim())
+        && !_isNumeric
+        && !_highConf) {
       console.log(`[${callSessionId}] STT noise drop (${_wordCount} word, conf=${confidence.toFixed(2)}): "${text}"`);
       return;
     }
