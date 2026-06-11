@@ -1,5 +1,5 @@
-/**
- * Subscription Service — Plan management, Stripe Checkout, and usage stats.
+﻿/**
+ * Subscription Service â€” Plan management, Stripe Checkout, and usage stats.
  *
  * Exports:
  *   createCheckoutSession     POST /createCheckoutSession
@@ -14,19 +14,18 @@ const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const {extractUidFromRequest} = require("./security_utils");
 
-// ── CORS ────────────────────────────────────────────────────────────────────
+// â”€â”€ CORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const corsOptions = {
   cors: [
     "https://voiceflow-ai-202509231639.web.app",
     "https://voiceflow-ai-202509231639.firebaseapp.com",
+    "https://voice.lancelotech.com",
     "http://localhost:3000",
     "http://localhost:5000",
-    /\.web\.app$/,
-    /\.firebaseapp\.com$/,
   ],
 };
 
-// ── Stripe ──────────────────────────────────────────────────────────────────
+// â”€â”€ Stripe â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY;
 let _stripe = null;
 function getStripe() {
@@ -37,7 +36,7 @@ function getStripe() {
   return _stripe;
 }
 
-// ── Auth helper ─────────────────────────────────────────────────────────────
+// â”€â”€ Auth helper â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function requireAuth(req, res) {
   const uid = await extractUidFromRequest(req);
   if (!uid) {
@@ -47,7 +46,7 @@ async function requireAuth(req, res) {
   return uid;
 }
 
-// ── Plan definitions ─────────────────────────────────────────────────────────
+// â”€â”€ Plan definitions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Exported so other services can import for limit enforcement
 const PLAN_LIMITS = {
   basic: {
@@ -86,6 +85,68 @@ const PLAN_LIMITS = {
 };
 exports.PLAN_LIMITS = PLAN_LIMITS;
 
+/**
+ * Check if a user has reached their plan limit for a given resource.
+ * @param {string} uid - User ID
+ * @param {string} resource - "assistants" | "leads" | "campaigns" | "minutesPerMonth"
+ * @returns {Promise<{allowed: boolean, limit?: number, current?: number, plan?: string}>}
+ */
+async function checkPlanLimit(uid, resource) {
+  const db = getFirestore();
+
+  // Get user plan
+  const userSnap = await db.collection("users").doc(uid).get();
+  if (!userSnap.exists) return {allowed: true}; // No user doc = allow (legacy)
+
+  const userData = userSnap.data();
+  const plan = userData.plan || (userData.subscribed === true ? "pro" : "basic");
+  const limits = PLAN_LIMITS[plan];
+  if (!limits) return {allowed: true}; // Unknown plan = allow
+
+  const maxAllowed = limits[resource];
+  if (maxAllowed === null || maxAllowed === undefined || maxAllowed === true) {
+    return {allowed: true}; // No limit or boolean feature flag
+  }
+  if (maxAllowed === false || maxAllowed === 0) {
+    return {allowed: false, limit: 0, current: 0, plan};
+  }
+
+  // Count current usage
+  let current = 0;
+  try {
+    if (resource === "assistants") {
+      const snap = await db.collection("assistants").where("ownerId", "==", uid).count().get();
+      current = snap.data().count;
+    } else if (resource === "leads") {
+      const snap = await db.collection("leads").where("ownerId", "==", uid).count().get();
+      current = snap.data().count;
+    } else if (resource === "campaigns") {
+      const snap = await db.collection("campaigns").where("ownerId", "==", uid).count().get();
+      current = snap.data().count;
+    } else if (resource === "minutesPerMonth") {
+      // Count minutes used this month
+      const now = new Date();
+      const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+      const snap = await db.collection("call_sessions")
+          .where("ownerId", "==", uid)
+          .where("createdAt", ">=", startOfMonth)
+          .get();
+      current = snap.docs.reduce((sum, doc) => sum + (doc.data().duration || 0), 0) / 60;
+    }
+  } catch (err) {
+    logger.warn(`Plan limit check failed for ${uid}/${resource}:`, err.message);
+    return {allowed: true}; // On error, allow (don't block users)
+  }
+
+  return {
+    allowed: current < maxAllowed,
+    limit: maxAllowed,
+    current,
+    plan,
+  };
+}
+exports.checkPlanLimit = checkPlanLimit;
+
 /** Resolve plan from Stripe price ID using env vars */
 function derivePlanFromPriceId(priceId) {
   if (!priceId) return "pro";
@@ -94,11 +155,11 @@ function derivePlanFromPriceId(priceId) {
 }
 exports.derivePlanFromPriceId = derivePlanFromPriceId;
 
-// ── createCheckoutSession ────────────────────────────────────────────────────
+// â”€â”€ createCheckoutSession â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * POST /createCheckoutSession
  * Body: { priceId, successUrl, cancelUrl }
- * Returns: { url } — redirect to Stripe Checkout
+ * Returns: { url } â€” redirect to Stripe Checkout
  */
 exports.createCheckoutSession = onRequest(corsOptions, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
@@ -160,11 +221,11 @@ exports.createCheckoutSession = onRequest(corsOptions, async (req, res) => {
   }
 });
 
-// ── createBillingPortalSession ───────────────────────────────────────────────
+// â”€â”€ createBillingPortalSession â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * POST /createBillingPortalSession
  * Body: { returnUrl? }
- * Returns: { url } — redirect to Stripe Billing Portal
+ * Returns: { url } â€” redirect to Stripe Billing Portal
  */
 exports.createBillingPortalSession = onRequest(corsOptions, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
@@ -206,7 +267,7 @@ exports.createBillingPortalSession = onRequest(corsOptions, async (req, res) => 
   }
 });
 
-// ── getUserPlan ───────────────────────────────────────────────────────────────
+// â”€â”€ getUserPlan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * GET /getUserPlan
  * Returns: { plan, limits, usage: { minutesUsed, assistantCount, leadCount, campaignCount, callCount } }
@@ -228,7 +289,7 @@ exports.getUserPlan = onRequest(corsOptions, async (req, res) => {
     // Determine plan with migration compatibility
     let plan = userData.plan;
     if (!plan) {
-      // Migrate: subscribed=true → pro, else basic
+      // Migrate: subscribed=true â†’ pro, else basic
       plan = userData.subscribed === true ? "pro" : "basic";
     }
     // Read plan limits from Firestore config (admin-editable), fall back to hardcoded

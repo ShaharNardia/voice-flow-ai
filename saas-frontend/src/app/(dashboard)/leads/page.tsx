@@ -13,6 +13,9 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
+import { useUsersMap } from "@/hooks/useUsersMap";
+import OwnerBadge from "@/components/OwnerBadge";
+import { FeatureGate } from "@/components/FeatureGate";
 import { formatDate, formatPhone, truncate } from "@/lib/utils";
 import {
   leadsBatchCreate,
@@ -1131,8 +1134,9 @@ function LeadPanel({ lead, campaigns, onClose, onDeleted, onUpdated }: LeadPanel
 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 
-export default function LeadsPage() {
+function LeadsPageInner() {
   const { user } = useAuth();
+  const { usersMap, isSuperAdmin } = useUsersMap();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
@@ -1147,12 +1151,18 @@ export default function LeadsPage() {
   // Firestore real-time listener
   useEffect(() => {
     if (!user) return;
-    const q = query(
-      collection(db, "leads"),
-      where("ownerId", "==", user.uid),
-      orderBy("createdAt", "desc"),
-      limit(500)
-    );
+    const q = isSuperAdmin
+      ? query(
+          collection(db, "leads"),
+          orderBy("createdAt", "desc"),
+          limit(500)
+        )
+      : query(
+          collection(db, "leads"),
+          where("ownerId", "==", user.uid),
+          orderBy("createdAt", "desc"),
+          limit(500)
+        );
     const unsub = onSnapshot(
       q,
       (snap) => {
@@ -1165,7 +1175,7 @@ export default function LeadsPage() {
       }
     );
     return unsub;
-  }, [user, refreshToken]);
+  }, [user, refreshToken, isSuperAdmin]);
 
   // Campaigns list
   useEffect(() => {
@@ -1343,7 +1353,8 @@ export default function LeadsPage() {
             )}
           </div>
         ) : (
-          <table className="w-full text-sm">
+          <div className="overflow-x-auto">
+          <table className="w-full text-sm min-w-[700px]">
             <thead>
               <tr className="bg-neutral-50 border-b border-neutral-200">
                 <th className="text-left px-5 py-3 font-medium text-neutral-600 whitespace-nowrap">
@@ -1378,11 +1389,14 @@ export default function LeadsPage() {
                   onClick={() => setSelectedLead(lead)}
                 >
                   <td className="px-5 py-3">
-                    <p className="font-medium text-neutral-900">
-                      {lead.name ? truncate(lead.name, 30) : (
-                        <span className="text-neutral-400 italic">Unnamed</span>
-                      )}
-                    </p>
+                    <div className="flex items-center gap-2">
+                      <p className="font-medium text-neutral-900">
+                        {lead.name ? truncate(lead.name, 30) : (
+                          <span className="text-neutral-400 italic">Unnamed</span>
+                        )}
+                      </p>
+                      {isSuperAdmin && <OwnerBadge ownerId={lead.ownerId} usersMap={usersMap} />}
+                    </div>
                     <p className="text-xs text-neutral-500 mt-0.5 flex items-center gap-1">
                       <Phone size={11} />
                       {formatPhone(lead.phone)}
@@ -1441,6 +1455,7 @@ export default function LeadsPage() {
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </div>
 
@@ -1479,4 +1494,8 @@ export default function LeadsPage() {
       )}
     </div>
   );
+}
+
+export default function LeadsPage() {
+  return <FeatureGate featureId="module.leads"><LeadsPageInner /></FeatureGate>;
 }

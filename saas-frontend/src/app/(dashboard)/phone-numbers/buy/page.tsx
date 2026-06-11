@@ -5,23 +5,30 @@ import { searchPhoneNumbers, purchasePhoneNumber, type PhoneNumber } from "@/lib
 import Link from "next/link";
 import { ArrowLeft, Search, Check, Loader2 } from "lucide-react";
 
+// Area code is only meaningful for US and CA
+const AREA_CODE_COUNTRIES = ["US", "CA"];
+
 export default function BuyPhoneNumberPage() {
   const [country, setCountry] = useState("US");
   const [areaCode, setAreaCode] = useState("");
   const [results, setResults] = useState<PhoneNumber[]>([]);
   const [searching, setSearching] = useState(false);
+  const [searchPerformed, setSearchPerformed] = useState(false);
   const [purchasing, setPurchasing] = useState<string | null>(null);
   const [purchased, setPurchased] = useState<string | null>(null);
   const [error, setError] = useState("");
 
   const handleSearch = async () => {
     setError("");
+    setSearchPerformed(false);
     setSearching(true);
     try {
       const res = await searchPhoneNumbers({ country, areaCode: areaCode || undefined });
       setResults(Array.isArray(res) ? res : []);
+      setSearchPerformed(true);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Search failed");
+      setResults([]);
     } finally {
       setSearching(false);
     }
@@ -55,7 +62,7 @@ export default function BuyPhoneNumberPage() {
             <label className="block text-xs font-medium text-neutral-500 mb-1.5">Country</label>
             <select
               value={country}
-              onChange={(e) => setCountry(e.target.value)}
+              onChange={(e) => { setCountry(e.target.value); setResults([]); setSearchPerformed(false); setError(""); }}
               className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
             >
               <option value="US">United States (+1)</option>
@@ -63,18 +70,23 @@ export default function BuyPhoneNumberPage() {
               <option value="CA">Canada (+1)</option>
               <option value="AU">Australia (+61)</option>
               <option value="IL">Israel (+972)</option>
+              <option value="GR">Greece (+30)</option>
+              <option value="CY">Cyprus (+357)</option>
+              <option value="AE">UAE / Dubai (+971)</option>
             </select>
           </div>
-          <div className="w-32">
-            <label className="block text-xs font-medium text-neutral-500 mb-1.5">Area Code</label>
-            <input
-              type="text"
-              value={areaCode}
-              onChange={(e) => setAreaCode(e.target.value.replace(/\D/g, "").slice(0, 3))}
-              placeholder="212"
-              className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
-            />
-          </div>
+          {AREA_CODE_COUNTRIES.includes(country) && (
+            <div className="w-32">
+              <label className="block text-xs font-medium text-neutral-500 mb-1.5">Area Code</label>
+              <input
+                type="text"
+                value={areaCode}
+                onChange={(e) => setAreaCode(e.target.value.replace(/\D/g, "").slice(0, 3))}
+                placeholder="212"
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
+              />
+            </div>
+          )}
           <div className="flex items-end">
             <button
               onClick={handleSearch}
@@ -89,6 +101,15 @@ export default function BuyPhoneNumberPage() {
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">{error}</div>}
+
+      {searchPerformed && results.length === 0 && !error && (
+        <div className="mb-4 p-4 bg-neutral-50 border border-neutral-200 rounded-xl text-center">
+          <p className="text-sm font-medium text-neutral-700 mb-1">No numbers available</p>
+          <p className="text-xs text-neutral-400">
+            Twilio has no available numbers for this country right now. Try a different country, or check that your Twilio account has geo-permissions enabled for this region.
+          </p>
+        </div>
+      )}
 
       {results.length > 0 && (
         <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">

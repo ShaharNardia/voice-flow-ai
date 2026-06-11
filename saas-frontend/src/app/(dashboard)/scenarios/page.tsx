@@ -1,13 +1,22 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import { collection, query, orderBy, onSnapshot, Timestamp } from "firebase/firestore";
+import { collection, query, orderBy, where, onSnapshot, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
+import { useAuth } from "@/hooks/useAuth";
 import { formatDate } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { GitBranch, Plus, Pencil, Loader2, X, Trash2, Copy } from "lucide-react";
+import { GitBranch, Plus, Pencil, Loader2, X, Trash2, Copy, Sparkles, Play } from "lucide-react";
 import { scenariosCreate, scenariosDelete, type ScenarioNode, type ScenarioEdge } from "@/lib/firebase-functions";
+import dynamic from "next/dynamic";
+const ScenarioPhoneSimulator = dynamic(
+  () => import("./edit/_components/shared/ScenarioPhoneSimulator"),
+  { ssr: false }
+);
+import { useUsersMap } from "@/hooks/useUsersMap";
+import OwnerBadge from "@/components/OwnerBadge";
+import { FeatureGate } from "@/components/FeatureGate";
 
 interface Scenario {
   id: string;
@@ -17,12 +26,19 @@ interface Scenario {
   edges?: unknown[];
   createdAt?: Timestamp;
   updatedAt?: Timestamp;
+  ownerId?: string | null;
 }
 
-export default function ScenariosPage() {
+function ScenariosPageInner() {
   const router = useRouter();
+  const { user } = useAuth();
+  const { usersMap, isSuperAdmin } = useUsersMap();
   const [scenarios, setScenarios] = useState<Scenario[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Simulator state
+  const [simScenarioId, setSimScenarioId] = useState<string | null>(null);
+  const [simScenarioName, setSimScenarioName] = useState("");
 
   // Create modal state
   const [showCreate, setShowCreate] = useState(false);
@@ -32,13 +48,23 @@ export default function ScenariosPage() {
   const [createError, setCreateError] = useState("");
 
   useEffect(() => {
-    const q = query(collection(db, "scenarios"), orderBy("createdAt", "desc"));
+    if (!user?.uid) return;
+    const q = isSuperAdmin
+      ? query(
+          collection(db, "scenarios"),
+          orderBy("createdAt", "desc")
+        )
+      : query(
+          collection(db, "scenarios"),
+          where("ownerId", "in", [user.uid, null]),
+          orderBy("createdAt", "desc")
+        );
     const unsub = onSnapshot(q, (snap) => {
       setScenarios(snap.docs.map((d) => ({ id: d.id, ...d.data() } as Scenario)));
       setLoading(false);
     }, () => setLoading(false));
     return unsub;
-  }, []);
+  }, [user?.uid, isSuperAdmin]);
 
   const handleCreate = useCallback(async () => {
     if (!newName.trim()) { setCreateError("Name is required"); return; }
@@ -96,13 +122,22 @@ export default function ScenariosPage() {
           <h2 className="text-lg font-semibold text-neutral-900">Scenarios</h2>
           <p className="text-sm text-neutral-500 mt-0.5">Visual call flow builder</p>
         </div>
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 bg-[#F22F46] hover:bg-[#d9243b] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-        >
-          <Plus className="w-4 h-4" />
-          New Scenario
-        </button>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/scenarios/new"
+            className="flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-all shadow-sm"
+          >
+            <Sparkles className="w-4 h-4" />
+            Create with AI
+          </Link>
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 bg-[#F22F46] hover:bg-[#d9243b] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            <Plus className="w-4 h-4" />
+            New Scenario
+          </button>
+        </div>
       </div>
 
       {/* Create Modal */}
@@ -173,24 +208,36 @@ export default function ScenariosPage() {
           </div>
           <h3 className="font-semibold text-neutral-700 mb-1">No scenarios yet</h3>
           <p className="text-neutral-400 text-sm mb-4">Create visual call flows without code.</p>
-          <button
-            onClick={() => setShowCreate(true)}
-            className="inline-flex items-center gap-2 bg-[#F22F46] hover:bg-[#d9243b] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-          >
-            <Plus className="w-4 h-4" />
-            Create your first scenario
-          </button>
+          <div className="flex items-center justify-center gap-2 flex-wrap">
+            <Link
+              href="/scenarios/new"
+              className="inline-flex items-center gap-2 bg-gradient-to-r from-violet-600 to-indigo-600 hover:from-violet-700 hover:to-indigo-700 text-white text-sm font-medium px-4 py-2 rounded-lg transition-all shadow-sm"
+            >
+              <Sparkles className="w-4 h-4" />
+              Create with AI
+            </Link>
+            <button
+              onClick={() => setShowCreate(true)}
+              className="inline-flex items-center gap-2 bg-[#F22F46] hover:bg-[#d9243b] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+            >
+              <Plus className="w-4 h-4" />
+              Build manually
+            </button>
+          </div>
         </div>
       ) : (
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
           {scenarios.map((s) => (
             <div key={s.id} className="bg-white border border-neutral-200 rounded-xl p-5 hover:border-neutral-300 transition-colors">
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 bg-blue-50 rounded-lg flex items-center justify-center">
                   <GitBranch className="w-4 h-4 text-blue-500" />
                 </div>
-                <div>
-                  <h3 className="font-semibold text-neutral-800 text-sm">{s.name || "Untitled Scenario"}</h3>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-neutral-800 text-sm truncate">{s.name || "Untitled Scenario"}</h3>
+                    {isSuperAdmin && <OwnerBadge ownerId={s.ownerId} usersMap={usersMap} />}
+                  </div>
                   <p className="text-xs text-neutral-400">{s.nodes?.length || 0} nodes</p>
                 </div>
               </div>
@@ -200,6 +247,13 @@ export default function ScenariosPage() {
                   {s.createdAt ? formatDate((s.createdAt as Timestamp).toDate()) : "—"}
                 </span>
                 <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => { setSimScenarioId(s.id); setSimScenarioName(s.name || "Scenario"); }}
+                    title="Test scenario (phone simulator)"
+                    className="w-6 h-6 flex items-center justify-center text-neutral-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors"
+                  >
+                    <Play className="w-3 h-3" />
+                  </button>
                   <button
                     onClick={() => handleDuplicate(s)}
                     title="Duplicate"
@@ -224,6 +278,18 @@ export default function ScenariosPage() {
           ))}
         </div>
       )}
+      {/* Phone simulator modal */}
+      {simScenarioId && (
+        <ScenarioPhoneSimulator
+          scenarioId={simScenarioId}
+          scenarioName={simScenarioName}
+          onClose={() => setSimScenarioId(null)}
+        />
+      )}
     </div>
   );
+}
+
+export default function ScenariosPage() {
+  return <FeatureGate featureId="module.scenarios"><ScenariosPageInner /></FeatureGate>;
 }

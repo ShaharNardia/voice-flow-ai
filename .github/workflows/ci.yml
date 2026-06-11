@@ -1,0 +1,61 @@
+name: CI
+
+# Runs on every PR and push to main. Lint + typecheck + build + unit tests.
+# Deploys are intentionally NOT automated here yet — they need Workload
+# Identity Federation set up (see docs/DEPLOY.md). This gate exists so broken
+# code is caught before it can be hand-deployed.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  frontend:
+    name: Frontend (build + typecheck)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: saas-frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: saas-frontend/package-lock.json
+      - run: npm ci
+      - run: npm run build   # next build runs tsc + eslint
+
+  functions:
+    name: Firebase Functions (lint + unit tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: firebase/functions
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: firebase/functions/package-lock.json
+      - run: npm ci
+      - run: node --test *.test.js
+
+  mediastream:
+    name: Cloud Run mediastream (unit tests)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cloud-run/mediastream
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: cloud-run/mediastream/package-lock.json
+      - run: npm ci
+      - run: node --test *.test.js

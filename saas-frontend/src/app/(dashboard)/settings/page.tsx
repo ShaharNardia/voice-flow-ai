@@ -19,6 +19,8 @@ import {
   XCircle,
   Loader2,
 } from "lucide-react";
+import EnableNotificationsCard from "@/components/EnableNotificationsCard";
+import InstallPwaBanner from "@/components/InstallPwaBanner";
 
 type ServiceKey = keyof UserIntegrationStatus["services"];
 
@@ -71,10 +73,13 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-xl space-y-6">
+      <InstallPwaBanner />
       <div>
         <h2 className="text-lg font-semibold text-neutral-900">Settings</h2>
         <p className="text-sm text-neutral-500 mt-0.5">Account and integration configuration</p>
       </div>
+
+      <EnableNotificationsCard />
 
       {/* Account */}
       <div className="bg-white border border-neutral-200 rounded-xl p-5">

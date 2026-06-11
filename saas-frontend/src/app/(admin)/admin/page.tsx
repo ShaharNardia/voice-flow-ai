@@ -1,10 +1,12 @@
 "use client";
 
-import React, { useEffect, useState, useMemo, useCallback, createContext, useContext, useRef } from "react";
+import React, { useEffect, useState, useMemo, useCallback, createContext, useContext, useRef, Fragment } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { useUsersMap } from "@/hooks/useUsersMap";
 import {
   adminListUsers, adminToggleUser, adminDeleteUser,
   adminSetRole, adminResetPassword, adminCreateUser, adminGetUserDetail,
+  assistantsDelete, scenariosDelete,
   adminGetSubscriptions, adminOverridePlan,
   adminGetPlanConfig, adminUpdatePlanConfig,
   adminGetBillingConfig, adminUpdateBillingConfig,
@@ -17,6 +19,11 @@ import {
   adminGetRateCard, adminUpdateRateCard,
   adminGetCustomerPricing, adminUpdateCustomerPricing,
   adminGetCostDashboard,
+  adminListTutorStudents, adminListStudentLessons,
+  adminGetFeatureConfig, adminSetFeatureConfig, adminSetUserFeatures,
+  type FeatureRegistryEntry,
+  type AdminTutorStudent, type AdminStudentLesson,
+  adminGetActivityLog, type ActivityLogEntry, type ActivityLogResponse,
   type AdminUser, type Assistant, type AdminCallSession,
   type AdminSubscriptionUser, type PlanTier,
   type AllPlanConfigs, type PlanConfig,
@@ -25,10 +32,11 @@ import {
   type AdminPhoneNumber, type AllIntegrationResults, type IntegrationResult,
 } from "@/lib/firebase-functions";
 import {
-  Loader2, Users, ShieldCheck, ShieldOff, Trash2, KeyRound, Eye,
-  UserPlus, X, Copy, Check, Phone, Bot, CreditCard, BarChart3,
+  Loader2, Users, ShieldCheck, ShieldOff, Trash2, KeyRound, Eye, Pencil,
+  UserPlus, X, Copy, Check, Phone, Bot, CreditCard, BarChart3, GitBranch,
   Key, Settings, ExternalLink, AlertTriangle, Save, RotateCcw,
-  CheckCircle2, XCircle, Info, RefreshCw, Globe, Wifi, WifiOff, DollarSign, TrendingUp,
+  CheckCircle2, XCircle, Info, RefreshCw, Globe, Wifi, WifiOff, DollarSign, TrendingUp, GraduationCap,
+  Activity, ChevronDown, ChevronRight, Clock, ToggleLeft,
 } from "lucide-react";
 
 // ── Error toast context ───────────────────────────────────────────────────────
@@ -66,9 +74,12 @@ const TABS = [
   { id: "plans",         label: "Plans & Pricing",      icon: BarChart3 },
   { id: "apikeys",       label: "API Keys",             icon: Key },
   { id: "settings",      label: "System Settings",      icon: Settings },
+  { id: "features",      label: "Features",             icon: ToggleLeft },
   { id: "phone",         label: "Phone & Integrations", icon: Phone },
   { id: "pronunciation", label: "Pronunciation",        icon: Globe },
+  { id: "activity",      label: "Activity Log",         icon: Activity },
   { id: "costs",         label: "Costs & Revenue",      icon: DollarSign },
+  { id: "tutor",         label: "Tutor Students",       icon: GraduationCap },
 ] as const;
 
 type TabId = typeof TABS[number]["id"];
@@ -89,11 +100,14 @@ function PlanBadge({ plan }: { plan?: string }) {
   );
 }
 
-function Badge({ role }: { role: "admin" | "user" }) {
+function Badge({ role }: { role: string }) {
+  const style =
+    role === "super_admin" ? "bg-red-100 text-red-700" :
+    role === "admin" ? "bg-purple-100 text-purple-700" :
+    "bg-neutral-100 text-neutral-600";
+  const label = role === "super_admin" ? "super admin" : role;
   return (
-    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${
-      role === "admin" ? "bg-purple-100 text-purple-700" : "bg-neutral-100 text-neutral-600"
-    }`}>{role}</span>
+    <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${style}`}>{label}</span>
   );
 }
 
@@ -144,7 +158,8 @@ function ToggleSwitch({ value, onChange }: { value: boolean; onChange: (v: boole
 
 // ── Tab 1: Users ──────────────────────────────────────────────────────────────
 
-function UsersTab({ currentUid }: { currentUid?: string }) {
+function UsersTab({ currentUid, currentRole }: { currentUid?: string; currentRole?: string }) {
+  const isSuperAdmin = currentRole === "super_admin";
   const showError = useErrorToast();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [loading, setLoading] = useState(true);
@@ -160,7 +175,17 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
   const [copied, setCopied] = useState(false);
 
   const [detailUser, setDetailUser] = useState<AdminUser | null>(null);
-  const [detail, setDetail] = useState<{ assistants: Assistant[]; recentCalls: AdminCallSession[]; plan?: string; stripeCustomerId?: string; stripeStatus?: string } | null>(null);
+  const [detail, setDetail] = useState<{
+    assistants: { id: string; name: string; language?: string; voice?: string; createdAt?: unknown }[];
+    recentCalls: { id: string; leadNumber?: string; status?: string; createdAt?: unknown; assistantName?: string; scenarioId?: string; duration?: number }[];
+    scenarios: { id: string; name: string; description?: string; nodeCount?: number; isActive?: boolean; createdAt?: unknown }[];
+    leads: { id: string; name?: string; phone?: string; email?: string; status?: string; createdAt?: unknown }[];
+    campaigns: { id: string; name?: string; status?: string; leadCount?: number; createdAt?: unknown }[];
+    phoneNumbers: { id: string; phoneNumber: string; friendlyName?: string; assistantId?: string }[];
+    plan?: string;
+    stripeCustomerId?: string;
+    stripeStatus?: string;
+  } | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   const [showCreate, setShowCreate] = useState(false);
@@ -170,6 +195,20 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
   const [createRole, setCreateRole] = useState<"user" | "admin">("user");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
+
+  // Edit user state
+  const [editUser, setEditUser] = useState<AdminUser | null>(null);
+  const [editRole, setEditRole] = useState<"user" | "admin" | "super_admin">("user");
+  const [editPlan, setEditPlan] = useState<"basic" | "pro" | "scale">("basic");
+  const [editStatus, setEditStatus] = useState<"active" | "suspended">("active");
+  // Feature overrides state for the currently-edited user.
+  // Values: true = force on, false = force off, undefined = inherit role default.
+  const [editFeatureOverrides, setEditFeatureOverrides] = useState<Record<string, boolean>>({});
+  const [initialFeatureOverrides, setInitialFeatureOverrides] = useState<Record<string, boolean>>({});
+  const [featureRegistry, setFeatureRegistry] = useState<FeatureRegistryEntry[]>([]);
+  const [featureModuleOpen, setFeatureModuleOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState("");
 
   useEffect(() => {
     adminListUsers()
@@ -188,7 +227,7 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
     total: users.length,
     active: users.filter(u => u.status === "active").length,
     suspended: users.filter(u => u.status === "suspended").length,
-    admins: users.filter(u => u.role === "admin").length,
+    admins: users.filter(u => u.role === "admin" || u.role === "super_admin").length,
     assistants: users.reduce((s, u) => s + (u.assistantCount || 0), 0),
     pro: users.filter(u => u.plan === "pro" || u.plan === "scale").length,
   }), [users]);
@@ -205,9 +244,13 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
     finally { setToggling(null); }
   };
 
-  const handleRoleToggle = async (u: AdminUser) => {
-    const newRole = u.role === "admin" ? "user" : "admin";
-    if (!confirm(`Change ${u.email} role to "${newRole}"?`)) return;
+  const handleRoleChange = async (u: AdminUser, newRole: "user" | "admin" | "super_admin") => {
+    if (newRole === u.role) return;
+    const label = newRole === "super_admin" ? "SUPER ADMIN" : newRole.toUpperCase();
+    const warning = newRole === "super_admin"
+      ? `\n\n⚠ Super admins have full system access — including billing, rate cards, user management, and all tenant data. Only promote someone you trust.`
+      : "";
+    if (!confirm(`Change ${u.email} role to "${label}"?${warning}`)) return;
     setSettingRole(u.uid);
     try {
       await adminSetRole({ uid: u.uid, role: newRole });
@@ -242,7 +285,7 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
     try {
       const d = await adminGetUserDetail(u.uid);
       setDetail(d);
-    } catch { setDetail({ assistants: [], recentCalls: [] }); }
+    } catch { setDetail({ assistants: [], recentCalls: [], scenarios: [], leads: [], campaigns: [], phoneNumbers: [] }); }
     finally { setLoadingDetail(false); }
   };
 
@@ -252,6 +295,89 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
+  };
+
+  const openEditUser = async (u: AdminUser) => {
+    setEditUser(u);
+    setEditRole(u.role as "user" | "admin" | "super_admin");
+    setEditPlan((u.plan as "basic" | "pro" | "scale") || "basic");
+    setEditStatus(u.status as "active" | "suspended");
+    setEditError("");
+    setEditFeatureOverrides({});
+    setInitialFeatureOverrides({});
+    setFeatureModuleOpen(false);
+    // Load the user's current feature overrides + registry (super_admin only)
+    if (isSuperAdmin) {
+      try {
+        const [detail, cfg] = await Promise.all([
+          adminGetUserDetail(u.uid),
+          featureRegistry.length ? Promise.resolve(null) : adminGetFeatureConfig(),
+        ]);
+        const overrides = detail.featureOverrides || {};
+        setEditFeatureOverrides({ ...overrides });
+        setInitialFeatureOverrides({ ...overrides });
+        if (cfg) setFeatureRegistry(cfg.featureRegistry);
+      } catch {
+        // Non-fatal; UI will show "unavailable"
+      }
+    }
+  };
+
+  const handleSaveEdit = async () => {
+    if (!editUser) return;
+    setSaving(true);
+    setEditError("");
+    try {
+      const updates: Promise<unknown>[] = [];
+
+      // Role change (super_admin only)
+      if (isSuperAdmin && editRole !== editUser.role) {
+        updates.push(adminSetRole({ uid: editUser.uid, role: editRole }));
+      }
+
+      // Plan change
+      if (editPlan !== (editUser.plan || "basic")) {
+        updates.push(adminOverridePlan({ uid: editUser.uid, plan: editPlan }));
+      }
+
+      // Status change
+      if (editStatus !== editUser.status) {
+        updates.push(adminToggleUser({ uid: editUser.uid, status: editStatus }));
+      }
+
+      // Feature overrides diff — only send keys that changed.
+      if (isSuperAdmin) {
+        const diff: Record<string, boolean | null> = {};
+        const allKeys = Array.from(new Set([
+          ...Object.keys(editFeatureOverrides),
+          ...Object.keys(initialFeatureOverrides),
+        ]));
+        for (const k of allKeys) {
+          const before = initialFeatureOverrides[k];
+          const after = editFeatureOverrides[k];
+          if (before === after) continue;
+          if (after === undefined) diff[k] = null;       // inherit (delete)
+          else diff[k] = after;                          // force on/off
+        }
+        if (Object.keys(diff).length > 0) {
+          updates.push(adminSetUserFeatures({ uid: editUser.uid, featureOverrides: diff }));
+        }
+      }
+
+      if (updates.length === 0) { setEditUser(null); return; }
+
+      await Promise.all(updates);
+      setUsers(prev => prev.map(u => u.uid === editUser.uid ? {
+        ...u,
+        role: (isSuperAdmin && editUser.role !== "super_admin") ? editRole : u.role,
+        plan: editPlan,
+        status: editStatus,
+        disabled: editStatus === "suspended",
+      } : u));
+      setEditUser(null);
+    } catch (err: unknown) {
+      setEditError(err instanceof Error ? err.message : "Failed to save changes");
+    } finally { setSaving(false); }
   };
 
   const handleCreate = async (e: React.FormEvent) => {
@@ -295,13 +421,15 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
           onChange={e => setSearch(e.target.value)}
           className="w-56 text-sm px-3 py-2 border border-neutral-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-neutral-200"
         />
-        <button
-          onClick={() => setShowCreate(true)}
-          className="flex items-center gap-2 bg-[#F22F46] hover:bg-[#d9243b] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
-        >
-          <UserPlus className="w-4 h-4" />
-          Create User
-        </button>
+        {isSuperAdmin && (
+          <button
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-2 bg-[#F22F46] hover:bg-[#d9243b] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+          >
+            <UserPlus className="w-4 h-4" />
+            Create User
+          </button>
+        )}
       </div>
 
       {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">{error}</div>}
@@ -331,14 +459,27 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
                     <div className="text-xs text-neutral-400">{u.email}</div>
                   </td>
                   <td className="px-4 py-3">
-                    <button
-                      onClick={() => !isSelf(u) && handleRoleToggle(u)}
-                      disabled={isSelf(u) || settingRole === u.uid}
-                      title={isSelf(u) ? "Cannot change own role" : `Click to make ${u.role === "admin" ? "user" : "admin"}`}
-                      className={`${isSelf(u) ? "cursor-default" : "cursor-pointer hover:opacity-80"} transition-opacity`}
-                    >
-                      {settingRole === u.uid ? <Loader2 className="w-3 h-3 animate-spin" /> : <Badge role={u.role} />}
-                    </button>
+                    {isSuperAdmin && !isSelf(u) ? (
+                      settingRole === u.uid ? (
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                      ) : (
+                        <select
+                          value={u.role}
+                          onChange={(e) => handleRoleChange(u, e.target.value as "user" | "admin" | "super_admin")}
+                          className={`text-xs font-semibold rounded-full px-2.5 py-1 border cursor-pointer hover:opacity-90 ${
+                            u.role === "super_admin" ? "bg-red-100 text-red-700 border-red-200"
+                            : u.role === "admin" ? "bg-blue-100 text-blue-700 border-blue-200"
+                            : "bg-neutral-100 text-neutral-600 border-neutral-200"
+                          }`}
+                        >
+                          <option value="user">user</option>
+                          <option value="admin">admin</option>
+                          <option value="super_admin">super admin</option>
+                        </select>
+                      )
+                    ) : (
+                      <Badge role={u.role} />
+                    )}
                   </td>
                   <td className="px-4 py-3"><PlanBadge plan={u.plan} /></td>
                   <td className="px-4 py-3 text-neutral-600">{u.assistantCount ?? 0}</td>
@@ -366,6 +507,15 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
                       >
                         {resetting === u.uid ? <Loader2 className="w-4 h-4 animate-spin" /> : <KeyRound className="w-4 h-4" />}
                       </button>
+                      {!isSelf(u) && (
+                        <button
+                          onClick={() => openEditUser(u)}
+                          title="Edit user"
+                          className="p-1.5 rounded-md text-neutral-400 hover:text-amber-600 hover:bg-amber-50 transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                      )}
                       <button
                         onClick={() => handleViewDetail(u)}
                         title="View details"
@@ -373,7 +523,7 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
                       >
                         <Eye className="w-4 h-4" />
                       </button>
-                      {!isSelf(u) && (
+                      {isSuperAdmin && !isSelf(u) && u.role !== "super_admin" && (
                         <button
                           onClick={() => handleDelete(u)}
                           disabled={deleting === u.uid}
@@ -419,7 +569,7 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
       {detailUser && (
         <div className="fixed inset-0 z-40 flex">
           <div className="flex-1 bg-black/30" onClick={() => setDetailUser(null)} />
-          <div className="w-96 bg-white shadow-xl flex flex-col overflow-hidden">
+          <div className="w-[480px] bg-white shadow-xl flex flex-col overflow-hidden">
             <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
               <div>
                 <p className="font-semibold text-neutral-900">{detailUser.displayName || detailUser.email}</p>
@@ -465,13 +615,145 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
                       <h3 className="text-sm font-semibold text-neutral-800">Assistants <span className="text-neutral-400 font-normal">({detail.assistants.length})</span></h3>
                     </div>
                     {detail.assistants.length === 0 ? (
-                      <p className="text-xs text-neutral-400">No assistants yet.</p>
+                      <p className="text-xs text-neutral-400">No assistants.</p>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="space-y-1.5">
                         {detail.assistants.map(a => (
                           <div key={a.id} className="flex items-center justify-between py-2 px-3 bg-neutral-50 rounded-lg">
-                            <span className="text-sm text-neutral-800">{a.name}</span>
-                            <span className="text-xs text-neutral-400">{a.language}</span>
+                            <div>
+                              <span className="text-sm text-neutral-800">{a.name}</span>
+                              {a.language && <span className="text-xs text-neutral-400 ml-2">{a.language}</span>}
+                            </div>
+                            {isSuperAdmin && (
+                              <button
+                                onClick={async () => {
+                                  if (!confirm(`Delete assistant "${a.name}"?`)) return;
+                                  try {
+                                    await assistantsDelete({id: a.id});
+                                    setDetail(prev => prev ? {...prev, assistants: prev.assistants.filter(x => x.id !== a.id)} : prev);
+                                  } catch (e: unknown) { showError(e instanceof Error ? e.message : "Failed"); }
+                                }}
+                                className="p-1 text-neutral-400 hover:text-red-500 transition-colors"
+                                title="Delete assistant"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Scenarios */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <GitBranch className="w-4 h-4 text-neutral-400" />
+                      <h3 className="text-sm font-semibold text-neutral-800">Scenarios <span className="text-neutral-400 font-normal">({detail.scenarios.length})</span></h3>
+                    </div>
+                    {detail.scenarios.length === 0 ? (
+                      <p className="text-xs text-neutral-400">No scenarios.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {detail.scenarios.map(s => (
+                          <div key={s.id} className="flex items-center justify-between py-2 px-3 bg-neutral-50 rounded-lg">
+                            <div>
+                              <span className="text-sm text-neutral-800">{s.name}</span>
+                              <span className="text-xs text-neutral-400 ml-2">{s.nodeCount || 0} nodes</span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <a href={`/scenarios/edit?id=${s.id}`} target="_blank" rel="noopener noreferrer"
+                                className="p-1 text-neutral-400 hover:text-blue-500 transition-colors" title="Edit scenario">
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                              {isSuperAdmin && (
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm(`Delete scenario "${s.name}"?`)) return;
+                                    try {
+                                      await scenariosDelete(s.id);
+                                      setDetail(prev => prev ? {...prev, scenarios: prev.scenarios.filter(x => x.id !== s.id)} : prev);
+                                    } catch (e: unknown) { showError(e instanceof Error ? e.message : "Failed"); }
+                                  }}
+                                  className="p-1 text-neutral-400 hover:text-red-500 transition-colors" title="Delete scenario"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Phone Numbers */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Phone className="w-4 h-4 text-neutral-400" />
+                      <h3 className="text-sm font-semibold text-neutral-800">Phone Numbers <span className="text-neutral-400 font-normal">({detail.phoneNumbers.length})</span></h3>
+                    </div>
+                    {detail.phoneNumbers.length === 0 ? (
+                      <p className="text-xs text-neutral-400">No phone numbers assigned.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {detail.phoneNumbers.map(p => (
+                          <div key={p.id} className="flex items-center justify-between py-2 px-3 bg-neutral-50 rounded-lg">
+                            <span className="text-sm text-neutral-800 font-mono">{p.phoneNumber}</span>
+                            {p.friendlyName && <span className="text-xs text-neutral-400">{p.friendlyName}</span>}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Leads */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <Users className="w-4 h-4 text-neutral-400" />
+                      <h3 className="text-sm font-semibold text-neutral-800">Leads <span className="text-neutral-400 font-normal">({detail.leads.length})</span></h3>
+                    </div>
+                    {detail.leads.length === 0 ? (
+                      <p className="text-xs text-neutral-400">No leads.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {detail.leads.slice(0, 10).map(l => (
+                          <div key={l.id} className="flex items-center justify-between py-2 px-3 bg-neutral-50 rounded-lg">
+                            <div>
+                              <span className="text-sm text-neutral-800">{l.name || l.phone || "Unknown"}</span>
+                              {l.email && <span className="text-xs text-neutral-400 ml-2">{l.email}</span>}
+                            </div>
+                            <span className={`text-xs px-1.5 py-0.5 rounded-full ${l.status === "contacted" ? "bg-green-100 text-green-600" : "bg-neutral-100 text-neutral-500"}`}>
+                              {l.status || "new"}
+                            </span>
+                          </div>
+                        ))}
+                        {detail.leads.length > 10 && (
+                          <p className="text-xs text-neutral-400 text-center">...and {detail.leads.length - 10} more</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Campaigns */}
+                  <div>
+                    <div className="flex items-center gap-2 mb-3">
+                      <BarChart3 className="w-4 h-4 text-neutral-400" />
+                      <h3 className="text-sm font-semibold text-neutral-800">Campaigns <span className="text-neutral-400 font-normal">({detail.campaigns.length})</span></h3>
+                    </div>
+                    {detail.campaigns.length === 0 ? (
+                      <p className="text-xs text-neutral-400">No campaigns.</p>
+                    ) : (
+                      <div className="space-y-1.5">
+                        {detail.campaigns.map(c => (
+                          <div key={c.id} className="flex items-center justify-between py-2 px-3 bg-neutral-50 rounded-lg">
+                            <span className="text-sm text-neutral-800">{c.name || "Untitled"}</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-neutral-400">{c.leadCount || 0} leads</span>
+                              <span className={`text-xs px-1.5 py-0.5 rounded-full ${c.status === "running" ? "bg-green-100 text-green-600" : "bg-neutral-100 text-neutral-500"}`}>
+                                {c.status || "draft"}
+                              </span>
+                            </div>
                           </div>
                         ))}
                       </div>
@@ -487,7 +769,7 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
                     {detail.recentCalls.length === 0 ? (
                       <p className="text-xs text-neutral-400">No calls yet.</p>
                     ) : (
-                      <div className="space-y-2">
+                      <div className="space-y-1.5">
                         {detail.recentCalls.map(c => (
                           <div key={c.id} className="py-2 px-3 bg-neutral-50 rounded-lg">
                             <div className="flex items-center justify-between">
@@ -553,6 +835,126 @@ function UsersTab({ currentUid }: { currentUid?: string }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Edit User Modal */}
+      {editUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-base font-semibold text-neutral-900">Edit User</h2>
+                <p className="text-xs text-neutral-400 mt-0.5">{editUser.email}</p>
+              </div>
+              <button onClick={() => setEditUser(null)} className="text-neutral-400 hover:text-neutral-600"><X className="w-5 h-5" /></button>
+            </div>
+            {editError && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">{editError}</div>}
+            <div className="space-y-4">
+              {/* Role */}
+              <div>
+                <label className="block text-xs font-medium text-neutral-500 uppercase tracking-wide mb-1.5">Role</label>
+                {isSuperAdmin && !isSelf(editUser) ? (
+                  <>
+                    <select value={editRole} onChange={e => setEditRole(e.target.value as "user" | "admin" | "super_admin")}
+                      className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200 bg-white">
+                      <option value="user">User</option>
+                      <option value="admin">Admin</option>
+                      <option value="super_admin">Super Admin</option>
+                    </select>
+                    {editRole === "super_admin" && editUser.role !== "super_admin" && (
+                      <p className="text-xs text-red-600 mt-1.5 flex items-start gap-1">
+                        <span>⚠</span>
+                        <span>Super admins have full system access including billing, rate cards, user management, and all tenant data. Only promote someone you trust.</span>
+                      </p>
+                    )}
+                  </>
+                ) : (
+                  <div className="px-3 py-2.5 text-sm bg-neutral-50 border border-neutral-200 rounded-lg text-neutral-500">
+                    <Badge role={editUser.role} />
+                    <span className="ml-2 text-xs text-neutral-400">{isSelf(editUser) ? "(can't change your own role)" : "(only super admin can change roles)"}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Plan */}
+              <div>
+                <label className="block text-xs font-medium text-neutral-500 uppercase tracking-wide mb-1.5">Plan</label>
+                <select value={editPlan} onChange={e => setEditPlan(e.target.value as "basic" | "pro" | "scale")}
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200 bg-white">
+                  <option value="basic">Basic</option>
+                  <option value="pro">Pro</option>
+                  <option value="scale">Scale</option>
+                </select>
+              </div>
+
+              {/* Status */}
+              <div>
+                <label className="block text-xs font-medium text-neutral-500 uppercase tracking-wide mb-1.5">Status</label>
+                <select value={editStatus} onChange={e => setEditStatus(e.target.value as "active" | "suspended")}
+                  className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-neutral-200 bg-white">
+                  <option value="active">Active</option>
+                  <option value="suspended">Suspended</option>
+                </select>
+              </div>
+
+              {/* Module access (super_admin only) */}
+              {isSuperAdmin && featureRegistry.length > 0 && (
+                <div className="border border-neutral-200 rounded-lg">
+                  <button type="button" onClick={() => setFeatureModuleOpen(o => !o)}
+                    className="w-full flex items-center justify-between px-3 py-2.5 text-left text-sm hover:bg-neutral-50 transition-colors">
+                    <span className="font-medium text-neutral-700">Module access</span>
+                    <ChevronDown className={`w-4 h-4 text-neutral-400 transition-transform ${featureModuleOpen ? "rotate-180" : ""}`} />
+                  </button>
+                  {featureModuleOpen && (
+                    <div className="px-3 pb-3 pt-1 border-t border-neutral-200 space-y-2 max-h-[280px] overflow-y-auto">
+                      <p className="text-xs text-neutral-500 pt-2 pb-1">
+                        &quot;Inherit&quot; uses the role default. Override here to force a module on or off for this user only.
+                      </p>
+                      {featureRegistry.map((f) => {
+                        const current = editFeatureOverrides[f.id];
+                        const value = current === undefined ? "inherit" : current ? "on" : "off";
+                        return (
+                          <div key={f.id} className="flex items-center justify-between gap-2 py-1">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm text-neutral-700 truncate">{f.label}</div>
+                              <div className="text-[10px] text-neutral-400 uppercase tracking-wide">{f.kind}</div>
+                            </div>
+                            <select
+                              value={value}
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setEditFeatureOverrides(prev => {
+                                  const next = { ...prev };
+                                  if (v === "inherit") delete next[f.id];
+                                  else next[f.id] = v === "on";
+                                  return next;
+                                });
+                              }}
+                              className="text-xs border border-neutral-200 rounded-md px-2 py-1 bg-white focus:outline-none"
+                            >
+                              <option value="inherit">Inherit</option>
+                              <option value="on">Force on</option>
+                              <option value="off">Force off</option>
+                            </select>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button type="button" onClick={() => setEditUser(null)}
+                  className="flex-1 border border-neutral-200 text-neutral-600 py-2.5 rounded-lg text-sm hover:bg-neutral-50 transition-colors">Cancel</button>
+                <button onClick={handleSaveEdit} disabled={saving}
+                  className="flex-1 bg-[#F22F46] hover:bg-[#d9243b] text-white py-2.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-60 flex items-center justify-center gap-2">
+                  {saving && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {saving ? "Saving..." : "Save Changes"}
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       )}
@@ -842,17 +1244,25 @@ function PlansTab({ wasLoaded }: { wasLoaded: boolean }) {
                   { key: "minutesPerMonth" as const, label: "Minutes/Month" },
                   { key: "leads" as const, label: "Leads" },
                   { key: "campaigns" as const, label: "Campaigns" },
-                ] as Array<{ key: keyof PlanConfig; label: string }>).map(({ key, label }) => (
-                  <div key={key} className="flex items-center justify-between">
-                    <span className="text-xs text-neutral-500">{label}</span>
-                    <input
-                      type="number" min={0}
-                      value={p[key] as number}
-                      onChange={e => updateTier(tier, key, Number(e.target.value))}
-                      className="w-20 text-xs text-right border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
-                    />
-                  </div>
-                ))}
+                ] as Array<{ key: keyof PlanConfig; label: string }>).map(({ key, label }) => {
+                  // null (or negative) = Unlimited. Leave the field empty so
+                  // the ∞ placeholder shows; round-trip null on save.
+                  const raw = p[key];
+                  const isUnlimited = raw === null || raw === undefined || (typeof raw === "number" && raw < 0);
+                  return (
+                    <div key={key} className="flex items-center justify-between">
+                      <span className="text-xs text-neutral-500">{label}</span>
+                      <input
+                        type="number" min={0}
+                        value={isUnlimited ? "" : (raw as number)}
+                        placeholder="∞"
+                        title={isUnlimited ? "Unlimited — leave empty for no cap" : ""}
+                        onChange={e => updateTier(tier, key, e.target.value === "" ? null : Number(e.target.value))}
+                        className="w-20 text-xs text-right border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300"
+                      />
+                    </div>
+                  );
+                })}
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-neutral-500">Call History Limit</span>
                   <input
@@ -1195,7 +1605,7 @@ function SystemSettingsTab({ wasLoaded }: { wasLoaded: boolean }) {
         </div>
       )}
 
-      <div className="space-y-5 max-w-2xl">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 max-w-6xl">
         {/* General */}
         <div className="bg-white border border-neutral-200 rounded-xl p-5">
           <h3 className="text-sm font-semibold text-neutral-900 mb-4">General</h3>
@@ -1291,6 +1701,125 @@ function SystemSettingsTab({ wasLoaded }: { wasLoaded: boolean }) {
   );
 }
 
+// ── Tab: Features (role defaults) ─────────────────────────────────────────────
+
+function FeaturesTab({ wasLoaded, isSuperAdmin }: { wasLoaded: boolean; isSuperAdmin: boolean }) {
+  const showError = useErrorToast();
+  const [registry, setRegistry] = useState<FeatureRegistryEntry[]>([]);
+  const [defaults, setDefaults] = useState<{ user: Record<string, boolean>; admin: Record<string, boolean> }>({ user: {}, admin: {} });
+  const [loading, setLoading] = useState(false);
+  const [savingKey, setSavingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!wasLoaded || !isSuperAdmin) return;
+    setLoading(true);
+    adminGetFeatureConfig()
+      .then((res) => {
+        setRegistry(res.featureRegistry);
+        setDefaults({ user: res.defaults.user || {}, admin: res.defaults.admin || {} });
+      })
+      .catch((e) => showError(e instanceof Error ? e.message : "Failed to load feature config"))
+      .finally(() => setLoading(false));
+  }, [wasLoaded, isSuperAdmin, showError]);
+
+  const effective = (role: "user" | "admin", f: FeatureRegistryEntry): boolean => {
+    const v = defaults[role][f.id];
+    return v === undefined ? f.defaultOn : v;
+  };
+
+  const toggle = async (role: "user" | "admin", f: FeatureRegistryEntry) => {
+    const next = !effective(role, f);
+    const key = `${role}:${f.id}`;
+    setSavingKey(key);
+    // optimistic
+    setDefaults(prev => ({ ...prev, [role]: { ...prev[role], [f.id]: next } }));
+    try {
+      await adminSetFeatureConfig({ role, featureId: f.id, enabled: next });
+    } catch (e) {
+      // revert
+      setDefaults(prev => ({ ...prev, [role]: { ...prev[role], [f.id]: !next } }));
+      showError(e instanceof Error ? e.message : "Failed to save");
+    } finally {
+      setSavingKey(null);
+    }
+  };
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="bg-white rounded-xl border border-neutral-200 p-8 text-center text-neutral-500">
+        Only super admins can manage feature defaults.
+      </div>
+    );
+  }
+
+  if (loading) {
+    return <div className="flex items-center justify-center py-16"><Loader2 className="w-5 h-5 animate-spin text-neutral-400" /></div>;
+  }
+
+  const navFeatures = registry.filter(f => f.kind === "nav");
+  const capFeatures = registry.filter(f => f.kind === "cap");
+
+  const renderRows = (list: FeatureRegistryEntry[]) => list.map((f) => (
+    <tr key={f.id} className="border-b border-neutral-100 last:border-0">
+      <td className="py-3 px-4">
+        <div className="text-sm text-neutral-800">{f.label}</div>
+        <div className="text-[11px] text-neutral-400 font-mono">{f.id}</div>
+      </td>
+      {(["user", "admin"] as const).map((role) => {
+        const on = effective(role, f);
+        const key = `${role}:${f.id}`;
+        return (
+          <td key={role} className="py-3 px-4 text-center">
+            <label className="inline-flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={on}
+                disabled={savingKey === key}
+                onChange={() => toggle(role, f)}
+                className="w-4 h-4 rounded border-neutral-300 text-[#F22F46] focus:ring-[#F22F46]"
+              />
+              {savingKey === key && <Loader2 className="w-3 h-3 animate-spin text-neutral-400" />}
+            </label>
+          </td>
+        );
+      })}
+      <td className="py-3 px-4 text-center text-neutral-400">
+        <Check className="w-4 h-4 inline text-neutral-300" />
+      </td>
+    </tr>
+  ));
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white rounded-xl border border-neutral-200 p-5">
+        <h2 className="text-base font-semibold text-neutral-900 mb-1">Feature defaults by role</h2>
+        <p className="text-sm text-neutral-500 mb-4">
+          Turn modules on or off for everyone in a role. Individual users can be overridden in <strong>Users → Edit</strong>.
+          Super admins always have access to everything.
+        </p>
+        <div className="overflow-x-auto">
+          <table className="w-full">
+            <thead>
+              <tr className="text-xs uppercase text-neutral-500 border-b border-neutral-200">
+                <th className="text-left py-2 px-4 font-medium">Feature</th>
+                <th className="py-2 px-4 font-medium w-24">User</th>
+                <th className="py-2 px-4 font-medium w-24">Admin</th>
+                <th className="py-2 px-4 font-medium w-28">Super admin</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr><td colSpan={4} className="px-4 pt-4 pb-1 text-xs uppercase tracking-wide text-neutral-400">Navigation modules</td></tr>
+              {renderRows(navFeatures)}
+              <tr><td colSpan={4} className="px-4 pt-4 pb-1 text-xs uppercase tracking-wide text-neutral-400">Capabilities</td></tr>
+              {renderRows(capFeatures)}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Tab 6: Phone & Integrations ───────────────────────────────────────────────
 
 type PhoneSection = "numbers" | "health";
@@ -1327,7 +1856,7 @@ function IntegrationCard({ name, result }: { name: string; result: IntegrationRe
 
 // ── Tab 7: Pronunciation Training ────────────────────────────────────────────
 
-const CLOUD_RUN_URL = "https://voiceflow-mediastream-900818829902.us-central1.run.app";
+const CLOUD_RUN_URL = "https://voiceflow-mediastream-900818829902.me-west1.run.app";
 
 function PronunciationTab({ wasLoaded }: { wasLoaded: boolean }) {
   const showError = useErrorToast();
@@ -1421,7 +1950,7 @@ function PronunciationTab({ wasLoaded }: { wasLoaded: boolean }) {
   if (loading) return <div className="flex items-center justify-center py-16"><Loader2 className="w-6 h-6 animate-spin text-neutral-400" /></div>;
 
   return (
-    <div className="space-y-5 max-w-3xl">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 max-w-6xl items-start">
       {/* TTS Voice Model Selector */}
       <div className="bg-white border border-neutral-200 rounded-xl p-5">
         <h3 className="text-sm font-semibold text-neutral-900 mb-1">בחירת קול TTS לעברית</h3>
@@ -1582,6 +2111,8 @@ function PronunciationTab({ wasLoaded }: { wasLoaded: boolean }) {
 function PhoneIntegrationsTab({ wasLoaded }: { wasLoaded: boolean }) {
   const showError = useErrorToast();
   const [section, setSection] = useState<PhoneSection>("numbers");
+  // #50 — resolve raw ownerIds to display emails when the audit field is missing.
+  const { usersMap } = useUsersMap();
 
   // Phone numbers state
   const [phones, setPhones] = useState<AdminPhoneNumber[]>([]);
@@ -1745,11 +2276,21 @@ function PhoneIntegrationsTab({ wasLoaded }: { wasLoaded: boolean }) {
                         <div className="text-xs text-neutral-400">{p.friendlyName !== p.phoneNumber ? p.friendlyName : p.sid}</div>
                       </td>
                       <td className="px-4 py-3">
-                        {p.ownerEmail ? (
-                          <span className="text-sm text-neutral-700">{p.ownerEmail}</span>
-                        ) : (
-                          <span className="text-xs text-neutral-400 italic">Unassigned</span>
-                        )}
+                        {(() => {
+                          const resolved = p.ownerId ? usersMap.get(p.ownerId) : null;
+                          const email = p.ownerEmail || resolved?.email;
+                          const name = resolved?.displayName;
+                          if (email) {
+                            return <span className="text-sm text-neutral-700" title={p.ownerId || ""}>{email}</span>;
+                          }
+                          if (name) {
+                            return <span className="text-sm text-neutral-700" title={p.ownerId || ""}>{name}</span>;
+                          }
+                          if (p.ownerId) {
+                            return <span className="text-xs font-mono text-neutral-500" title={p.ownerId}>{p.ownerId.slice(0, 8)}…</span>;
+                          }
+                          return <span className="text-xs text-neutral-400 italic">Unassigned</span>;
+                        })()}
                       </td>
                       <td className="px-4 py-3">
                         <span className="text-xs font-medium bg-neutral-100 text-neutral-600 px-2 py-0.5 rounded-full">{p.country}</span>
@@ -1968,7 +2509,7 @@ function CostsTab({ wasLoaded }: { wasLoaded: boolean }) {
       {loading ? <div className="text-center py-12 text-neutral-400 text-sm">Loading costs...</div> : s && (
         <>
           {/* Summary cards */}
-          <div className="grid grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
             {[
               { label: "Total Cost", value: `$${s.totalCost.toFixed(2)}`, color: "text-red-600" },
               { label: "Revenue", value: `$${s.totalRevenue.toFixed(2)}`, color: "text-green-600" },
@@ -1986,12 +2527,13 @@ function CostsTab({ wasLoaded }: { wasLoaded: boolean }) {
           {bs && (
             <div className="bg-white border border-neutral-200 rounded-xl p-5">
               <h3 className="text-sm font-semibold text-neutral-700 mb-3">Cost by Service</h3>
-              <div className="grid grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
                 {[
                   { name: "Twilio (Calls)", cost: bs.twilio, icon: "📞" },
                   { name: "OpenAI (LLM)", cost: bs.llm, icon: "🧠" },
                   { name: "Deepgram (STT)", cost: bs.stt, icon: "🎙️" },
                   { name: "TTS", cost: bs.tts, icon: "🔊" },
+                  { name: "Realtime (V2V)", cost: bs.realtime ?? 0, icon: "⚡" },
                 ].map(svc => {
                   const pct = s.totalCost > 0 ? (svc.cost / s.totalCost * 100).toFixed(0) : "0";
                   return (
@@ -2013,7 +2555,8 @@ function CostsTab({ wasLoaded }: { wasLoaded: boolean }) {
           {dashboard.byUser.length > 0 && (
             <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
               <h3 className="text-sm font-semibold text-neutral-700 p-4 border-b">Cost by User</h3>
-              <table className="w-full text-sm">
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
                 <thead><tr className="bg-neutral-50 text-neutral-500 text-xs uppercase">
                   <th className="px-4 py-2 text-left">User</th><th className="px-4 py-2 text-right">Calls</th>
                   <th className="px-4 py-2 text-right">Minutes</th><th className="px-4 py-2 text-right">Cost</th>
@@ -2032,6 +2575,35 @@ function CostsTab({ wasLoaded }: { wasLoaded: boolean }) {
                   ))}
                 </tbody>
               </table>
+              </div>
+            </div>
+          )}
+
+          {/* Cost by assistant */}
+          {dashboard.byAssistant && dashboard.byAssistant.length > 0 && (
+            <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
+              <h3 className="text-sm font-semibold text-neutral-700 p-4 border-b">Cost by Assistant</h3>
+              <div className="overflow-x-auto">
+              <table className="w-full text-sm min-w-[640px]">
+                <thead><tr className="bg-neutral-50 text-neutral-500 text-xs uppercase">
+                  <th className="px-4 py-2 text-left">Assistant</th><th className="px-4 py-2 text-right">Calls</th>
+                  <th className="px-4 py-2 text-right">Minutes</th><th className="px-4 py-2 text-right">Cost</th>
+                  <th className="px-4 py-2 text-right">Revenue</th><th className="px-4 py-2 text-right">Profit</th>
+                </tr></thead>
+                <tbody>
+                  {dashboard.byAssistant.map(a => (
+                    <tr key={a.assistantId} className="border-t border-neutral-100 hover:bg-neutral-50">
+                      <td className="px-4 py-2">{a.assistantName}</td>
+                      <td className="px-4 py-2 text-right">{a.calls}</td>
+                      <td className="px-4 py-2 text-right">{a.minutes}</td>
+                      <td className="px-4 py-2 text-right text-red-600">${a.cost.toFixed(4)}</td>
+                      <td className="px-4 py-2 text-right text-green-600">${a.revenue.toFixed(4)}</td>
+                      <td className={`px-4 py-2 text-right font-medium ${a.revenue - a.cost >= 0 ? "text-green-600" : "text-red-600"}`}>${(a.revenue - a.cost).toFixed(4)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              </div>
             </div>
           )}
         </>
@@ -2108,10 +2680,451 @@ function CostsTab({ wasLoaded }: { wasLoaded: boolean }) {
   );
 }
 
+// ── Tab: Activity Log (Super Admin only) ─────────────────────────────────────
+
+const ACTION_COLORS: Record<string, string> = {
+  create: "bg-green-100 text-green-700",
+  delete: "bg-red-100 text-red-600",
+  update: "bg-blue-100 text-blue-700",
+  toggle: "bg-amber-100 text-amber-700",
+  change: "bg-purple-100 text-purple-700",
+  place: "bg-cyan-100 text-cyan-700",
+  purchase: "bg-emerald-100 text-emerald-700",
+  release: "bg-orange-100 text-orange-700",
+  start: "bg-green-100 text-green-700",
+  override: "bg-amber-100 text-amber-700",
+  reset: "bg-indigo-100 text-indigo-700",
+  bootstrap: "bg-red-100 text-red-700",
+  batch: "bg-blue-100 text-blue-700",
+};
+
+function getActionColor(action: string): string {
+  for (const [key, cls] of Object.entries(ACTION_COLORS)) {
+    if (action.includes(key)) return cls;
+  }
+  return "bg-neutral-100 text-neutral-600";
+}
+
+const CATEGORY_OPTIONS = [
+  { value: "", label: "All Categories" },
+  { value: "user", label: "Users" },
+  { value: "scenario", label: "Scenarios" },
+  { value: "assistant", label: "Assistants" },
+  { value: "call", label: "Calls" },
+  { value: "phone", label: "Phone Numbers" },
+  { value: "lead", label: "Leads" },
+  { value: "campaign", label: "Campaigns" },
+  { value: "settings", label: "Settings" },
+  { value: "billing", label: "Billing" },
+];
+
+function formatTimeAgo(iso: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const now = new Date();
+  const diffMs = now.getTime() - d.getTime();
+  const diffMin = Math.floor(diffMs / 60000);
+  if (diffMin < 1) return "Just now";
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDay = Math.floor(diffHr / 24);
+  if (diffDay < 7) return `${diffDay}d ago`;
+  return d.toLocaleDateString();
+}
+
+function ActivityLogTab({ wasLoaded, isSuperAdmin }: { wasLoaded: boolean; isSuperAdmin: boolean }) {
+  const showError = useErrorToast();
+  // Resolve raw uids → emails for #50. Audit entries that don't carry
+  // userEmail still get a friendly display name when the user is in the
+  // active users map.
+  const { usersMap } = useUsersMap();
+  const [entries, setEntries] = useState<ActivityLogEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  const fetchLogs = useCallback(async (cursor?: string) => {
+    const isMore = !!cursor;
+    if (isMore) setLoadingMore(true); else setLoading(true);
+    try {
+      const result = await adminGetActivityLog({
+        limit: 50,
+        startAfter: cursor,
+        category: categoryFilter || undefined,
+      });
+      if (isMore) {
+        setEntries((prev) => [...prev, ...result.entries]);
+      } else {
+        setEntries(result.entries);
+      }
+      setNextCursor(result.nextCursor);
+    } catch (e: unknown) {
+      showError(e instanceof Error ? e.message : "Failed to load activity log");
+    } finally {
+      setLoading(false);
+      setLoadingMore(false);
+    }
+  }, [categoryFilter, showError]);
+
+  useEffect(() => {
+    if (!wasLoaded || !isSuperAdmin) return;
+    fetchLogs();
+  }, [wasLoaded, isSuperAdmin, fetchLogs]);
+
+  // Reload when filter changes
+  useEffect(() => {
+    if (!wasLoaded || !isSuperAdmin) return;
+    fetchLogs();
+  }, [categoryFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!isSuperAdmin) {
+    return (
+      <div className="text-center py-12 text-neutral-400 text-sm">
+        Activity Log is only available to Super Admins.
+      </div>
+    );
+  }
+
+  return (
+    <>
+      {/* Toolbar */}
+      <div className="flex items-center gap-3 mb-4">
+        <div className="flex items-center gap-2">
+          <Activity className="w-4 h-4 text-neutral-500" />
+          <h2 className="text-lg font-semibold text-neutral-900">Activity Log</h2>
+        </div>
+        <div className="flex-1" />
+        <select
+          value={categoryFilter}
+          onChange={(e) => setCategoryFilter(e.target.value)}
+          className="text-sm border border-neutral-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-neutral-200"
+        >
+          {CATEGORY_OPTIONS.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+        <button
+          onClick={() => fetchLogs()}
+          className="flex items-center gap-2 text-sm text-neutral-500 hover:text-neutral-700 px-3 py-2 border border-neutral-200 rounded-lg hover:bg-neutral-50 transition-colors"
+        >
+          <RefreshCw className="w-3.5 h-3.5" />
+          Refresh
+        </button>
+      </div>
+
+      {loading ? (
+        <div className="flex items-center justify-center py-16">
+          <Loader2 className="w-6 h-6 animate-spin text-neutral-400" />
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="text-center py-12 text-neutral-400 text-sm">
+          No activity logged yet.
+        </div>
+      ) : (
+        <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-neutral-100 bg-neutral-50">
+                <th className="text-left px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide w-8"></th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Time</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">User</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Action</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Category</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Resource</th>
+                <th className="text-left px-4 py-3 text-xs font-medium text-neutral-500 uppercase tracking-wide">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-neutral-100">
+              {entries.map((entry) => (
+                <React.Fragment key={entry.id}>
+                  <tr
+                    className="hover:bg-neutral-50 transition-colors cursor-pointer"
+                    onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+                  >
+                    <td className="px-4 py-3 text-neutral-400">
+                      {expandedId === entry.id ? (
+                        <ChevronDown className="w-3.5 h-3.5" />
+                      ) : (
+                        <ChevronRight className="w-3.5 h-3.5" />
+                      )}
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-neutral-600" title={entry.timestamp || ""}>
+                        {formatTimeAgo(entry.timestamp)}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-neutral-700 text-xs" title={entry.userId || ""}>
+                        {(() => {
+                          // Display priority: entry.userEmail → usersMap lookup → short uid → "system".
+                          if (entry.userEmail) return entry.userEmail;
+                          const resolved = entry.userId ? usersMap.get(entry.userId) : null;
+                          if (resolved?.email) return resolved.email;
+                          if (resolved?.displayName) return resolved.displayName;
+                          return entry.userId ? <span className="font-mono">{entry.userId.slice(0, 8)}…</span> : "system";
+                        })()}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${getActionColor(entry.action)}`}>
+                        {entry.action}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs text-neutral-500 capitalize">
+                        {entry.category}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs text-neutral-400 font-mono">
+                        {entry.resourceType ? `${entry.resourceType}` : "—"}
+                        {entry.resourceId ? ` / ${entry.resourceId.slice(0, 12)}...` : ""}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3">
+                      <span className={`text-xs font-medium ${entry.status === "success" ? "text-green-600" : "text-red-500"}`}>
+                        {entry.status}
+                      </span>
+                    </td>
+                  </tr>
+                  {/* Expanded details row */}
+                  {expandedId === entry.id && (
+                    <tr>
+                      <td colSpan={7} className="px-8 py-4 bg-neutral-50">
+                        <div className="space-y-2">
+                          <div className="flex gap-6 text-xs">
+                            <div>
+                              <span className="text-neutral-400">User ID:</span>{" "}
+                              <span className="font-mono text-neutral-600">{entry.userId}</span>
+                            </div>
+                            <div>
+                              <span className="text-neutral-400">Timestamp:</span>{" "}
+                              <span className="text-neutral-600">{entry.timestamp ? new Date(entry.timestamp).toLocaleString() : "—"}</span>
+                            </div>
+                            {entry.resourceId && (
+                              <div>
+                                <span className="text-neutral-400">Resource ID:</span>{" "}
+                                <span className="font-mono text-neutral-600">{entry.resourceId}</span>
+                              </div>
+                            )}
+                          </div>
+                          {Object.keys(entry.details || {}).length > 0 && (
+                            <div>
+                              <span className="text-xs text-neutral-400 block mb-1">Details:</span>
+                              <pre className="text-xs bg-white border border-neutral-200 rounded-lg p-3 overflow-x-auto font-mono text-neutral-700">
+                                {JSON.stringify(entry.details, null, 2)}
+                              </pre>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+
+          {/* Load More */}
+          {nextCursor && (
+            <div className="border-t border-neutral-100 px-4 py-3 text-center">
+              <button
+                onClick={() => fetchLogs(nextCursor)}
+                disabled={loadingMore}
+                className="text-sm text-[#F22F46] hover:text-[#d9243b] font-medium disabled:opacity-50 flex items-center gap-2 mx-auto"
+              >
+                {loadingMore && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                {loadingMore ? "Loading..." : "Load More"}
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Main AdminPage ────────────────────────────────────────────────────────────
 
+// ══════════════════════════════════════════════════════════════════════
+// TutorStudentsTab — super_admin view of all tutor students + drill-down
+// into each student's lesson history with costs.
+// ══════════════════════════════════════════════════════════════════════
+function TutorStudentsTab({ wasLoaded }: { wasLoaded: boolean }) {
+  const showError = useErrorToast();
+  const [students, setStudents] = useState<AdminTutorStudent[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [lessonsByStudent, setLessonsByStudent] = useState<Record<string, AdminStudentLesson[]>>({});
+  const [loadingLessons, setLoadingLessons] = useState<string | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await adminListTutorStudents();
+      setStudents(r.students);
+    } catch (e) {
+      showError(e instanceof Error ? e.message : "Failed to load tutor students");
+    } finally {
+      setLoading(false);
+    }
+  }, [showError]);
+
+  useEffect(() => { if (wasLoaded) refresh(); }, [wasLoaded, refresh]);
+
+  const toggleExpand = async (uid: string) => {
+    if (expanded === uid) { setExpanded(null); return; }
+    setExpanded(uid);
+    if (!lessonsByStudent[uid]) {
+      setLoadingLessons(uid);
+      try {
+        const r = await adminListStudentLessons(uid);
+        setLessonsByStudent((prev) => ({ ...prev, [uid]: r.lessons }));
+      } catch (e) {
+        showError(e instanceof Error ? e.message : "Failed to load lessons");
+      } finally {
+        setLoadingLessons(null);
+      }
+    }
+  };
+
+  const totalCost = students.reduce((s, x) => s + x.cost, 0);
+  const totalLessons = students.reduce((s, x) => s + x.lessons, 0);
+  const totalMinutes = students.reduce((s, x) => s + x.minutes, 0);
+
+  return (
+    <div className="space-y-4">
+      {/* Summary */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        <div className="bg-white border border-neutral-200 rounded-xl p-4">
+          <div className="text-xs text-neutral-500 uppercase font-medium">Students</div>
+          <div className="text-2xl font-bold text-violet-700">{students.length}</div>
+        </div>
+        <div className="bg-white border border-neutral-200 rounded-xl p-4">
+          <div className="text-xs text-neutral-500 uppercase font-medium">Total lessons</div>
+          <div className="text-2xl font-bold text-neutral-900">{totalLessons}</div>
+        </div>
+        <div className="bg-white border border-neutral-200 rounded-xl p-4">
+          <div className="text-xs text-neutral-500 uppercase font-medium">Total minutes</div>
+          <div className="text-2xl font-bold text-neutral-900">{totalMinutes}</div>
+        </div>
+        <div className="bg-white border border-neutral-200 rounded-xl p-4">
+          <div className="text-xs text-neutral-500 uppercase font-medium">Total cost</div>
+          <div className="text-2xl font-bold text-red-600">${totalCost.toFixed(2)}</div>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-neutral-700">All tutor students</h3>
+        <button onClick={refresh} className="text-neutral-400 hover:text-neutral-600"><RefreshCw className="w-4 h-4" /></button>
+      </div>
+
+      {/* Students table */}
+      <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
+        {loading ? (
+          <div className="p-8 text-center text-neutral-400 text-sm">Loading…</div>
+        ) : students.length === 0 ? (
+          <div className="p-8 text-center text-neutral-400 text-sm">No tutor students yet.</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm min-w-[760px]">
+              <thead>
+                <tr className="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
+                  <th className="px-4 py-2 text-left"></th>
+                  <th className="px-4 py-2 text-left">Student</th>
+                  <th className="px-4 py-2 text-left">Level</th>
+                  <th className="px-4 py-2 text-right">Lessons</th>
+                  <th className="px-4 py-2 text-right">Minutes</th>
+                  <th className="px-4 py-2 text-right">Cost</th>
+                  <th className="px-4 py-2 text-left">Last activity</th>
+                </tr>
+              </thead>
+              <tbody>
+                {students.map((s) => (
+                  <Fragment key={s.uid}>
+                    <tr className="border-t border-neutral-100 hover:bg-neutral-50 cursor-pointer" onClick={() => toggleExpand(s.uid)}>
+                      <td className="px-4 py-2.5 w-8 text-violet-400">{expanded === s.uid ? "▾" : "▸"}</td>
+                      <td className="px-4 py-2.5 font-mono text-xs">{s.email}</td>
+                      <td className="px-4 py-2.5">
+                        {s.level ? (
+                          <span className="text-[10px] font-semibold uppercase bg-violet-50 text-violet-700 px-1.5 py-0.5 rounded-full">{s.level}</span>
+                        ) : s.placementDone ? (
+                          <span className="text-[10px] text-neutral-400">—</span>
+                        ) : (
+                          <span className="text-[10px] text-amber-600">no placement</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5 text-right">{s.lessons}</td>
+                      <td className="px-4 py-2.5 text-right">{s.minutes}</td>
+                      <td className="px-4 py-2.5 text-right text-red-600 font-mono">${s.cost.toFixed(4)}</td>
+                      <td className="px-4 py-2.5 text-xs text-neutral-500">{s.lastAt ? new Date(s.lastAt).toLocaleString() : "—"}</td>
+                    </tr>
+                    {expanded === s.uid && (
+                      <tr className="bg-violet-50/30">
+                        <td colSpan={7} className="px-4 py-4">
+                          {loadingLessons === s.uid ? (
+                            <div className="text-center text-neutral-400 text-xs py-4">Loading lessons…</div>
+                          ) : (lessonsByStudent[s.uid] || []).length === 0 ? (
+                            <div className="text-center text-neutral-400 text-xs py-4">No lessons yet for this student.</div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                            <table className="w-full text-xs min-w-[720px] bg-white rounded-lg">
+                              <thead>
+                                <tr className="text-neutral-500 text-[10px] uppercase tracking-wide bg-neutral-50">
+                                  <th className="px-3 py-2 text-left">When</th>
+                                  <th className="px-3 py-2 text-left">Theme</th>
+                                  <th className="px-3 py-2 text-left">Mode</th>
+                                  <th className="px-3 py-2 text-right">Duration</th>
+                                  <th className="px-3 py-2 text-right">Corrections</th>
+                                  <th className="px-3 py-2 text-right">Vocab</th>
+                                  <th className="px-3 py-2 text-right">Drills</th>
+                                  <th className="px-3 py-2 text-right">In/Out sec</th>
+                                  <th className="px-3 py-2 text-right">Cost</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {(lessonsByStudent[s.uid] || []).map((l) => (
+                                  <tr key={l.id} className="border-t border-neutral-100">
+                                    <td className="px-3 py-2 text-neutral-600 whitespace-nowrap">
+                                      {l.createdAt ? new Date(l.createdAt).toLocaleString() : "—"}
+                                    </td>
+                                    <td className="px-3 py-2">{l.theme || "—"} {l.moduleId ? `· ${l.moduleId}` : ""}</td>
+                                    <td className="px-3 py-2">
+                                      <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${l.mode === "placement" ? "bg-amber-100 text-amber-700" : "bg-violet-100 text-violet-700"}`}>
+                                        {l.mode}
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right">{Math.round(l.durationSec / 60)}m</td>
+                                    <td className="px-3 py-2 text-right">{l.correctionsCount}</td>
+                                    <td className="px-3 py-2 text-right">{l.vocabularyCount}</td>
+                                    <td className="px-3 py-2 text-right">{l.drillsCount}</td>
+                                    <td className="px-3 py-2 text-right font-mono text-[10px] text-neutral-500">{l.realtimeInputSec}/{l.realtimeOutputSec}</td>
+                                    <td className="px-3 py-2 text-right text-red-600 font-mono">${l.cost.toFixed(4)}</td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function AdminPage() {
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const [activeTab, setActiveTab] = useState<TabId>("users");
   const [loadedTabs, setLoadedTabs] = useState<Set<TabId>>(new Set<TabId>(["users"]));
 
@@ -2144,14 +3157,17 @@ export default function AdminPage() {
         </div>
 
         {/* Tab content */}
-        {activeTab === "users" && <UsersTab currentUid={user?.uid} />}
+        {activeTab === "users" && <UsersTab currentUid={user?.uid} currentRole={role} />}
         {activeTab === "subscriptions" && <SubscriptionsTab wasLoaded={loadedTabs.has("subscriptions")} />}
         {activeTab === "plans" && <PlansTab wasLoaded={loadedTabs.has("plans")} />}
         {activeTab === "apikeys" && <ApiKeysTab wasLoaded={loadedTabs.has("apikeys")} />}
         {activeTab === "settings" && <SystemSettingsTab wasLoaded={loadedTabs.has("settings")} />}
+        {activeTab === "features" && <FeaturesTab wasLoaded={loadedTabs.has("features")} isSuperAdmin={role === "super_admin"} />}
         {activeTab === "phone" && <PhoneIntegrationsTab wasLoaded={loadedTabs.has("phone")} />}
         {activeTab === "pronunciation" && <PronunciationTab wasLoaded={loadedTabs.has("pronunciation")} />}
+        {activeTab === "activity" && <ActivityLogTab wasLoaded={loadedTabs.has("activity")} isSuperAdmin={role === "super_admin"} />}
         {activeTab === "costs" && <CostsTab wasLoaded={loadedTabs.has("costs")} />}
+        {activeTab === "tutor" && <TutorStudentsTab wasLoaded={loadedTabs.has("tutor")} />}
       </div>
     </ErrorToastProvider>
   );

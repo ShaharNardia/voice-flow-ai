@@ -1,5 +1,5 @@
-/**
- * Admin Settings Service — plan config, subscriptions, API key metadata, system settings.
+﻿/**
+ * Admin Settings Service â€” plan config, subscriptions, API key metadata, system settings.
  * All endpoints require admin role.
  */
 
@@ -9,16 +9,17 @@ const {onRequest} = require("firebase-functions/v2/https");
 const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
-const {extractUidFromRequest} = require("./security_utils");
+const {extractUidFromRequest, getUserDoc} = require("./security_utils");
+const {logActivity} = require("./audit_service");
 
-// ── Hardcoded fallback plan limits (mirrors subscription_service.js PLAN_LIMITS) ──
+// â”€â”€ Hardcoded fallback plan limits (mirrors subscription_service.js PLAN_LIMITS) â”€â”€
 const DEFAULT_PLAN_LIMITS = {
   basic: {assistants: 1, minutesPerMonth: 50, leads: 100, campaigns: 0, knowledgeBase: false, analytics: false, calendar: false, whatsapp: false, callHistoryLimit: 10},
   pro:   {assistants: 10, minutesPerMonth: 2000, leads: 5000, campaigns: 10, knowledgeBase: true, analytics: true, calendar: true, whatsapp: true, callHistoryLimit: null},
   scale: {assistants: 999, minutesPerMonth: 10000, leads: 999999, campaigns: 999, knowledgeBase: true, analytics: true, calendar: true, whatsapp: true, callHistoryLimit: null},
 };
 
-// ── Admin check helper (self-contained, no cross-file dependency) ──
+// â”€â”€ Admin check helper (self-contained, no cross-file dependency) â”€â”€
 async function requireAdmin(req, res) {
   const uid = await extractUidFromRequest(req);
   if (!uid) {
@@ -26,15 +27,9 @@ async function requireAdmin(req, res) {
     return null;
   }
   const db = getFirestore();
-  let role = null;
-  const newDoc = await db.collection("users").doc(uid).get();
-  if (newDoc.exists) {
-    role = newDoc.data().role;
-  } else {
-    const legacyDoc = await db.collection("user").doc(uid).get();
-    if (legacyDoc.exists) role = legacyDoc.data().role;
-  }
-  if (role !== "admin") {
+  const doc = await getUserDoc(db, uid);
+  const role = doc.exists ? doc.data().role : null;
+  if (role !== "admin" && role !== "super_admin") {
     res.status(403).json({status: "error", message: "Forbidden. Admin only."});
     return null;
   }
@@ -45,14 +40,13 @@ const corsOptions = {
   cors: [
     "https://voiceflow-ai-202509231639.web.app",
     "https://voiceflow-ai-202509231639.firebaseapp.com",
+    "https://voice.lancelotech.com",
     "http://localhost:3000",
     "http://localhost:5000",
-    /\.web\.app$/,
-    /\.firebaseapp\.com$/,
   ],
 };
 
-// ── Allowed API key names ──────────────────────────────────────────────────
+// â”€â”€ Allowed API key names â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const ALLOWED_KEY_NAMES = [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
@@ -63,7 +57,50 @@ const ALLOWED_KEY_NAMES = [
   "TWILIO_AUTH_TOKEN",
 ];
 
-// ── Default system settings ────────────────────────────────────────────────
+// ── Plan-config validator (shared with unit tests) ──────────────────────
+//
+// Quota fields accept null/undefined/negative-number → "unlimited" (null).
+// Non-negative numbers are clamped + floored. `price` is always a concrete
+// non-negative number (no unlimited concept). callHistoryLimit allows null
+// (unlimited) or a positive integer.
+//
+// Throws Error with a message describing the first invalid field. Returns
+// the validated `{basic, pro, scale}` shape on success.
+function validatePlans(plans) {
+  if (!plans || typeof plans !== "object") {
+    throw new Error("plans object required");
+  }
+  const quotaFields = ["assistants", "minutesPerMonth", "leads", "campaigns"];
+  const boolFields  = ["knowledgeBase", "analytics", "calendar", "whatsapp"];
+  const out = {};
+  for (const tier of ["basic", "pro", "scale"]) {
+    if (!plans[tier]) throw new Error(`Missing plan tier: ${tier}`);
+    const p = plans[tier];
+    out[tier] = {};
+    for (const f of quotaFields) {
+      const v = p[f];
+      if (v === null || v === undefined) {
+        out[tier][f] = null;
+      } else if (typeof v === "number") {
+        out[tier][f] = v < 0 ? null : Math.max(0, Math.floor(v));
+      } else {
+        throw new Error(`${tier}.${f} must be a number or null`);
+      }
+    }
+    const pr = p.price;
+    if (pr !== null && pr !== undefined && typeof pr !== "number") {
+      throw new Error(`${tier}.price must be a number`);
+    }
+    out[tier].price = typeof pr === "number" ? Math.max(0, Math.floor(pr)) : 0;
+    for (const f of boolFields) out[tier][f] = Boolean(p[f]);
+    const chl = p.callHistoryLimit;
+    out[tier].callHistoryLimit = (chl === null || chl === undefined) ? null : Math.max(1, Math.floor(Number(chl)));
+  }
+  return out;
+}
+exports._internal = { validatePlans };
+
+// ── Default system settings ────────────────────────────────────────────
 const DEFAULT_SETTINGS = {
   appName: "VoiceFlow AI",
   supportEmail: "support@voiceflow.ai",
@@ -75,7 +112,7 @@ const DEFAULT_SETTINGS = {
   },
 };
 
-// ── adminGetSubscriptions ──────────────────────────────────────────────────
+// â”€â”€ adminGetSubscriptions â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * GET /adminGetSubscriptions
  * Returns all users with their plan, Stripe info, and minutes used this month.
@@ -129,7 +166,7 @@ exports.adminGetSubscriptions = onRequest(corsOptions, async (req, res) => {
       };
     });
 
-    // Sort by plan (scale → pro → basic), then by email
+    // Sort by plan (scale â†’ pro â†’ basic), then by email
     const planOrder = {scale: 0, pro: 1, basic: 2};
     result.sort((a, b) => {
       const po = (planOrder[a.plan] ?? 2) - (planOrder[b.plan] ?? 2);
@@ -144,7 +181,7 @@ exports.adminGetSubscriptions = onRequest(corsOptions, async (req, res) => {
   }
 });
 
-// ── adminOverridePlan ──────────────────────────────────────────────────────
+// â”€â”€ adminOverridePlan â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * POST /adminOverridePlan  { uid, plan }
  * Manually set a user's plan, bypassing Stripe.
@@ -183,13 +220,14 @@ exports.adminOverridePlan = onRequest(corsOptions, async (req, res) => {
     ]);
 
     res.status(200).json({status: "success", uid, plan});
+    logActivity({ userId: callerUid, action: "billing.override_plan", category: "billing", resourceType: "user", resourceId: uid, details: {plan} }).catch(() => {});
   } catch (error) {
     logger.error("adminOverridePlan failed", error);
     res.status(500).json({status: "error", message: "Failed to override plan"});
   }
 });
 
-// ── adminGetPlanConfig ─────────────────────────────────────────────────────
+// â”€â”€ adminGetPlanConfig â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * GET /adminGetPlanConfig
  * Returns plan limits + prices. Reads from config/plans Firestore doc,
@@ -223,7 +261,7 @@ exports.adminGetPlanConfig = onRequest(corsOptions, async (req, res) => {
   }
 });
 
-// ── adminUpdatePlanConfig ──────────────────────────────────────────────────
+// â”€â”€ adminUpdatePlanConfig â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * POST /adminUpdatePlanConfig  { plans: { basic, pro, scale } }
  */
@@ -243,32 +281,13 @@ exports.adminUpdatePlanConfig = onRequest(corsOptions, async (req, res) => {
       return;
     }
 
-    // Validate each plan tier
-    const numericFields = ["assistants", "minutesPerMonth", "leads", "campaigns", "price"];
-    const boolFields = ["knowledgeBase", "analytics", "calendar", "whatsapp"];
-    const validated = {};
-
-    for (const tier of ["basic", "pro", "scale"]) {
-      if (!plans[tier]) {
-        res.status(400).json({status: "error", message: `Missing plan tier: ${tier}`});
-        return;
-      }
-      const p = plans[tier];
-      validated[tier] = {};
-      for (const f of numericFields) {
-        const v = p[f];
-        if (v !== null && v !== undefined && typeof v !== "number") {
-          res.status(400).json({status: "error", message: `${tier}.${f} must be a number`});
-          return;
-        }
-        validated[tier][f] = typeof v === "number" ? Math.max(0, Math.floor(v)) : 0;
-      }
-      for (const f of boolFields) {
-        validated[tier][f] = Boolean(p[f]);
-      }
-      // callHistoryLimit can be null (unlimited) or a non-negative integer
-      const chl = p.callHistoryLimit;
-      validated[tier].callHistoryLimit = (chl === null || chl === undefined) ? null : Math.max(1, Math.floor(Number(chl)));
+    // Validate via shared helper (also exported for unit tests).
+    let validated;
+    try {
+      validated = validatePlans(plans);
+    } catch (e) {
+      res.status(400).json({status: "error", message: e.message});
+      return;
     }
 
     const db = getFirestore();
@@ -279,13 +298,14 @@ exports.adminUpdatePlanConfig = onRequest(corsOptions, async (req, res) => {
     });
 
     res.status(200).json({status: "success"});
+    logActivity({ userId: callerUid, action: "settings.update_plan_config", category: "settings", resourceType: "config", resourceId: "plan_config" }).catch(() => {});
   } catch (error) {
     logger.error("adminUpdatePlanConfig failed", error);
     res.status(500).json({status: "error", message: "Failed to update plan config"});
   }
 });
 
-// ── adminGetSystemSettings ─────────────────────────────────────────────────
+// â”€â”€ adminGetSystemSettings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * GET /adminGetSystemSettings
  */
@@ -307,7 +327,7 @@ exports.adminGetSystemSettings = onRequest(corsOptions, async (req, res) => {
   }
 });
 
-// ── adminUpdateSystemSettings ──────────────────────────────────────────────
+// â”€â”€ adminUpdateSystemSettings â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * POST /adminUpdateSystemSettings  { settings }
  */
@@ -350,16 +370,17 @@ exports.adminUpdateSystemSettings = onRequest(corsOptions, async (req, res) => {
     await db.collection("config").doc("settings").set(sanitized);
 
     res.status(200).json({status: "success"});
+    logActivity({ userId: callerUid, action: "settings.update_system", category: "settings", resourceType: "config", resourceId: "system_settings" }).catch(() => {});
   } catch (error) {
     logger.error("adminUpdateSystemSettings failed", error);
     res.status(500).json({status: "error", message: "Failed to update settings"});
   }
 });
 
-// ── adminGetKeysMeta ───────────────────────────────────────────────────────
+// â”€â”€ adminGetKeysMeta â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * GET /adminGetKeysMeta
- * Returns metadata ONLY — isSet, last4, description. NEVER actual secrets.
+ * Returns metadata ONLY â€” isSet, last4, description. NEVER actual secrets.
  */
 exports.adminGetKeysMeta = onRequest(corsOptions, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
@@ -384,12 +405,48 @@ exports.adminGetKeysMeta = onRequest(corsOptions, async (req, res) => {
       TWILIO_AUTH_TOKEN:     {description: "Twilio Auth Token"},
     };
 
+    // Source of truth: Secret Manager. The Firestore "config/keys" doc was
+    // a hand-maintained mirror that drifts out of sync as soon as someone
+    // rotates a secret via the new /admin/api-keys page or
+    // `firebase functions:secrets:set`. We query Secret Manager directly
+    // and only fall back to the mirror when SM can't be reached.
+    let getSecretMeta = null;
+    try {
+      ({ getSecretMeta } = require("./admin_secrets_service.js")._internal);
+    } catch (e) {
+      logger.warn("admin_secrets_service._internal unavailable, falling back to mirror", e.message);
+    }
+
     const result = {};
     for (const keyName of ALLOWED_KEY_NAMES) {
-      const meta = stored[keyName] || {};
+      const mirror = stored[keyName] || {};
+      let isSet = Boolean(mirror.isSet);
+      let last4 = mirror.last4 || null;
+      let source = mirror.isSet ? "mirror" : "unset";
+
+      if (getSecretMeta) {
+        try {
+          const sm = await getSecretMeta(keyName);
+          if (sm.status === "present") {
+            isSet = true;
+            // sm.masked is "…XXXX" or "…(short)" — strip the ellipsis for
+            // the existing UI which prefixes its own marker. Also blocks
+            // leaking a stale mirror prefix (#49).
+            last4 = sm.masked && sm.masked.startsWith("…") && sm.masked.length === 5
+              ? sm.masked.slice(1) : null;
+            source = "secret-manager";
+          } else if (sm.status === "missing") {
+            isSet = false; last4 = null; source = "unset";
+          }
+        } catch (e) {
+          logger.warn(`SM check failed for ${keyName}, keeping mirror`, e.message);
+        }
+      }
+
       result[keyName] = {
-        isSet: Boolean(meta.isSet),
-        last4: meta.last4 || null,
+        isSet,
+        last4,
+        source,
         description: KEY_DEFAULTS[keyName]?.description || "",
       };
     }
@@ -401,7 +458,7 @@ exports.adminGetKeysMeta = onRequest(corsOptions, async (req, res) => {
   }
 });
 
-// ── adminUpdateKeyMeta ─────────────────────────────────────────────────────
+// â”€â”€ adminUpdateKeyMeta â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * POST /adminUpdateKeyMeta  { keyName, last4, isSet }
  * Updates metadata only. Actual secrets managed via Firebase Secret Manager.
@@ -438,13 +495,14 @@ exports.adminUpdateKeyMeta = onRequest(corsOptions, async (req, res) => {
     }, {merge: true});
 
     res.status(200).json({status: "success", keyName});
+    logActivity({ userId: callerUid, action: "settings.update_api_keys", category: "settings", resourceType: "config", resourceId: "api_keys" }).catch(() => {});
   } catch (error) {
     logger.error("adminUpdateKeyMeta failed", error);
     res.status(500).json({status: "error", message: "Failed to update key metadata"});
   }
 });
 
-// ── Billing Config ─────────────────────────────────────────────────────────
+// â”€â”€ Billing Config â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 const DEFAULT_BILLING_CONFIG = {
   signupCreditCents: 1000,      // $10 signup credit for Basic users
@@ -486,11 +544,11 @@ exports.adminUpdateBillingConfig = onRequest(corsOptions, async (req, res) => {
     const creditCents = Math.round(Number(config.signupCreditCents));
     const creditDays  = Math.round(Number(config.signupCreditDays));
     if (isNaN(creditCents) || creditCents < 0 || creditCents > 100000) {
-      res.status(400).json({status: "error", message: "signupCreditCents must be 0–100000"});
+      res.status(400).json({status: "error", message: "signupCreditCents must be 0â€“100000"});
       return;
     }
     if (isNaN(creditDays) || creditDays < 1 || creditDays > 365) {
-      res.status(400).json({status: "error", message: "signupCreditDays must be 1–365"});
+      res.status(400).json({status: "error", message: "signupCreditDays must be 1â€“365"});
       return;
     }
     const db = getFirestore();
@@ -502,14 +560,15 @@ exports.adminUpdateBillingConfig = onRequest(corsOptions, async (req, res) => {
       updatedBy: callerUid,
     });
     res.status(200).json({status: "success"});
+    logActivity({ userId: callerUid, action: "settings.update_billing", category: "settings", resourceType: "config", resourceId: "billing_config" }).catch(() => {});
   } catch (error) {
     logger.error("adminUpdateBillingConfig failed", error);
     res.status(500).json({status: "error", message: "Failed to save billing config"});
   }
 });
 
-// ── Pronunciation Dictionary — Hebrew TTS pronunciation fixes ────────────────
-// Firestore doc: config/pronunciation → { fixes: [{original, replacement, note}] }
+// â”€â”€ Pronunciation Dictionary â€” Hebrew TTS pronunciation fixes â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// Firestore doc: config/pronunciation â†’ { fixes: [{original, replacement, note}] }
 
 exports.adminGetPronunciation = onRequest(corsOptions, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
@@ -553,6 +612,7 @@ exports.adminUpdatePronunciation = onRequest(corsOptions, async (req, res) => {
     });
     logger.info(`Pronunciation dictionary updated by ${uid}: ${validated.length} fixes`);
     res.status(200).json({status: "ok", count: validated.length});
+    logActivity({ userId: uid, action: "settings.update_pronunciation", category: "settings", resourceType: "config", resourceId: "pronunciation" }).catch(() => {});
   } catch (error) {
     logger.error("adminUpdatePronunciation failed", error);
     res.status(500).json({status: "error", message: "Failed to save pronunciation"});
@@ -572,13 +632,15 @@ exports.getPronunciationFixes = onRequest(corsOptions, async (req, res) => {
   }
 });
 
-// ══════════════════════════════════════════════════════════════════
-// ── Cost Tracking & Customer Pricing ─────────────────────────────
-// ══════════════════════════════════════════════════════════════════
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
+// â”€â”€ Cost Tracking & Customer Pricing â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
 const DEFAULT_RATE_CARD = {
   twilio: {costPerMinute: 0.013},
   openai: {costPerPromptToken1K: 0.00015, costPerCompletionToken1K: 0.0006, costPerTtsChar1K: 0.015},
+  // OpenAI Realtime (gpt-4o-realtime-preview): priced per minute of input/output audio
+  openaiRealtime: {costPerMinuteInput: 0.06, costPerMinuteOutput: 0.24},
   deepgram: {costPerMinute: 0.0043},
   googleTts: {costPerChar1K: 0.016},
   currency: "USD",
@@ -592,7 +654,7 @@ const DEFAULT_CUSTOMER_PRICING = {
   overrides: {},
 };
 
-// ── Rate Card CRUD ───────────────────────────────────────────────
+// â”€â”€ Rate Card CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 exports.adminGetRateCard = onRequest(corsOptions, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
@@ -627,13 +689,14 @@ exports.adminUpdateRateCard = onRequest(corsOptions, async (req, res) => {
     const db = getFirestore();
     await db.collection("config").doc("rateCard").set({...rc, updatedAt: FieldValue.serverTimestamp(), updatedBy: uid}, {merge: true});
     res.status(200).json({status: "ok"});
+    logActivity({ userId: uid, action: "settings.update_rate_card", category: "settings", resourceType: "config", resourceId: "rate_card" }).catch(() => {});
   } catch (error) {
     logger.error("adminUpdateRateCard error", error);
     res.status(500).json({status: "error", message: error.message});
   }
 });
 
-// ── Customer Pricing CRUD ────────────────────────────────────────
+// â”€â”€ Customer Pricing CRUD â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 exports.adminGetCustomerPricing = onRequest(corsOptions, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
@@ -673,13 +736,14 @@ exports.adminUpdateCustomerPricing = onRequest(corsOptions, async (req, res) => 
     const db = getFirestore();
     await db.collection("config").doc("customerPricing").set(data, {merge: true});
     res.status(200).json({status: "ok"});
+    logActivity({ userId: uid, action: "settings.update_customer_pricing", category: "settings", resourceType: "config", resourceId: "customer_pricing" }).catch(() => {});
   } catch (error) {
     logger.error("adminUpdateCustomerPricing error", error);
     res.status(500).json({status: "error", message: error.message});
   }
 });
 
-// ── Cost Dashboard Query ─────────────────────────────────────────
+// â”€â”€ Cost Dashboard Query â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 exports.adminGetCostDashboard = onRequest(corsOptions, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
@@ -697,8 +761,9 @@ exports.adminGetCostDashboard = onRequest(corsOptions, async (req, res) => {
     if (userId) q = q.where("ownerId", "==", userId);
 
     const snap = await q.get();
-    const byService = {twilio: 0, llm: 0, stt: 0, tts: 0};
+    const byService = {twilio: 0, llm: 0, stt: 0, tts: 0, realtime: 0};
     const byUserMap = {};
+    const byAssistantMap = {};
     let totalCost = 0, totalRevenue = 0, totalMinutes = 0;
     const calls = [];
 
@@ -712,6 +777,7 @@ exports.adminGetCostDashboard = onRequest(corsOptions, async (req, res) => {
       if (c.llm) byService.llm += c.llm.cost || 0;
       if (c.stt) byService.stt += c.stt.cost || 0;
       if (c.tts) byService.tts += c.tts.cost || 0;
+      if (c.realtime) byService.realtime += c.realtime.cost || 0;
       totalCost += c.totalCost || 0;
       totalRevenue += c.customerCharge || 0;
 
@@ -722,13 +788,23 @@ exports.adminGetCostDashboard = onRequest(corsOptions, async (req, res) => {
       byUserMap[oid].cost += c.totalCost || 0;
       byUserMap[oid].revenue += c.customerCharge || 0;
 
-      calls.push({id: doc.id, createdAt: d.createdAt?.toDate?.()?.toISOString() || "", ownerId: oid, duration: d.duration || 0, costs: c});
+      // Per-assistant rollup
+      const aid = d.assistantId || "none";
+      const aname = d.assistantDefinition?.name || d.assistantName || "(no assistant)";
+      if (!byAssistantMap[aid]) byAssistantMap[aid] = {assistantId: aid, assistantName: aname, calls: 0, minutes: 0, cost: 0, revenue: 0};
+      byAssistantMap[aid].calls += 1;
+      byAssistantMap[aid].minutes += minutes;
+      byAssistantMap[aid].cost += c.totalCost || 0;
+      byAssistantMap[aid].revenue += c.customerCharge || 0;
+
+      calls.push({id: doc.id, createdAt: d.createdAt?.toDate?.()?.toISOString() || "", ownerId: oid, assistantId: aid, assistantName: aname, duration: d.duration || 0, costs: c});
     });
 
     res.status(200).json({
       summary: {totalCost: +totalCost.toFixed(4), totalRevenue: +totalRevenue.toFixed(4), profit: +(totalRevenue - totalCost).toFixed(4), totalCalls: snap.size, totalMinutes: +totalMinutes.toFixed(1)},
-      byService: {twilio: +byService.twilio.toFixed(4), llm: +byService.llm.toFixed(4), stt: +byService.stt.toFixed(4), tts: +byService.tts.toFixed(4)},
+      byService: {twilio: +byService.twilio.toFixed(4), llm: +byService.llm.toFixed(4), stt: +byService.stt.toFixed(4), tts: +byService.tts.toFixed(4), realtime: +byService.realtime.toFixed(4)},
       byUser: Object.values(byUserMap).map((u) => ({...u, minutes: +u.minutes.toFixed(1), cost: +u.cost.toFixed(4), revenue: +u.revenue.toFixed(4)})),
+      byAssistant: Object.values(byAssistantMap).map((a) => ({...a, minutes: +a.minutes.toFixed(1), cost: +a.cost.toFixed(4), revenue: +a.revenue.toFixed(4)})).sort((a, b) => b.cost - a.cost),
       calls: calls.slice(0, 200),
     });
   } catch (error) {

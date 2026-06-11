@@ -114,7 +114,7 @@ export default function BillingPage() {
           </div>
 
           {usage && (
-            <div className="grid grid-cols-3 gap-4 mt-6 pt-6 border-t border-neutral-100">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mt-6 pt-6 border-t border-neutral-100">
               <UsageMeter used={usage.minutesUsed} max={limits.minutesPerMonth} label="Call minutes this month" />
               <UsageMeter used={usage.assistantCount} max={limits.assistants} label="Assistants" />
               <UsageMeter used={usage.leadCount} max={limits.leads} label="Leads" />
@@ -142,7 +142,7 @@ export default function BillingPage() {
             </div>
 
             {usage && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <UsageMeter used={usage.minutesUsed} max={50} label="Call minutes this month" />
                 <UsageMeter used={usage.assistantCount} max={1} label="Assistants" />
                 <UsageMeter used={usage.leadCount} max={100} label="Leads" />
@@ -173,7 +173,7 @@ export default function BillingPage() {
                 </p>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-x-6 gap-y-2 mb-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2 mb-6">
               {["10 AI assistants", "2,000 minutes/month", "5,000 leads", "10 campaigns", "Calendar & appointments", "Knowledge base", "Advanced analytics", "WhatsApp integration"].map((f) => (
                 <div key={f} className="flex items-center gap-2 text-sm text-neutral-700">
                   <Check className="w-4 h-4 text-emerald-500 shrink-0" />

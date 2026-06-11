@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Leads & Campaigns Service
  *
  * Manages the CRM layer: leads (imported from XLSX), outbound calling
@@ -11,15 +11,16 @@ const {onRequest} = require("firebase-functions/v2/https");
 const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const {extractUidFromRequest} = require("./security_utils");
+const {logActivity} = require("./audit_service");
+const {checkPlanLimit} = require("./subscription_service");
 
 const corsOptions = {
   cors: [
     "https://voiceflow-ai-202509231639.web.app",
     "https://voiceflow-ai-202509231639.firebaseapp.com",
+    "https://voice.lancelotech.com",
     "http://localhost:3000",
     "http://localhost:5000",
-    /\.web\.app$/,
-    /\.firebaseapp\.com$/,
   ],
 };
 
@@ -33,7 +34,7 @@ async function requireAuth(req, res) {
   return uid;
 }
 
-// ── Leads ──────────────────────────────────────────────────────────────
+// â”€â”€ Leads â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * POST /leadsBatchCreate
@@ -55,6 +56,19 @@ exports.leadsBatchCreate = onRequest(corsOptions, async (req, res) => {
   }
   if (leads.length > 5000) {
     return res.status(400).json({status: "error", message: "Maximum 5000 leads per batch"});
+  }
+
+  // Check plan limit
+  if (uid) {
+    const planCheck = await checkPlanLimit(uid, "leads");
+    if (!planCheck.allowed) {
+      res.status(403).json({
+        status: "error",
+        code: "plan_limit_reached",
+        message: `Lead limit reached (${planCheck.current}/${planCheck.limit} on ${planCheck.plan} plan). Upgrade to import more leads.`,
+      });
+      return;
+    }
   }
 
   const now = FieldValue.serverTimestamp();
@@ -102,6 +116,7 @@ exports.leadsBatchCreate = onRequest(corsOptions, async (req, res) => {
 
   logger.info("leadsBatchCreate", {uid, campaignId, created});
   res.status(201).json({status: "success", created});
+  logActivity({ userId: uid, action: "lead.batch_create", category: "lead", resourceType: "lead", details: {count: created} }).catch(() => {});
 });
 
 /**
@@ -132,6 +147,7 @@ exports.leadsUpdate = onRequest(corsOptions, async (req, res) => {
   }
   await docRef.set(update, {merge: true});
   res.json({status: "success", id});
+  logActivity({ userId: uid, action: "lead.update", category: "lead", resourceType: "lead", resourceId: id }).catch(() => {});
 });
 
 /**
@@ -156,9 +172,10 @@ exports.leadsDelete = onRequest(corsOptions, async (req, res) => {
   }
   await docRef.delete();
   res.json({status: "success", id});
+  logActivity({ userId: uid, action: "lead.delete", category: "lead", resourceType: "lead", resourceId: id }).catch(() => {});
 });
 
-// ── Campaigns ──────────────────────────────────────────────────────────
+// â”€â”€ Campaigns â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * POST /campaignsCreate
@@ -175,6 +192,19 @@ exports.campaignsCreate = onRequest(corsOptions, async (req, res) => {
   const {name, assistantId, fromNumber, description} = req.body || {};
   if (!name || !assistantId || !fromNumber) {
     return res.status(400).json({status: "error", message: "name, assistantId, fromNumber required"});
+  }
+
+  // Check plan limit
+  if (uid) {
+    const planCheck = await checkPlanLimit(uid, "campaigns");
+    if (!planCheck.allowed) {
+      res.status(403).json({
+        status: "error",
+        code: "plan_limit_reached",
+        message: `Campaign limit reached (${planCheck.current}/${planCheck.limit} on ${planCheck.plan} plan). Upgrade to create more campaigns.`,
+      });
+      return;
+    }
   }
 
   const now = FieldValue.serverTimestamp();
@@ -197,6 +227,7 @@ exports.campaignsCreate = onRequest(corsOptions, async (req, res) => {
   await docRef.set(data);
   logger.info("campaignsCreate", {uid, campaignId: docRef.id});
   res.status(201).json({...data, id: docRef.id});
+  logActivity({ userId: uid, action: "campaign.create", category: "campaign", resourceType: "campaign", resourceId: docRef.id, details: {name} }).catch(() => {});
 });
 
 /**
@@ -257,11 +288,25 @@ exports.campaignStart = onRequest(corsOptions, async (req, res) => {
     .get();
 
   if (leadsSnap.empty) {
-    // All leads contacted — mark complete
+    // All leads contacted â€” mark complete
     await db.collection("campaigns").doc(campaignId).set(
       {status: "completed", updatedAt: FieldValue.serverTimestamp()},
       {merge: true},
     );
+    // Notify campaign owner
+    try {
+      const {sendPushToUser} = require("./push_service");
+      const campSnap = await db.collection("campaigns").doc(campaignId).get();
+      const campOwner = campSnap.exists ? campSnap.data().ownerId : null;
+      if (campOwner) {
+        const campName = campSnap.data().name || "Campaign";
+        await sendPushToUser(campOwner, {
+          title: "âœ… Campaign completed",
+          body: `"${campName}" â€” all leads have been called.`,
+          url: "/leads",
+        });
+      }
+    } catch (_) {}
     return res.json({queued: 0, remaining: 0, status: "completed"});
   }
 
@@ -304,6 +349,7 @@ exports.campaignStart = onRequest(corsOptions, async (req, res) => {
 
   logger.info("campaignStart", {uid, campaignId, queued: queued.length, errors: errors.length});
   res.json({queued: queued.length, errors: errors.length, remaining: remainingSnap.size});
+  logActivity({ userId: uid, action: "campaign.start", category: "campaign", resourceType: "campaign", resourceId: campaignId }).catch(() => {});
 });
 
 /**
@@ -333,7 +379,7 @@ exports.campaignPause = onRequest(corsOptions, async (req, res) => {
   res.json({status: "paused"});
 });
 
-// ── Appointments ───────────────────────────────────────────────────────
+// â”€â”€ Appointments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 /**
  * GET /appointmentsList?assistantId=&from=&to=

@@ -1,0 +1,17 @@
+; Add this to your [from-sip] context (or whatever context your DID routes to).
+; Replace _X. with the actual DID pattern if needed (e.g., _747XXXXXX).
+;
+; This sends every inbound call to the VoiceFlow ARI application.
+; The bridge's StasisStart handler will handle it from there.
+
+[from-sip]
+exten => _X.,1,NoOp(VoiceFlow inbound: ${CALLERID(num)} -> ${EXTEN})
+ same => n,Answer()
+ same => n,Stasis(voiceflow-app)
+ same => n,Hangup()
+
+; If you need a specific DID (e.g. 0747054937 / 747054937):
+; exten => 747054937,1,NoOp(VoiceFlow DID)
+;  same => n,Answer()
+;  same => n,Stasis(voiceflow-app)
+;  same => n,Hangup()

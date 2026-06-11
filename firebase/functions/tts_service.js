@@ -276,7 +276,19 @@ exports.listTtsVoices = onRequest(
   }
   try {
     const body = parseBody(req);
-    const provider = validateProvider((body.provider || body.providerId || "").toLowerCase());
+    const rawProvider = (body.provider || body.providerId || "").toLowerCase();
+    if (!rawProvider || !PROVIDERS.has(rawProvider)) {
+      // Return 400 with a clear message instead of crashing — this endpoint
+      // is called from the frontend voice-picker which may probe without a
+      // provider on first load.
+      res.status(400).json({
+        error: "provider query param required",
+        allowed: Array.from(PROVIDERS),
+        example: "?provider=elevenlabs",
+      });
+      return;
+    }
+    const provider = rawProvider;
     const languageCode = body.languageCode || body.language || null;
     let voices;
     let cached = false;
@@ -299,6 +311,17 @@ exports.listTtsVoices = onRequest(
     });
   } catch (error) {
     logger.error("listTtsVoices failed", error);
+    // Surface upstream auth failures as 502 with a clear message so the UI
+    // can show "API key invalid" instead of a generic 500.
+    const upstreamStatus = error.response?.status;
+    if (upstreamStatus === 401 || upstreamStatus === 403) {
+      res.status(502).json({
+        status: "error",
+        upstream: upstreamStatus,
+        message: "Upstream TTS provider rejected our API key — rotate it in Firebase Secrets.",
+      });
+      return;
+    }
     res.status(500).json({
       status: "error",
       message: error.message || "Failed to list voices",

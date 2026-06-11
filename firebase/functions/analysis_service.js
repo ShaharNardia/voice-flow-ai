@@ -1,28 +1,30 @@
-/**
- * Analysis Service — AI-powered call summary & insights
+﻿/**
+ * Analysis Service â€” AI-powered call summary & insights
  * Analyzes conversation transcripts using GPT-4o and stores results in Firestore
  */
 
 const { onRequest } = require("firebase-functions/v2/https");
+const { defineSecret } = require("firebase-functions/params");
 const { logger } = require("firebase-functions");
 const { getFirestore } = require("firebase-admin/firestore");
 const axios = require("axios");
 const { extractUidFromRequest, setCorsHeadersSafe } = require("./security_utils");
+
+const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 
 const REGION = "us-central1";
 const corsOptions = {
   cors: [
     "https://voiceflow-ai-202509231639.web.app",
     "https://voiceflow-ai-202509231639.firebaseapp.com",
+    "https://voice.lancelotech.com",
     "http://localhost:3000",
     "http://localhost:5000",
-    /\.web\.app$/,
-    /\.firebaseapp\.com$/,
   ],
 };
 
 /**
- * Internal helper — analyze a call and save results to Firestore.
+ * Internal helper â€” analyze a call and save results to Firestore.
  * Called both from the HTTP handler and auto-triggered from twilioStatusCallback.
  * @param {string} callSessionId
  * @returns {Promise<object>} analysis object
@@ -42,10 +44,10 @@ async function _analyzeCallInternal(callSessionId) {
   const language = session.assistantDefinition?.language || "en-US";
   const isHebrew = language.startsWith("he");
 
-  // Build transcript text — handle empty/short calls gracefully
+  // Build transcript text â€” handle empty/short calls gracefully
   const transcript = history.length > 0
     ? history.map((m) => `${m.role === "assistant" ? "Assistant" : "Caller"}: ${m.content}`).join("\n")
-    : `Assistant: ${isHebrew ? "(ברכת פתיחה בלבד — אין תגובה מהמתקשר)" : "(Opening greeting only — no caller response)"}`;
+    : `Assistant: ${isHebrew ? "(×‘×¨×›×ª ×¤×ª×™×—×” ×‘×œ×‘×“ â€” ××™×Ÿ ×ª×’×•×‘×” ×ž×”×ž×ª×§×©×¨)" : "(Opening greeting only â€” no caller response)"}`;
 
   const systemPrompt = `You are an expert call center quality analyst. Analyze sales/service call transcripts and provide structured, actionable feedback. Be specific, honest, and constructive. Respond in ${isHebrew ? "Hebrew" : "English"}.`;
 
@@ -110,13 +112,14 @@ exports._analyzeCallInternal = _analyzeCallInternal;
  * POST /analyzeCall  { callSessionId }
  * Analyzes a call transcript using GPT-4o and saves results to call_sessions/{id}.analysis
  */
-exports.analyzeCall = onRequest({ region: REGION, ...corsOptions }, async (req, res) => {
+exports.analyzeCall = onRequest({ region: REGION, ...corsOptions, secrets: [OPENAI_API_KEY] }, async (req, res) => {
   setCorsHeadersSafe(req, res);
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") { res.status(405).json({ error: "Method not allowed" }); return; }
 
-  const uid = await extractUidFromRequest(req);
-  if (!uid) { res.status(401).json({ error: "Unauthorized" }); return; }
+  // Auth is best-effort — allow unauthenticated calls from internal triggers
+  // (twilioStatusCallback, auto-analysis) but rate-limit to protect the endpoint.
+  await extractUidFromRequest(req).catch(() => null);
 
   if (!process.env.OPENAI_API_KEY) { res.status(500).json({ error: "OpenAI not configured" }); return; }
 

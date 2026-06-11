@@ -1,22 +1,26 @@
-/**
+﻿/**
  * Scenario Service - CRUD operations for Call Flow Scenarios
  * Similar to Voximplant scenarios - allows customers to define visual call flows
  */
 
 const {onRequest} = require("firebase-functions/v2/https");
+const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const {extractUidFromRequest} = require("./security_utils");
+const {logActivity} = require("./audit_service");
+const axios = require("axios");
+
+const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 
 // CORS configuration
 const corsOptions = {
   cors: [
     "https://voiceflow-ai-202509231639.web.app",
     "https://voiceflow-ai-202509231639.firebaseapp.com",
+    "https://voice.lancelotech.com",
     "http://localhost:3000",
     "http://localhost:5000",
-    /\.web\.app$/,
-    /\.firebaseapp\.com$/,
   ],
 };
 
@@ -132,7 +136,7 @@ const NODE_TYPES = {
     color: "#F44336",
     maxOutputs: 0,
     defaultData: {
-      message: "תודה. להתראות!",
+      message: "×ª×•×“×”. ×œ×”×ª×¨××•×ª!",
       status: "completed",
     },
   },
@@ -191,7 +195,7 @@ function validateScenario(scenario) {
 /**
  * Create a new scenario
  */
-exports.scenariosCreate = onRequest(corsOptions, async (req, res) => {
+exports.scenariosCreate = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
@@ -254,6 +258,7 @@ exports.scenariosCreate = onRequest(corsOptions, async (req, res) => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     });
+    logActivity({ userId: uid, action: "scenario.create", category: "scenario", resourceType: "scenario", resourceId: docRef.id, details: {name: payload.name} }).catch(() => {});
   } catch (error) {
     logger.error("Failed to create scenario", error);
     res.status(500).json({
@@ -266,7 +271,7 @@ exports.scenariosCreate = onRequest(corsOptions, async (req, res) => {
 /**
  * Update an existing scenario
  */
-exports.scenariosUpdate = onRequest(corsOptions, async (req, res) => {
+exports.scenariosUpdate = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
@@ -352,6 +357,7 @@ exports.scenariosUpdate = onRequest(corsOptions, async (req, res) => {
       id: scenarioId,
       ...updatedData,
     });
+    logActivity({ userId: null, action: "scenario.update", category: "scenario", resourceType: "scenario", resourceId: scenarioId, details: {name: payload.name} }).catch(() => {});
   } catch (error) {
     logger.error("Failed to update scenario", error);
     res.status(500).json({
@@ -364,7 +370,7 @@ exports.scenariosUpdate = onRequest(corsOptions, async (req, res) => {
 /**
  * Get a single scenario by ID
  */
-exports.scenariosGet = onRequest(corsOptions, async (req, res) => {
+exports.scenariosGet = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
@@ -415,7 +421,7 @@ exports.scenariosGet = onRequest(corsOptions, async (req, res) => {
 /**
  * List scenarios with optional filtering
  */
-exports.scenariosList = onRequest(corsOptions, async (req, res) => {
+exports.scenariosList = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
@@ -435,7 +441,7 @@ exports.scenariosList = onRequest(corsOptions, async (req, res) => {
     const db = getFirestore();
     let query = db.collection("scenarios").orderBy("createdAt", "desc");
 
-    // Filter by authenticated user's UID — include legacy null-owner docs
+    // Filter by authenticated user's UID â€” include legacy null-owner docs
     const ownerFilter = uid || req.query.ownerId || req.query.userId;
     if (ownerFilter) {
       query = query.where("ownerId", "in", [ownerFilter, null]);
@@ -471,7 +477,7 @@ exports.scenariosList = onRequest(corsOptions, async (req, res) => {
 /**
  * Delete a scenario
  */
-exports.scenariosDelete = onRequest(corsOptions, async (req, res) => {
+exports.scenariosDelete = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
@@ -515,6 +521,7 @@ exports.scenariosDelete = onRequest(corsOptions, async (req, res) => {
       message: "Scenario deleted",
       id: scenarioId,
     });
+    logActivity({ userId: null, action: "scenario.delete", category: "scenario", resourceType: "scenario", resourceId: scenarioId }).catch(() => {});
   } catch (error) {
     logger.error("Failed to delete scenario", error);
     res.status(500).json({
@@ -527,7 +534,7 @@ exports.scenariosDelete = onRequest(corsOptions, async (req, res) => {
 /**
  * Duplicate a scenario
  */
-exports.scenariosDuplicate = onRequest(corsOptions, async (req, res) => {
+exports.scenariosDuplicate = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
@@ -585,6 +592,7 @@ exports.scenariosDuplicate = onRequest(corsOptions, async (req, res) => {
       id: newDocRef.id,
       ...newScenario,
     });
+    logActivity({ userId: null, action: "scenario.duplicate", category: "scenario", resourceType: "scenario", resourceId: newDocRef.id, details: {sourceId: scenarioId} }).catch(() => {});
   } catch (error) {
     logger.error("Failed to duplicate scenario", error);
     res.status(500).json({
@@ -597,7 +605,7 @@ exports.scenariosDuplicate = onRequest(corsOptions, async (req, res) => {
 /**
  * Get available node types
  */
-exports.scenariosNodeTypes = onRequest(corsOptions, async (req, res) => {
+exports.scenariosNodeTypes = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
@@ -611,5 +619,222 @@ exports.scenariosNodeTypes = onRequest(corsOptions, async (req, res) => {
 
 // Export NODE_TYPES for use in other modules
 exports.NODE_TYPES = NODE_TYPES;
+
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// AI Scenario Wizard
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+
+const WIZARD_INTERVIEW_SYSTEM = `You are a friendly, expert phone-bot scenario designer.
+Your job: conduct a short interview (max 6 questions) to understand the business use-case,
+then generate a professional call flow scenario.
+
+Rules:
+- Ask ONE question at a time. Keep each question under 20 words.
+- After 4-6 exchanges (or when you have enough info), output EXACTLY the token "Â§READYÂ§" on its own line â€” nothing before or after it on that line.
+- Don't ask about technical details (node types, branching logic, etc.) â€” you handle that automatically.
+- Be warm, conversational, and encouraging.
+
+Questions to cover (adapt based on what the user already told you, skip obvious ones):
+1. What is the main purpose / goal of this phone bot? (one sentence)
+2. Who are the people calling or being called? (customers, leads, tenants, patientsâ€¦)
+3. What does success look like? What is the ideal outcome of one call?
+4. What key piece of information do you need to collect from the caller?
+5. After the call â€” what should happen? (book an appointment, send to CRM, transfer to a human, etc.)
+6. Any common objection, hesitation, or edge-case the bot should handle gracefully?
+
+When you output Â§READYÂ§, add a SECOND line with a compact JSON summary:
+{ "purpose": "...", "audience": "...", "goal": "...", "collect": "...", "afterCall": "...", "edgeCases": "..." }`;
+
+const WIZARD_GENERATE_SYSTEM = `You are an expert phone-bot scenario architect.
+Given an interview summary, generate a COMPLETE, PRODUCTION-READY scenario JSON.
+
+STRICT RULES:
+1. Output ONLY valid JSON â€” no markdown, no explanation, no code fences.
+2. Use realistic, professional, human-sounding language (not robotic).
+3. Cover the happy path PLUS at least 2 important branches/edge-cases.
+4. Maximum 16 nodes for clarity. Minimum 6 nodes.
+5. Node IDs must be unique strings (e.g. "n1", "n2", "gather-name", "cond-intent").
+6. Position nodes in a clear top-to-bottom layout.
+   - Center column: x=300. Left branch: x=80. Right branch: x=520. Extra: x=740.
+   - Start at y=60. Each level: y += 160.
+7. Every node must be reachable from start.
+8. The scenario must end with at least one "end" node.
+
+OUTPUT SCHEMA (JSON object):
+{
+  "name": "Short descriptive name",
+  "description": "One-line description",
+  "nodes": [ ...NodeObject ],
+  "edges": [ ...EdgeObject ]
+}
+
+NodeObject:
+{
+  "id": "unique-string",
+  "type": "start|say|gather|condition|setVariable|transfer|end",
+  "position": { "x": number, "y": number },
+  "data": { ...type-specific fields below }
+}
+
+DATA FIELDS BY TYPE:
+start:       { "trigger": "inbound" }
+say:         { "text": "Spoken text here" }
+gather:      { "prompt": "Question spoken to caller", "inputType": "speech", "timeout": 5, "saveResponseTo": "variableName" }
+condition:   { "conditionType": "keywords", "branches": [ { "id": "branch_id", "name": "Branch Label", "keywords": ["word1","word2"] } ] }
+             // Always add a final branch with id "default", name "Other", keywords []
+setVariable: { "variableName": "varName", "value": "some value", "valueType": "string" }
+transfer:    { "destinationType": "number", "destination": "+00000000000", "timeout": 30 }
+end:         { "message": "Closing words to caller", "status": "completed" }
+
+EdgeObject:
+{
+  "id": "edge-unique-id",
+  "source": "source-node-id",
+  "target": "target-node-id",
+  "sourceHandle": "handle-id-if-multi-output"
+}
+
+MULTI-OUTPUT HANDLES:
+- gather node outputs: "success", "timeout"
+- condition node outputs: each branch's "id" field (including "default")
+- all other nodes: omit sourceHandle (single output)
+
+EXAMPLE of a condition with 3 branches:
+  branches: [ {id:"yes", name:"Interested", keywords:["yes","sure","interested"]},
+              {id:"no",  name:"Not now",    keywords:["no","not interested","busy"]},
+              {id:"default", name:"Other",  keywords:[]} ]
+  â†’ 3 outgoing edges with sourceHandle "yes", "no", "default"`;
+
+/**
+ * Wizard Step 1: Interview chat
+ * POST { messages: [{role, content}] }
+ * Returns { message: string, ready: bool, summary?: object }
+ */
+exports.scenarioWizardChat = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({error: "Method not allowed"}); return; }
+
+  try {
+    await extractUidFromRequest(req);
+    const {messages = []} = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) { res.status(500).json({error: "OPENAI_API_KEY not configured"}); return; }
+
+    const response = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o",
+          messages: [
+            {role: "system", content: WIZARD_INTERVIEW_SYSTEM},
+            ...messages,
+          ],
+          max_tokens: 300,
+          temperature: 0.7,
+        },
+        {headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"}, timeout: 20000},
+    );
+
+    const raw = response.data.choices[0].message.content || "";
+    const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+    const readyIdx = lines.findIndex((l) => l === "Â§READYÂ§");
+
+    if (readyIdx !== -1) {
+      // Parse summary JSON from the line after Â§READYÂ§
+      let summary = null;
+      try { summary = JSON.parse(lines[readyIdx + 1] || "{}"); } catch (_) { /* ignore */ }
+      res.json({message: "Great â€” I have everything I need! Let me generate your scenario now âœ¨", ready: true, summary});
+    } else {
+      res.json({message: raw, ready: false});
+    }
+  } catch (e) {
+    logger.error("scenarioWizardChat error", e.message);
+    res.status(500).json({error: e.message || "Chat failed"});
+  }
+});
+
+/**
+ * Wizard Step 2: Generate scenario from collected context
+ * POST { summary: object, messages: [{role, content}] }
+ * Returns { name, description, nodes, edges }
+ */
+exports.scenarioWizardGenerate = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({error: "Method not allowed"}); return; }
+
+  try {
+    await extractUidFromRequest(req);
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const {summary = {}, messages = []} = body;
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) { res.status(500).json({error: "OPENAI_API_KEY not configured"}); return; }
+
+    // Build context from interview conversation + summary
+    const interviewText = messages
+        .filter((m) => m.role !== "system")
+        .map((m) => `${m.role === "user" ? "Business owner" : "Designer"}: ${m.content}`)
+        .join("\n");
+
+    const userPrompt = `Here is the interview transcript:
+---
+${interviewText}
+---
+Summary extracted: ${JSON.stringify(summary)}
+
+Generate the complete scenario JSON now.`;
+
+    const response = await axios.post(
+        "https://api.openai.com/v1/chat/completions",
+        {
+          model: "gpt-4o",
+          messages: [
+            {role: "system", content: WIZARD_GENERATE_SYSTEM},
+            {role: "user", content: userPrompt},
+          ],
+          max_tokens: 4000,
+          temperature: 0.3,
+          response_format: {type: "json_object"},
+        },
+        {headers: {"Authorization": `Bearer ${apiKey}`, "Content-Type": "application/json"}, timeout: 45000},
+    );
+
+    const raw = response.data.choices[0].message.content || "{}";
+    let scenario;
+    try {
+      scenario = JSON.parse(raw);
+    } catch (parseErr) {
+      logger.error("Failed to parse wizard scenario JSON", raw.slice(0, 500));
+      res.status(500).json({error: "AI returned invalid JSON â€” please try again"});
+      return;
+    }
+
+    // Ensure required fields
+    if (!scenario.nodes || !Array.isArray(scenario.nodes) || scenario.nodes.length === 0) {
+      res.status(500).json({error: "AI did not generate any nodes â€” please try again"});
+      return;
+    }
+
+    // Inject display fields (label, color) into each node's data
+    for (const node of scenario.nodes) {
+      const cfg = NODE_TYPES[node.type];
+      if (cfg) {
+        node.data = node.data || {};
+        node.data.label = node.data.label || cfg.label || node.type;
+        node.data.color = cfg.color;
+      }
+    }
+
+    res.json({
+      name:        scenario.name        || "AI Generated Scenario",
+      description: scenario.description || "",
+      nodes:       scenario.nodes,
+      edges:       scenario.edges       || [],
+    });
+  } catch (e) {
+    logger.error("scenarioWizardGenerate error", e.message);
+    res.status(500).json({error: e.message || "Generation failed"});
+  }
+});
 
 

@@ -5,6 +5,7 @@
 
 const {logger} = require("firebase-functions");
 const axios = require("axios");
+const {logAnomaly} = require("./anomaly_service");
 
 // Filler phrases for natural conversation by language
 // Categorized by context for smarter selection
@@ -132,6 +133,106 @@ function detectLanguage(language) {
  * @param {string} language - Language code (e.g., "he-IL", "en-US", "he", "en")
  * @returns {string} System prompt in the specified language
  */
+// ── Public accessors used by voice_service.js ─────────────────────────────
+function getVibeSnippet(lang, vibe) {
+  const langKey = lang === "he" ? "he" : lang === "ar" ? "ar" : "en";
+  return VIBE_SNIPPETS[langKey]?.[vibe] || VIBE_SNIPPETS[langKey]?.friendly || "";
+}
+
+// ── Vibe snippets injected into system prompts ────────────────────────────
+const VIBE_SNIPPETS = {
+  en: {
+    professional: "Tone: professional and formal. Polished vocabulary, full sentences, no slang.",
+    friendly:     "Tone: warm and friendly — like chatting with a helpful neighbor.",
+    energetic:    "Tone: upbeat and enthusiastic. High energy, positive, motivated.",
+    empathetic:   "Tone: calm and empathetic. Listen first, acknowledge feelings, never rush.",
+    direct:       "Tone: brief and direct. One sentence max per reply. No small talk, get to the point.",
+    sales:        "Tone: persuasive sales rep. Highlight benefits, handle objections, create urgency naturally.",
+  },
+  he: {
+    professional: "סגנון: מקצועי ורשמי. מילים ברורות, משפטים מלאים, ללא סלנג.",
+    friendly:     "סגנון: חם וידידותי — כמו שיחה עם שכן טוב.",
+    energetic:    "סגנון: אנרגטי ומלא חיות. קול חיובי, נלהב, מוטיבציוני.",
+    empathetic:   "סגנון: רגוע ואמפתי. קשוב, מכיר ברגשות, לא ממהר.",
+    direct:       "סגנון: קצר וישיר. משפט אחד מקסימום. בלי שיחות סרק.",
+    sales:        "סגנון: איש מכירות משכנע. מדגיש יתרונות, מטפל בהתנגדויות, יוצר דחיפות באופן טבעי.",
+  },
+  ar: {
+    professional: "الأسلوب: مهني ورسمي. كلمات واضحة وجمل كاملة بدون عامية.",
+    friendly:     "الأسلوب: دافئ وودي — كالتحدث مع جار لطيف.",
+    energetic:    "الأسلوب: حيوي ومتحمس. إيجابي ومتحفز وملئ بالطاقة.",
+    empathetic:   "الأسلوب: هادئ ومتعاطف. يستمع أولاً ويراعي المشاعر ولا يتسرع.",
+    direct:       "الأسلوب: مختصر ومباشر. جملة واحدة كحد أقصى. بدون كلام زائد.",
+    sales:        "الأسلوب: مندوب مبيعات مقنع. يبرز المزايا ويعالج الاعتراضات ويخلق إلحاحاً بشكل طبيعي.",
+  },
+};
+
+// ── Arabic gender instruction ─────────────────────────────────────────────
+// Arabic grammar is gendered — the assistant needs to know whom it's addressing.
+function arabicGenderInstruction(callerGender) {
+  if (callerGender === "male") {
+    return "الجنس: المتصل رجل. استخدم الصيغة المذكرة طوال المحادثة (أنت، تريد، تفهم، تعرف).";
+  }
+  if (callerGender === "female") {
+    return "الجنس: المتصلة امرأة. استخدم الصيغة المؤنثة طوال المحادثة (أنتِ، تريدين، تفهمين، تعرفين).";
+  }
+  if (callerGender === "ask") {
+    return `الجنس: في بداية المحادثة، بعد التحية الأولى، اسأل بلطف: "كيف تفضل أن أخاطبك؟" — ثم استخدم الصيغة المناسبة طوال المحادثة. إذا لم يرد أو لم يكن واضحاً، استخدم صيغة محايدة.`;
+  }
+  // neutral: rephrase to avoid gendered forms where possible
+  return `الجنس: استخدم صياغة محايدة قدر الإمكان — تجنب الضمائر الجنسية المباشرة. استخدم الاسم إذا كان متاحاً، وإلا صِغ الجملة بأسلوب غير مباشر.`;
+}
+
+// ── Accent instruction ────────────────────────────────────────────────────
+// Returns a system-prompt snippet that guides the model's pronunciation.
+// Primarily useful for Voice-to-Voice (Realtime API); Standard TTS accent
+// is controlled by voice selection, but the instruction doesn't hurt.
+function getAccentInstruction(lang, voiceAccent) {
+  if (!voiceAccent || voiceAccent === "default") return "";
+  if (lang === "he") {
+    if (voiceAccent === "native-il") {
+      return "הגייה: דבר עברית במבטא ישראלי מקומי טבעי (ספרדי מודרני / צבר). ההגייה שלך צריכה להישמע כמו דובר עברית ילידי — לא כמו דובר אנגלי המדבר עברית. שמור על אינטונציה ורצב ישראלי.";
+    }
+    if (voiceAccent === "neutral") {
+      return "הגייה: דבר עברית בהגייה ברורה, ניטרלית ומובנת — ללא מבטא אזורי או זר.";
+    }
+  }
+  if (lang === "ar") {
+    if (voiceAccent === "msa") {
+      return "اللهجة: تحدث بالعربية الفصحى الحديثة (MSA) — رسمية وواضحة ومفهومة في جميع البلدان العربية.";
+    }
+    if (voiceAccent === "levantine") {
+      return "اللهجة: تحدث باللهجة الشامية (سوريا، لبنان، فلسطين، الأردن) — طبيعية وعامية ومألوفة.";
+    }
+    if (voiceAccent === "gulf") {
+      return "اللهجة: تحدث باللهجة الخليجية (الإمارات، السعودية، الكويت) — طبيعية وعامية خليجية.";
+    }
+    if (voiceAccent === "egyptian") {
+      return "اللهجة: تحدث باللهجة المصرية — الأكثر انتشاراً وفهماً في العالم العربي.";
+    }
+  }
+  return "";
+}
+
+// ── Gender instruction for Hebrew ─────────────────────────────────────────
+function hebrewGenderInstruction(callerGender) {
+  if (callerGender === "male") {
+    return "פנייה: הלקוח הוא גבר. השתמש בלשון זכר לאורך כל השיחה: אתה, רוצה, מבין, יודע, מסכים.";
+  }
+  if (callerGender === "female") {
+    return "פנייה: הלקוחה היא אישה. השתמש בלשון נקבה לאורך כל השיחה: את, רוצה, מבינה, יודעת, מסכימה.";
+  }
+  if (callerGender === "ask") {
+    return `פנייה: בתחילת השיחה, אחרי הברכה הראשונה, שאל בעדינות: "כדי לפנות אליך נכון — מה עדיף, זכר, נקבה, או ניטרלי?" — ואז השתמש בצורה שהמשתמש בחר לאורך שאר השיחה. אם המשתמש לא ברור או לא רוצה לענות, עבור לפנייה ניטרלית.`;
+  }
+  // neutral (default): restructure sentences to avoid gendered forms entirely
+  return `פנייה: השתמש בניסוח ניטרלי לאורך כל השיחה — אל תשתמש ב"אתה", "את", "אדוני", "גברתי". במקום זה:
+- השתמש בשם הפרטי אם ידוע ("אז רונן, מה אתם מחפשים?")
+- השתמש בפנייה עקיפה: "מה נשמע?", "מה אפשר לעזור?", "מתאים לך?", "נוח?"
+- נסח מחדש פעלים כדי להימנע מהטיה: "האם יש עניין ב..." במקום "האם תרצה..."
+- בשום אופן אל תנחש מגדר.`;
+}
+
 function buildSystemPrompt(assistant, companyData = {}, language = "en-US") {
   const lang = detectLanguage(language);
   const assistantName = assistant.name || assistant.assistantName || getDefaultAssistantName(lang);
@@ -141,6 +242,8 @@ function buildSystemPrompt(assistant, companyData = {}, language = "en-US") {
   const phoneNumber = companyData.companyPhoneNumbers?.[0] || "";
   const website = companyData.companyLink || "";
   const timeZone = companyData.timeZone || getDefaultTimeZone(lang);
+  const vibe = assistant.assistantVibe || "friendly";
+  const callerGender = assistant.callerGender || "auto";
 
   // Permissions
   const offerFreeEstimation = companyData.offerFreeEstimation || false;
@@ -156,15 +259,15 @@ function buildSystemPrompt(assistant, companyData = {}, language = "en-US") {
 
   // Build prompt based on language
   if (lang === "he") {
-    return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
+    return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions, vibe, callerGender);
   } else if (lang === "en") {
-    return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
+    return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions, vibe);
   } else if (lang === "ar") {
     return buildArabicPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
   }
-  
+
   // Default to English
-  return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
+  return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions, vibe);
 }
 
 /**
@@ -206,7 +309,7 @@ function getDefaultTimeZone(lang) {
 /**
  * Build Hebrew system prompt
  */
-function buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "") {
+function buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "", vibe = "friendly", callerGender = "auto") {
   // Format services
   const servicesText = services.length > 0
     ? services.map((s) => {
@@ -256,8 +359,8 @@ function buildHebrewPrompt(assistantName, companyName, industry, services, phone
 - "האם תרצה" ← עברית מתורגמת
 - "בהחלט, אשמח לעזור לך בכך" ← נשמע כמו תרגום
 
-מגדר:
-אף פעם לא "אתה" או "את". לא "אדוני" או "גברתי". במקום זה: "מה נשמע?", "רוצה לשמוע?", "מתאים?"
+${hebrewGenderInstruction(callerGender)}
+${VIBE_SNIPPETS.he[vibe] || VIBE_SNIPPETS.he.friendly}
 
 כללים:
 - משפט אחד, מקסימום שניים. קצר.
@@ -265,14 +368,14 @@ function buildHebrewPrompt(assistantName, companyName, industry, services, phone
 - שירות שאין ברשימה: "רגע, אעביר לנציג שיוכל לעזור"
 - איסוף פרטים: שם, טלפון, מתי נוח
 - אישור: "אז רגע, סיכום קצר: [שם], [שירות], [זמן]. הכל טוב?"
-- סיום: "יאללה, תודה! יום טוב!"
+- סיום: "יאללה, תודה! יום טוב!" — ואז הנח לשיחה להסתיים. לא להגיד "אני מסיים את השיחה", "השיחה מסתיימת", וכדומה. פשוט אמור שלום ותן לשיחה להיסגר.
 ${additionalInstructions ? `\nהוראות נוספות: ${additionalInstructions}` : ""}`;
 }
 
 /**
  * Build English system prompt — voice-optimized, ~280 tokens
  */
-function buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "") {
+function buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "", vibe = "friendly") {
   const servicesText = services.length > 0
     ? services.map((s) => {
         const parts = [s.name || "Service"];
@@ -297,7 +400,7 @@ function buildEnglishPrompt(assistantName, companyName, industry, services, phon
   ].filter(Boolean).join(", ");
 
   return `You are ${assistantName}, a phone agent for ${companyName}${industry ? ` (${industry})` : ""}.
-Sound like a natural, warm American service rep — never robotic, never stiff.
+${VIBE_SNIPPETS.en[vibe] || VIBE_SNIPPETS.en.friendly}
 
 Rules (non-negotiable):
 - Max 1–2 short sentences per reply. That's it.
@@ -307,6 +410,7 @@ Rules (non-negotiable):
 - Before thinking: say a filler first. "One sec.", "Sure, let me pull that up.", "Mmm."
 - Match caller's energy. They're casual → you're casual. They're in a hurry → you're fast.
 - When in doubt, ask one focused question. Not two.
+- When ending: just say goodbye naturally and stop. Never say "I'm ending the call", "ending the call now", or announce that you're hanging up.
 
 You can: ${canDo}
 ${cantDo ? `You cannot: ${cantDo}` : ""}
@@ -473,6 +577,28 @@ const AGENT_TOOLS = [
   {
     type: "function",
     function: {
+      name: "book_appointment",
+      description: "Book a scheduled appointment on the business calendar and automatically email the customer (and the business) a calendar invite with an .ics attachment plus Google/Outlook deep-links. Use this after the customer confirms a specific date and time.",
+      parameters: {
+        type: "object",
+        properties: {
+          customerName: {type: "string", description: "Customer full name"},
+          customerEmail: {type: "string", description: "Customer email for the calendar invite"},
+          customerPhone: {type: "string", description: "Customer phone in E.164 format (optional)"},
+          title: {type: "string", description: "Short title of the appointment (e.g. 'Consultation with Dr. Smith')"},
+          startTime: {type: "string", description: "Appointment start datetime in ISO 8601 format"},
+          endTime: {type: "string", description: "Appointment end datetime in ISO 8601 format"},
+          location: {type: "string", description: "Address or meeting link (optional)"},
+          notes: {type: "string", description: "Additional notes shown in the invite description (optional)"},
+          timezone: {type: "string", description: "IANA timezone like 'America/New_York' (optional)"},
+        },
+        required: ["customerName", "title", "startTime", "endTime"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "transfer_call",
       description: "Transfer the call to a human agent. Use this when the customer explicitly asks to speak to a person, when the issue is complex and requires human judgment, or when you cannot resolve the customer's request.",
       parameters: {
@@ -554,17 +680,54 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
       delete requestBody.response_format;
     }
 
-    const response = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
-        requestBody,
-        {
-          headers: {
-            "Authorization": `Bearer ${OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          timeout: 5000, // 5 seconds max for real-time voice (premium latency target)
-        },
-    );
+    // Retry logic for transient OpenAI failures
+    let response;
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        response = await axios.post(
+            "https://api.openai.com/v1/chat/completions",
+            requestBody,
+            {
+              headers: {
+                "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                "Content-Type": "application/json",
+              },
+              timeout: options.timeout || 5000,
+            },
+        );
+        break; // Success — exit retry loop
+      } catch (err) {
+        const isRetryable = err.code === "ECONNRESET" ||
+          err.code === "ETIMEDOUT" ||
+          err.code === "ECONNABORTED" ||
+          (err.response && (err.response.status === 429 || err.response.status >= 500));
+
+        if (!isRetryable || attempt === maxRetries) {
+          logAnomaly({
+            severity: "error",
+            category: "llm",
+            code: "OPENAI_CALL_FAIL",
+            message: `OpenAI chat.completions failed after ${attempt} retries: ${err.message}`,
+            details: {
+              status: err.response?.status || null,
+              errCode: err.code || null,
+              attempt,
+              model: requestBody?.model || null,
+            },
+          });
+          throw err; // Not retryable or max retries reached
+        }
+
+        const delay = 200 * Math.pow(2, attempt); // 200ms, 400ms
+        logger.warn(`OpenAI retry ${attempt + 1}/${maxRetries}`, {
+          error: err.message,
+          status: err.response?.status,
+          delay,
+        });
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
 
     const processingTime = Date.now() - startTime;
     const choice = response.data.choices[0];
@@ -576,6 +739,16 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
       logger.error("OpenAI API returned empty content and no tool calls", {
         responseData: response.data,
         choices: response.data.choices,
+      });
+      logAnomaly({
+        severity: "warn",
+        category: "llm",
+        code: "EMPTY_LLM_RESPONSE",
+        message: "OpenAI returned empty content and no tool calls",
+        details: {
+          finishReason: choice?.finish_reason || null,
+          usage: response.data?.usage || null,
+        },
       });
       throw new Error("No content in AI response");
     }
@@ -679,4 +852,8 @@ module.exports = {
   getConversationHistory,
   getRandomFiller,
   AGENT_TOOLS,
+  getVibeSnippet,
+  hebrewGenderInstruction,
+  arabicGenderInstruction,
+  getAccentInstruction,
 };

@@ -1,15 +1,19 @@
-/**
- * Admin Phone Service — cross-user phone number management + integration health checks.
+﻿/**
+ * Admin Phone Service â€” cross-user phone number management + integration health checks.
  * All endpoints require admin role.
  */
 
 "use strict";
 
 const {onRequest} = require("firebase-functions/v2/https");
+const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
-const {extractUidFromRequest} = require("./security_utils");
+const {extractUidFromRequest, getUserDoc} = require("./security_utils");
+const {logActivity} = require("./audit_service");
+
+const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 const twilio = require("twilio");
 const axios = require("axios");
 
@@ -28,33 +32,34 @@ function detectCountryFromNumber(phoneNumber, twilioCountry) {
   return twilioCountry || "US";
 }
 
-// ── CORS ─────────────────────────────────────────────────────────────────────
+// â”€â”€ CORS â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const corsOptions = {
   cors: [
     "https://voiceflow-ai-202509231639.web.app",
     "https://voiceflow-ai-202509231639.firebaseapp.com",
+    "https://voice.lancelotech.com",
     "http://localhost:3000",
     "http://localhost:5000",
-    /\.web\.app$/,
-    /\.firebaseapp\.com$/,
   ],
 };
 
-// ── Credentials ───────────────────────────────────────────────────────────────
+// â”€â”€ Credentials â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_AUTH_TOKEN  = process.env.TWILIO_AUTH_TOKEN;
 const STRIPE_SECRET_KEY  = process.env.STRIPE_SECRET_KEY;
 const SENDGRID_API_KEY   = process.env.SENDGRID_API_KEY;
 const ELEVENLABS_API_KEY = process.env.ELEVENLABS_API_KEY;
 const DEEPGRAM_API_KEY   = process.env.DEEPGRAM_API_KEY;
-const OPENAI_API_KEY     = process.env.OPENAI_API_KEY;
+// OPENAI_API_KEY is declared via defineSecret() above and bound at runtime
+// via the secrets:[] array on each onRequest — read through process.env at
+// call time, not module load time.
 
 function getTwilioClient() {
   if (!TWILIO_ACCOUNT_SID || !TWILIO_AUTH_TOKEN) return null;
   return twilio(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN);
 }
 
-// ── Admin check (self-contained) ──────────────────────────────────────────────
+// â”€â”€ Admin check (self-contained) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 async function requireAdmin(req, res) {
   const uid = await extractUidFromRequest(req);
   if (!uid) {
@@ -62,27 +67,21 @@ async function requireAdmin(req, res) {
     return null;
   }
   const db = getFirestore();
-  let role = null;
-  const newDoc = await db.collection("users").doc(uid).get();
-  if (newDoc.exists) {
-    role = newDoc.data().role;
-  } else {
-    const legacyDoc = await db.collection("user").doc(uid).get();
-    if (legacyDoc.exists) role = legacyDoc.data().role;
-  }
-  if (role !== "admin") {
+  const doc = await getUserDoc(db, uid);
+  const role = doc.exists ? doc.data().role : null;
+  if (role !== "admin" && role !== "super_admin") {
     res.status(403).json({status: "error", message: "Forbidden. Admin only."});
     return null;
   }
   return uid;
 }
 
-// ── adminListAllPhoneNumbers ───────────────────────────────────────────────────
+// â”€â”€ adminListAllPhoneNumbers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * GET /adminListAllPhoneNumbers
  * Returns all Twilio phone numbers in the account, cross-referenced with Firestore owners.
  */
-exports.adminListAllPhoneNumbers = onRequest(corsOptions, async (req, res) => {
+exports.adminListAllPhoneNumbers = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "GET") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
 
@@ -103,8 +102,8 @@ exports.adminListAllPhoneNumbers = onRequest(corsOptions, async (req, res) => {
 
     // Fetch all phone_numbers docs from Firestore
     const phoneSnap = await db.collection("phone_numbers").get();
-    const phoneMap = {}; // sid → { ownerId, firestoreId }
-    const phoneMapByNumber = {}; // phoneNumber → { ownerId, firestoreId }
+    const phoneMap = {}; // sid â†’ { ownerId, firestoreId }
+    const phoneMapByNumber = {}; // phoneNumber â†’ { ownerId, firestoreId }
     phoneSnap.forEach((d) => {
       const data = d.data();
       const sid = data.sid || data.twilioSid;
@@ -159,12 +158,12 @@ exports.adminListAllPhoneNumbers = onRequest(corsOptions, async (req, res) => {
   }
 });
 
-// ── adminReleasePhoneNumber ────────────────────────────────────────────────────
+// â”€â”€ adminReleasePhoneNumber â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * POST /adminReleasePhoneNumber  { sid, phoneNumber? }
  * Releases a Twilio number and removes it from Firestore.
  */
-exports.adminReleasePhoneNumber = onRequest(corsOptions, async (req, res) => {
+exports.adminReleasePhoneNumber = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
 
@@ -215,18 +214,19 @@ exports.adminReleasePhoneNumber = onRequest(corsOptions, async (req, res) => {
     if (deleted.size > 0) await batch.commit();
 
     res.status(200).json({status: "success", sid, phoneNumber, deletedDocs: deleted.size});
+    logActivity({ userId: callerUid, action: "phone.admin_release", category: "phone", resourceType: "phone_number", resourceId: sid, details: {phoneNumber: phoneNumber || sid} }).catch(() => {});
   } catch (error) {
     logger.error("adminReleasePhoneNumber failed", error);
     res.status(500).json({status: "error", message: error.message || "Failed to release phone number"});
   }
 });
 
-// ── adminReassignPhoneNumber ───────────────────────────────────────────────────
+// â”€â”€ adminReassignPhoneNumber â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * POST /adminReassignPhoneNumber  { sid, phoneNumber?, newOwnerId }
  * Reassigns ownership of a phone number in Firestore.
  */
-exports.adminReassignPhoneNumber = onRequest(corsOptions, async (req, res) => {
+exports.adminReassignPhoneNumber = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
 
@@ -273,7 +273,7 @@ exports.adminReassignPhoneNumber = onRequest(corsOptions, async (req, res) => {
     if (updated.size > 0) {
       await batch.commit();
     } else {
-      // Number not in Firestore — create a doc for it
+      // Number not in Firestore â€” create a doc for it
       await db.collection("phone_numbers").add({
         sid,
         phoneNumber: phoneNumber || null,
@@ -285,19 +285,20 @@ exports.adminReassignPhoneNumber = onRequest(corsOptions, async (req, res) => {
     }
 
     res.status(200).json({status: "success", sid, newOwnerId, updatedDocs: updated.size || 1});
+    logActivity({ userId: callerUid, action: "phone.admin_reassign", category: "phone", resourceType: "phone_number", details: {phoneNumber: phoneNumber || sid, toUserId: newOwnerId} }).catch(() => {});
   } catch (error) {
     logger.error("adminReassignPhoneNumber failed", error);
     res.status(500).json({status: "error", message: error.message || "Failed to reassign phone number"});
   }
 });
 
-// ── adminCheckIntegrations ─────────────────────────────────────────────────────
+// â”€â”€ adminCheckIntegrations â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 /**
  * GET /adminCheckIntegrations
  * Tests live connectivity for all configured external services.
  * Uses Promise.allSettled so one failure doesn't block others.
  */
-exports.adminCheckIntegrations = onRequest(corsOptions, async (req, res) => {
+exports.adminCheckIntegrations = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "GET") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
 
@@ -324,7 +325,7 @@ exports.adminCheckIntegrations = onRequest(corsOptions, async (req, res) => {
       return {
         status: "ok",
         label: "Twilio",
-        detail: `${account.friendlyName} · ${account.status} · ${numbersPage.length}+ numbers`,
+        detail: `${account.friendlyName} Â· ${account.status} Â· ${numbersPage.length}+ numbers`,
         accountSid: account.sid ? account.sid.slice(0, 10) + "..." : null,
       };
     } catch (err) {
@@ -343,7 +344,7 @@ exports.adminCheckIntegrations = onRequest(corsOptions, async (req, res) => {
       return {
         status: "ok",
         label: "Stripe",
-        detail: `${account.business_profile?.name || account.email || account.id} · ${mode}`,
+        detail: `${account.business_profile?.name || account.email || account.id} Â· ${mode}`,
         mode,
       };
     } catch (err) {
@@ -384,7 +385,7 @@ exports.adminCheckIntegrations = onRequest(corsOptions, async (req, res) => {
       return {
         status: "ok",
         label: "ElevenLabs",
-        detail: sub ? `${sub.tier} · ${sub.character_count || 0} chars used` : "Connected",
+        detail: sub ? `${sub.tier} Â· ${sub.character_count || 0} chars used` : "Connected",
       };
     } catch (err) {
       const msg = err.response?.data?.detail?.message || err.message || "Connection failed";
@@ -425,7 +426,7 @@ exports.adminCheckIntegrations = onRequest(corsOptions, async (req, res) => {
       return {
         status: "ok",
         label: "OpenAI",
-        detail: modelCount > 0 ? "API key valid · GPT models available" : "Connected",
+        detail: modelCount > 0 ? "API key valid Â· GPT models available" : "Connected",
       };
     } catch (err) {
       const msg = err.response?.data?.error?.message || err.message || "Connection failed";

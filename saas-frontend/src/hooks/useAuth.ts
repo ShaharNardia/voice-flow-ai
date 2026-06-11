@@ -5,10 +5,11 @@ import { doc, getDoc, onSnapshot } from "firebase/firestore";
 import { onAuthChange, type User } from "@/lib/firebase-auth";
 import { db } from "@/lib/firebase";
 
-export type AuthRole = "admin" | "user";
+export type AuthRole = "admin" | "user" | "super_admin";
 
 export interface AuthUser extends User {
   role: AuthRole;
+  featureOverrides?: Record<string, boolean>;
 }
 
 async function fetchRole(uid: string): Promise<AuthRole> {
@@ -46,8 +47,10 @@ export function useAuth() {
       if (firebaseUser) {
         // Listen for real-time role changes from Firestore
         unsubFirestore = onSnapshot(doc(db, "users", firebaseUser.uid), (snap) => {
-          const role: AuthRole = snap.exists() ? ((snap.data().role as AuthRole) || "user") : "user";
-          setUser({ ...firebaseUser, role } as AuthUser);
+          const data = snap.exists() ? snap.data() : {};
+          const role: AuthRole = (data.role as AuthRole) || "user";
+          const featureOverrides = (data.featureOverrides as Record<string, boolean>) || {};
+          setUser({ ...firebaseUser, role, featureOverrides } as AuthUser);
           setLoading(false);
         }, (err) => {
           console.error("[useAuth] onSnapshot error:", err);
@@ -69,5 +72,11 @@ export function useAuth() {
     };
   }, []);
 
-  return { user, loading, isAuthenticated: !!user, role: user?.role ?? ("user" as AuthRole) };
+  return {
+    user,
+    loading,
+    isAuthenticated: !!user,
+    role: user?.role ?? ("user" as AuthRole),
+    featureOverrides: user?.featureOverrides ?? {},
+  };
 }

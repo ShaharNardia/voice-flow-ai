@@ -9,13 +9,16 @@
  */
 
 const {onRequest} = require("firebase-functions/v2/https");
+const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
+
+const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 
 const VERSION = "1.0.0";
 const START_TIME = Date.now();
 
-exports.healthCheck = onRequest(async (req, res) => {
+exports.healthCheck = onRequest({secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method !== "GET") {
     res.set("Allow", "GET");
     res.status(405).json({status: "error", message: "Method not allowed."});
@@ -85,7 +88,7 @@ exports.healthCheck = onRequest(async (req, res) => {
  * Returns boolean "configured" flag per service based on env var presence.
  * Used by the user-facing Settings page to display which integrations are active.
  */
-exports.getIntegrationStatus = onRequest(async (req, res) => {
+exports.getIntegrationStatus = onRequest({secrets: [OPENAI_API_KEY]}, async (req, res) => {
   // Allow CORS from any origin — this is read-only, non-sensitive data
   res.set("Access-Control-Allow-Origin", "*");
   res.set("Access-Control-Allow-Methods", "GET, OPTIONS");

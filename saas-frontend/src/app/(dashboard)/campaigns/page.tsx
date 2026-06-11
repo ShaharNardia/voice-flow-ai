@@ -4,6 +4,9 @@ import { useState, useEffect, useRef } from "react";
 import { collection, query, where, orderBy, onSnapshot } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
+import { useUsersMap, type UserInfo } from "@/hooks/useUsersMap";
+import OwnerBadge from "@/components/OwnerBadge";
+import { FeatureGate } from "@/components/FeatureGate";
 import { formatDate } from "@/lib/utils";
 import {
   campaignsList,
@@ -86,11 +89,15 @@ function CampaignCard({
   onStart,
   onPause,
   loadingId,
+  isSuperAdmin,
+  usersMap,
 }: {
   campaign: Campaign & { id: string };
   onStart: (id: string) => void;
   onPause: (id: string) => void;
   loadingId: string | null;
+  isSuperAdmin: boolean;
+  usersMap: Map<string, UserInfo>;
 }) {
   const called = campaign.calledCount ?? 0;
   const total = campaign.leadCount ?? 0;
@@ -103,7 +110,10 @@ function CampaignCard({
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col gap-4 hover:shadow-md transition-shadow">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h3 className="font-semibold text-gray-900 truncate">{campaign.name}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="font-semibold text-gray-900 truncate">{campaign.name}</h3>
+            {isSuperAdmin && <OwnerBadge ownerId={campaign.ownerId} usersMap={usersMap} />}
+          </div>
           {campaign.assistantId && (
             <p className="text-xs text-gray-500 mt-0.5 truncate">{campaign.assistantId}</p>
           )}
@@ -583,8 +593,9 @@ function NewCampaignModal({ onClose, onCreated }: { onClose: () => void; onCreat
   );
 }
 
-export default function CampaignsPage() {
+function CampaignsPageInner() {
   const { user } = useAuth();
+  const { usersMap, isSuperAdmin } = useUsersMap();
   const uid = user?.uid;
   const [campaigns, setCampaigns] = useState<(Campaign & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
@@ -595,18 +606,23 @@ export default function CampaignsPage() {
 
   useEffect(() => {
     if (!uid) return;
-    const q = query(
-      collection(db, "campaigns"),
-      where("ownerId", "==", uid),
-      orderBy("createdAt", "desc")
-    );
+    const q = isSuperAdmin
+      ? query(
+          collection(db, "campaigns"),
+          orderBy("createdAt", "desc")
+        )
+      : query(
+          collection(db, "campaigns"),
+          where("ownerId", "==", uid),
+          orderBy("createdAt", "desc")
+        );
     const unsub = onSnapshot(q, (snap) => {
       const docs = snap.docs.map((d) => { const c = d.data() as Campaign; return { ...c, id: d.id }; });
       setCampaigns(docs);
       setLoading(false);
     });
     return () => unsub();
-  }, [uid, refreshKey]);
+  }, [uid, refreshKey, isSuperAdmin]);
 
   async function handleStart(campaignId: string) {
     setLoadingId(campaignId);
@@ -698,6 +714,8 @@ export default function CampaignsPage() {
                 onStart={handleStart}
                 onPause={handlePause}
                 loadingId={loadingId}
+                isSuperAdmin={isSuperAdmin}
+                usersMap={usersMap}
               />
             ))}
           </div>
@@ -712,4 +730,8 @@ export default function CampaignsPage() {
       )}
     </div>
   );
+}
+
+export default function CampaignsPage() {
+  return <FeatureGate featureId="module.campaigns"><CampaignsPageInner /></FeatureGate>;
 }

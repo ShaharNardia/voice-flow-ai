@@ -30,7 +30,7 @@ const FIREBASE_AUTH_URL =
 
 const CLOUD_RUN_URL =
   process.env.CLOUD_RUN_URL ||
-  'https://voiceflow-mediastream-900818829902.us-central1.run.app';
+  'https://voiceflow-mediastream-900818829902.me-west1.run.app';
 
 const QA_EMAIL = process.env.QA_EMAIL || 'shahar@lancelotech.com';
 const QA_PASSWORD = process.env.QA_PASSWORD || 'Test123!';

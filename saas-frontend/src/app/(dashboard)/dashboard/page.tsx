@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { collection, query, where, orderBy, limit, onSnapshot, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { useAuth } from "@/hooks/useAuth";
@@ -19,6 +19,9 @@ import { usePlan } from "@/hooks/usePlan";
 import { UsageMeter } from "@/components/ui/UsageMeter";
 import { UpgradeModal } from "@/components/ui/UpgradeModal";
 import { getUserPlan } from "@/lib/firebase-functions";
+import { useUsersMap } from "@/hooks/useUsersMap";
+import OwnerBadge from "@/components/OwnerBadge";
+import WizardWelcomeBanner from "@/components/WizardWelcomeBanner";
 import {
   AreaChart,
   Area,
@@ -38,6 +41,8 @@ interface CallSession {
   updatedAt?: Timestamp;
   assistantDefinition?: { name?: string };
   conversationHistory?: unknown[];
+  duration?: number;
+  ownerId?: string;
 }
 
 interface StatCardProps {
@@ -46,9 +51,13 @@ interface StatCardProps {
   icon: React.ElementType;
   trend?: string;
   color?: string;
+  // #51 — when true, render shimmer placeholders instead of a hard "0" so the
+  // dashboard doesn't briefly show all-zeros before the first Firestore
+  // snapshot lands.
+  loading?: boolean;
 }
 
-function StatCard({ label, value, icon: Icon, trend, color = "#F22F46" }: StatCardProps) {
+function StatCard({ label, value, icon: Icon, trend, color = "#F22F46", loading = false }: StatCardProps) {
   return (
     <div className="bg-white border border-neutral-200 rounded-xl p-5">
       <div className="flex items-center justify-between mb-3">
@@ -57,8 +66,16 @@ function StatCard({ label, value, icon: Icon, trend, color = "#F22F46" }: StatCa
           <Icon className="w-4 h-4" style={{ color }} />
         </div>
       </div>
-      <div className="text-2xl font-bold text-neutral-900">{value}</div>
-      {trend && <div className="text-xs text-neutral-400 mt-1">{trend}</div>}
+      {loading ? (
+        <div className="h-8 w-20 bg-neutral-200 rounded animate-pulse" aria-label="Loading…" />
+      ) : (
+        <div className="text-2xl font-bold text-neutral-900">{value}</div>
+      )}
+      {loading ? (
+        <div className="mt-2 h-3 w-24 bg-neutral-100 rounded animate-pulse" />
+      ) : (
+        trend && <div className="text-xs text-neutral-400 mt-1">{trend}</div>
+      )}
     </div>
   );
 }
@@ -105,6 +122,7 @@ interface PlanUsage {
 
 export default function DashboardPage() {
   const { user } = useAuth();
+  const { usersMap, isSuperAdmin } = useUsersMap();
   const { isBasic, loading: planLoading, limits } = usePlan();
   const [recentCalls, setRecentCalls] = useState<CallSession[]>([]);
   const [allCalls, setAllCalls] = useState<CallSession[]>([]);
@@ -116,18 +134,14 @@ export default function DashboardPage() {
     if (!user) return;
 
     // Live calls (real-time)
-    const liveQ = query(
-      collection(db, "call_sessions"),
-      where("status", "==", "in-progress"),
-      limit(10),
-    );
+    const liveQ = isSuperAdmin
+      ? query(collection(db, "call_sessions"), where("status", "==", "in-progress"), limit(10))
+      : query(collection(db, "call_sessions"), where("ownerId", "==", user.uid), where("status", "==", "in-progress"), limit(10));
 
     // Recent calls for stats
-    const recentQ = query(
-      collection(db, "call_sessions"),
-      orderBy("createdAt", "desc"),
-      limit(50),
-    );
+    const recentQ = isSuperAdmin
+      ? query(collection(db, "call_sessions"), orderBy("createdAt", "desc"), limit(50))
+      : query(collection(db, "call_sessions"), where("ownerId", "==", user.uid), orderBy("createdAt", "desc"), limit(50));
 
     const unsubLive = onSnapshot(liveQ, (snap) => {
       const live = snap.docs.map((d) => ({ id: d.id, ...d.data() } as CallSession));
@@ -148,7 +162,7 @@ export default function DashboardPage() {
       unsubLive();
       unsubRecent();
     };
-  }, [user]);
+  }, [user, isSuperAdmin]);
 
   // Load plan usage for BASIC users (only after plan is confirmed loaded)
   useEffect(() => {
@@ -158,13 +172,29 @@ export default function DashboardPage() {
     }).catch(() => {});
   }, [user, isBasic, planLoading]);
 
-  const liveCalls = allCalls.filter((c) => c.status === "in-progress").length;
+  const liveCalls = allCalls.filter((c) => {
+    if (c.status !== "in-progress") return false;
+    // Don't count sessions older than 5 minutes as "live" — they're stale
+    // Twilio status callbacks are unreliable for inbound calls
+    if (c.createdAt && c.createdAt.toDate) {
+      const created = c.createdAt.toDate();
+      if (Date.now() - created.getTime() > 5 * 60 * 1000) return false;
+    }
+    return true;
+  }).length;
   const todayCalls = allCalls.filter((c) => {
     if (!c.createdAt) return false;
     const today = new Date();
     const d = c.createdAt.toDate();
     return d.toDateString() === today.toDateString();
   }).length;
+
+  const avgDuration = useMemo(() => {
+    const withDuration = allCalls.filter(c => c.duration && c.duration > 0);
+    if (withDuration.length === 0) return "N/A";
+    const avg = withDuration.reduce((sum, c) => sum + (c.duration || 0), 0) / withDuration.length;
+    return avg < 60 ? `${Math.round(avg)}s` : `${(avg / 60).toFixed(1)}m`;
+  }, [allCalls]);
 
   const chartData = buildChartData(allCalls);
 
@@ -173,6 +203,9 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <UpgradeModal open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
+
+      {/* First-run banner pointing to the voice-enabled wizard */}
+      <WizardWelcomeBanner assistantCount={allCalls.length > 0 ? 1 : 0} />
 
       {/* ── BASIC upgrade banner ── */}
       {isBasic && planUsage && (
@@ -220,13 +253,14 @@ export default function DashboardPage() {
       )}
 
       {/* Stats row */}
-      <div className="grid grid-cols-4 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
         <StatCard
           label="Live Calls"
           value={liveCalls}
           icon={PhoneCall}
           trend={liveCalls > 0 ? "Active right now" : "No active calls"}
           color="#F22F46"
+          loading={loading}
         />
         <StatCard
           label="Calls Today"
@@ -234,6 +268,7 @@ export default function DashboardPage() {
           icon={TrendingUp}
           trend="Last 24 hours"
           color="#0066CC"
+          loading={loading}
         />
         <StatCard
           label="Total Calls (50)"
@@ -241,20 +276,22 @@ export default function DashboardPage() {
           icon={Bot}
           trend="Loaded"
           color="#22C55E"
+          loading={loading}
         />
         <StatCard
-          label="Avg Turn Latency"
-          value="< 1.1s"
+          label="Avg Duration"
+          value={avgDuration}
           icon={Clock}
-          trend="Target: < 800ms"
+          trend="Per call average"
           color="#F59E0B"
+          loading={loading}
         />
       </div>
 
       {/* Chart + recent calls */}
-      <div className="grid grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
         {/* Volume chart */}
-        <div className="col-span-2 bg-white border border-neutral-200 rounded-xl p-5">
+        <div className="lg:col-span-2 bg-white border border-neutral-200 rounded-xl p-5">
           <div className="flex items-center justify-between mb-4">
             <h2 className="font-semibold text-neutral-800 text-sm">Call Volume — Last 7 Days</h2>
           </div>
@@ -328,29 +365,43 @@ export default function DashboardPage() {
                 <th className="px-5 py-3 text-left">Assistant</th>
                 <th className="px-5 py-3 text-left">Status</th>
                 <th className="px-5 py-3 text-left">Turns</th>
+                <th className="px-5 py-3 text-left">Duration</th>
                 <th className="px-5 py-3 text-left">Time</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-neutral-50">
-              {recentCalls.map((call) => (
+              {recentCalls.map((call) => {
+                // Treat stale "in-progress" sessions (>5 min) as completed
+                let effectiveStatus = call.status;
+                if (call.status === "in-progress" && call.createdAt && call.createdAt.toDate) {
+                  const age = Date.now() - call.createdAt.toDate().getTime();
+                  if (age > 5 * 60 * 1000) effectiveStatus = "completed";
+                }
+                return (
                 <tr key={call.id} className="hover:bg-neutral-50/50 transition-colors">
                   <td className="px-5 py-3 text-sm text-neutral-700 font-mono">
-                    {call.leadNumber ? formatPhone(call.leadNumber) : "—"}
+                    <div className="flex items-center gap-2">
+                      <span>{call.leadNumber ? formatPhone(call.leadNumber) : "—"}</span>
+                      {isSuperAdmin && <OwnerBadge ownerId={call.ownerId} usersMap={usersMap} />}
+                    </div>
                   </td>
                   <td className="px-5 py-3 text-sm text-neutral-600">
                     {call.assistantDefinition?.name || "—"}
                   </td>
                   <td className="px-5 py-3">
-                    <StatusBadge status={call.status} />
+                    <StatusBadge status={effectiveStatus} />
                   </td>
                   <td className="px-5 py-3 text-sm text-neutral-500">
                     {Math.floor((call.conversationHistory?.length || 0) / 2)}
+                  </td>
+                  <td className="px-5 py-3 text-sm text-neutral-500">
+                    {call.duration ? `${Math.round(call.duration)}s` : "\u2014"}
                   </td>
                   <td className="px-5 py-3 text-sm text-neutral-400">
                     {call.createdAt ? formatDate(call.createdAt.toDate()) : "—"}
                   </td>
                 </tr>
-              ))}
+                ); })}
             </tbody>
           </table>
         )}

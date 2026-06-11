@@ -110,3 +110,8 @@ saas-frontend/out/
 gleaming-idiom-*.json
 *-service-account*.json
 *serviceAccountKey*.json
+
+# Build artifacts + stray temp dumps (added 2026-06-10 prod hardening)
+.next/
+/CTemp*.json
+/CUsers*.json

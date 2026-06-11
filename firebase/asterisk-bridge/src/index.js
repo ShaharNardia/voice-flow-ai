@@ -14,6 +14,9 @@ const { v4: uuidv4 } = require('uuid');
 const ariClient = require('./ari-client');
 const ttsService = require('./tts-service');
 const firebaseService = require('./firebase-service');
+const AiSession = require('./ai-session');
+
+const AI_MODE = process.env.AI_MODE !== 'false'; // default: true
 
 const app = express();
 app.use(cors());
@@ -213,28 +216,42 @@ app.post('/webhook/asterisk', async (req, res) => {
 });
 
 /**
- * Handle call answered
+ * Handle call answered — starts full AI session or DTMF fallback
  */
 async function handleStasisStart(event) {
   const channelId = event.channel?.id;
-  const callId = event.channel?.channelvars?.VOICEFLOW_CALL_ID;
-  
+  const callId    = event.channel?.channelvars?.VOICEFLOW_CALL_ID;
+
   if (!callId || !activeCalls.has(callId)) {
-    console.log('Unknown call, ignoring');
+    console.log('Unknown call in StasisStart, ignoring');
     return;
   }
 
   const call = activeCalls.get(callId);
-  call.status = 'answered';
+  call.status     = 'answered';
   call.answeredAt = new Date();
+  call.channelId  = channelId;
 
-  console.log(`[${callId}] Call answered, playing greeting...`);
+  console.log(`[${callId}] Call answered — AI_MODE=${AI_MODE}`);
 
-  // Answer the channel
-  await ariClient.answerChannel(channelId);
+  await firebaseService.updateCallSession(call.callSessionId, {
+    status:    'in-progress',
+    answeredAt: new Date(),
+  });
 
-  // Play the greeting
-  await ariClient.playSound(channelId, call.audioFile);
+  if (AI_MODE) {
+    // Full AI conversation — runs the whole call asynchronously
+    const session = new AiSession(call);
+    session.start().catch((err) => {
+      console.error(`[${callId}] AI session crashed: ${err.message}`);
+    });
+  } else {
+    // Legacy: play greeting then wait for DTMF
+    await ariClient.answerChannel(channelId);
+    await ariClient.playAndWait(channelId, call.audioFile);
+    // Timeout for DTMF response
+    call._dtmfTimeout = setTimeout(() => handleNoResponse(call), 10000);
+  }
 }
 
 /**

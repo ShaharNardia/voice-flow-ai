@@ -21,6 +21,9 @@ function normalizeLanguageForDeepgram(language) {
   if (lang.startsWith("he")) return "he";
   if (lang.startsWith("en")) return "en";
   if (lang.startsWith("ar")) return "ar";
+  if (lang.startsWith("el")) return "el";
+  if (lang.startsWith("af")) return "af";
+  if (lang.startsWith("zu")) return "zu";
 
   // Default to English for unknown languages
   return "en";
@@ -47,8 +50,10 @@ function createDeepgramConnection(language = "en", model = null, onTranscript, o
   // English: nova-3 (most accurate), tighter VAD for faster turn-taking
   // Hebrew: nova-2 (nova-3 causes APPLICATION ERROR with he-IL on Twilio)
   const resolvedModel = model || (deepgramLanguage === "en" ? "nova-3" : "nova-2");
-  const utteranceEndMs = deepgramLanguage === "en" ? 600 : 800;
-  const vadTurnoff = deepgramLanguage === "en" ? 300 : 500;
+  // Relaxed VAD settings to prevent cutting off natural speech pauses
+  // Previous values were too aggressive and dropped words during hesitations
+  const utteranceEndMs = deepgramLanguage === "en" ? 800 : 1000;
+  const vadTurnoff = deepgramLanguage === "en" ? 500 : 700;
 
   const deepgram = createClient(DEEPGRAM_API_KEY);
 
@@ -60,7 +65,7 @@ function createDeepgramConnection(language = "en", model = null, onTranscript, o
     smart_format: true,
     interim_results: true, // Critical for barge-in detection
     utterance_end_ms: utteranceEndMs, // English: 600ms, Hebrew: 800ms
-    endpointing: 150, // End of speech detection (ms) - aggressive for sub-second response
+    endpointing: 300, // End of speech detection (ms) - balanced: captures full utterances without long delay (was 150)
     vad_events: true, // Voice activity detection – enables barge-in
     vad_turnoff: vadTurnoff, // English: 300ms, Hebrew: 500ms
     punctuate: true, // Better accuracy with punctuation
@@ -71,7 +76,32 @@ function createDeepgramConnection(language = "en", model = null, onTranscript, o
     channels: 1, // Mono audio
   });
 
-  logger.info("Deepgram connection created", {
+  // Track connection readiness and buffer early audio
+  let isReady = false;
+  const audioBuffer = [];
+
+  connection.on("open", () => {
+    isReady = true;
+    logger.info("Deepgram connection READY — flushing buffered audio", {
+      bufferedChunks: audioBuffer.length,
+    });
+    // Flush any audio that arrived before connection was ready
+    while (audioBuffer.length > 0) {
+      const chunk = audioBuffer.shift();
+      if (connection.send) connection.send(chunk);
+    }
+  });
+
+  // Return a wrapper that tracks state without monkey-patching the SDK object
+  const wrapper = {
+    connection,
+    isReady: () => isReady,
+    buffer: audioBuffer,
+    send: (chunk) => connection.send ? connection.send(chunk) : null,
+    finish: () => connection.finish ? connection.finish() : null,
+  };
+
+  logger.info("Deepgram connection created (waiting for open event)", {
     originalLanguage: language,
     deepgramLanguage,
     model: resolvedModel,
@@ -122,19 +152,28 @@ function createDeepgramConnection(language = "en", model = null, onTranscript, o
     logger.info("Deepgram connection closed");
   });
 
-  return connection;
+  return wrapper;
 }
 
 /**
  * Process audio chunk through Deepgram
- * @param {Object} connection - Deepgram connection object
+ * @param {Object} wrapper - Deepgram connection wrapper (from createDeepgramConnection)
  * @param {Buffer} audioChunk - Audio data chunk
  */
-function sendAudioToDeepgram(connection, audioChunk) {
-  if (connection && connection.send) {
-    connection.send(audioChunk);
+function sendAudioToDeepgram(wrapper, audioChunk) {
+  if (!wrapper) {
+    logger.warn("Deepgram wrapper is null");
+    return;
+  }
+  // If connection not ready yet, buffer the audio (prevents losing first words)
+  if (wrapper.isReady && !wrapper.isReady()) {
+    wrapper.buffer.push(audioChunk);
+    return;
+  }
+  if (wrapper.send) {
+    wrapper.send(audioChunk);
   } else {
-    logger.warn("Deepgram connection not ready or invalid");
+    logger.warn("Deepgram wrapper has no send method");
   }
 }
 
@@ -142,9 +181,9 @@ function sendAudioToDeepgram(connection, audioChunk) {
  * Close Deepgram connection
  * @param {Object} connection - Deepgram connection object
  */
-function closeDeepgramConnection(connection) {
-  if (connection && connection.finish) {
-    connection.finish();
+function closeDeepgramConnection(wrapper) {
+  if (wrapper && wrapper.finish) {
+    wrapper.finish();
   }
 }
 

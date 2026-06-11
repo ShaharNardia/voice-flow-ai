@@ -8,10 +8,11 @@ import { useAuth } from "./useAuth";
 export type PlanName = "basic" | "pro" | "scale";
 
 export interface PlanLimits {
-  assistants: number;
-  minutesPerMonth: number;
-  leads: number;
-  campaigns: number;
+  // null = Unlimited (matches PlanConfig in firebase-functions.ts).
+  assistants: number | null;
+  minutesPerMonth: number | null;
+  leads: number | null;
+  campaigns: number | null;
   knowledgeBase: boolean;
   analytics: boolean;
   calendar: boolean;

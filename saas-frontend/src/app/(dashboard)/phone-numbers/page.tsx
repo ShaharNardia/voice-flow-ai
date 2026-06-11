@@ -1,11 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, query, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
+import { collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { releasePhoneNumber, listPhoneNumbers, configurePhoneNumber, assistantsList, type Assistant } from "@/lib/firebase-functions";
 import Link from "next/link";
-import { Phone, Plus, Trash2, RefreshCw, Loader2, Settings, X, Check } from "lucide-react";
+import { Phone, Plus, Trash2, RefreshCw, Loader2, Settings, X, Check, Server } from "lucide-react";
 
 interface PhoneNumberDoc {
   id: string;
@@ -15,11 +15,16 @@ interface PhoneNumberDoc {
   assistantName?: string;
   country?: string;
   sid?: string;
+  provider?: "twilio" | "sip";
 }
 
 /** Detect country from phone number E.164 prefix when Twilio returns wrong data */
 function detectCountry(phoneNumber: string, twilioCountry: string): string {
+  if (!phoneNumber) return twilioCountry || "US";
   if (phoneNumber.startsWith("+972")) return "IL";
+  if (phoneNumber.startsWith("+971")) return "AE";
+  if (phoneNumber.startsWith("+357")) return "CY";
+  if (phoneNumber.startsWith("+30"))  return "GR";
   if (phoneNumber.startsWith("+44"))  return "GB";
   if (phoneNumber.startsWith("+49"))  return "DE";
   if (phoneNumber.startsWith("+33"))  return "FR";
@@ -46,26 +51,42 @@ export default function PhoneNumbersPage() {
   useEffect(() => {
     const q = query(collection(db, "phone_numbers"));
     const unsub = onSnapshot(q, (snap) => {
-      setNumbers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as PhoneNumberDoc)));
+      setNumbers(snap.docs.map((d) => {
+        const data = d.data();
+        return { id: d.id, ...data, phoneNumber: data.phoneNumber || d.id } as PhoneNumberDoc;
+      }));
       setLoading(false);
     }, () => setLoading(false));
     return unsub;
+  }, []);
+
+  // Auto-sync from Twilio on page load so newly provisioned numbers appear immediately
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { handleSync(); }, []);
+
+  // Load assistants for name resolution
+  useEffect(() => {
+    assistantsList().then(setAssistants).catch(() => {});
   }, []);
 
   const handleSync = async () => {
     setSyncing(true);
     setSyncError("");
     try {
-      const twilioNumbers = await listPhoneNumbers();
+      const allNumbers = await listPhoneNumbers();
       await Promise.all(
-        twilioNumbers.map((n) =>
-          setDoc(doc(db, "phone_numbers", n.phoneNumber), {
+        allNumbers.map((n) => {
+          const provider = (n as { provider?: string }).provider || "twilio";
+          const nlpId    = (n as { id?: string }).id;
+          return setDoc(doc(db, "phone_numbers", n.phoneNumber), {
             phoneNumber: n.phoneNumber,
             friendlyName: n.friendlyName || "",
             country: detectCountry(n.phoneNumber, n.country || "US"),
-            sid: n.sid,
-          }, { merge: true })
-        )
+            sid: n.sid || null,
+            provider,
+            // NLPearl provisioning removed — only Twilio + SIP supported now.
+          }, { merge: true });
+        })
       );
     } catch (e: unknown) {
       setSyncError(e instanceof Error ? e.message : "Sync failed");
@@ -111,7 +132,7 @@ export default function PhoneNumbersPage() {
         // the number likely already has correct webhooks from purchase/sync.
         console.warn("Twilio webhook config skipped:", twilioErr);
       }
-      // Always save assistant assignment to Firestore
+      // Save assistant assignment to phone_numbers collection (used by outbound/UI)
       const assistant = assistants.find((a) => a.id === configAssistantId);
       await setDoc(doc(db, "phone_numbers", configuring.phoneNumber), {
         assistantId: configAssistantId || "",
@@ -119,6 +140,29 @@ export default function PhoneNumbersPage() {
           ? (assistant?.name || assistant?.assistantName || "")
           : "",
       }, { merge: true });
+
+      // Also update ALL Company phoneNumberMap entries for this number (used by inbound calls)
+      // This ensures inbound calls route to the correct assistant
+      try {
+        const companiesSnap = await getDocs(query(collection(db, "Company")));
+        for (const companyDoc of companiesSnap.docs) {
+          const data = companyDoc.data();
+          const phoneMap: Array<{ phoneNumber?: string; assistantId?: string; [key: string]: unknown }> = data.phoneNumberMap || [];
+          const idx = phoneMap.findIndex((e: { phoneNumber?: string }) =>
+            e.phoneNumber && (e.phoneNumber === configuring.phoneNumber || e.phoneNumber.replace(/\D/g, "") === configuring.phoneNumber.replace(/\D/g, ""))
+          );
+          if (idx >= 0) {
+            // Update the assistantId in the matching entry
+            const updated = [...phoneMap];
+            updated[idx] = { ...updated[idx], assistantId: configAssistantId || "" };
+            await setDoc(doc(db, "Company", companyDoc.id), { phoneNumberMap: updated }, { merge: true });
+          }
+        }
+      } catch (companyErr) {
+        console.warn("Company phoneNumberMap sync skipped:", companyErr);
+        // Non-critical — don't fail the whole operation
+      }
+
       setConfiguring(null);
     } catch (e: unknown) {
       setSaveError(e instanceof Error ? e.message : "Failed to save");
@@ -129,10 +173,10 @@ export default function PhoneNumbersPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-lg font-semibold text-neutral-900">Phone Numbers</h2>
-          <p className="text-sm text-neutral-500 mt-0.5">Manage your Twilio phone numbers</p>
+          <p className="text-sm text-neutral-500 mt-0.5">Manage PSTN numbers and SIP trunks</p>
         </div>
         <div className="flex items-center gap-2">
           <button
@@ -151,6 +195,24 @@ export default function PhoneNumbersPage() {
             Buy Number
           </Link>
         </div>
+      </div>
+
+      {/* Tab bar */}
+      <div className="flex border-b border-neutral-200 mb-6">
+        <Link
+          href="/phone-numbers"
+          className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors border-[#F22F46] text-[#F22F46]"
+        >
+          <Phone className="w-4 h-4" />
+          PSTN Numbers
+        </Link>
+        <Link
+          href="/phone-numbers/sip"
+          className="flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 -mb-px transition-colors border-transparent text-neutral-500 hover:text-neutral-700 hover:bg-neutral-50"
+        >
+          <Server className="w-4 h-4" />
+          SIP Trunks
+        </Link>
       </div>
 
       {syncError && (
@@ -189,16 +251,32 @@ export default function PhoneNumbersPage() {
             <tbody className="divide-y divide-neutral-50">
               {numbers.map((n) => (
                 <tr key={n.id} className="hover:bg-neutral-50/50 transition-colors group">
-                  <td className="px-5 py-3 text-sm font-mono text-neutral-800">{n.phoneNumber}</td>
+                  <td className="px-5 py-3 text-sm font-mono text-neutral-800">
+                    <div className="flex items-center gap-2">
+                      <span>{n.phoneNumber}</span>
+                      {n.provider === "sip" ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 bg-teal-50 text-teal-700 rounded text-[10px] font-semibold uppercase">SIP</span>
+                      ) : (
+                        <span className="inline-flex items-center px-1.5 py-0.5 bg-red-50 text-red-700 rounded text-[10px] font-semibold uppercase">Twilio</span>
+                      )}
+                    </div>
+                  </td>
                   <td className="px-5 py-3 text-sm text-neutral-600">{n.friendlyName || "—"}</td>
                   <td className="px-5 py-3 text-sm text-neutral-500">
-                    {n.assistantName ? (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
-                        {n.assistantName}
-                      </span>
-                    ) : (
-                      <span className="text-neutral-400">Not assigned</span>
-                    )}
+                    {(() => {
+                      const name = n.assistantName || (n.assistantId ? assistants.find((a) => a.id === n.assistantId)?.name : null);
+                      return name ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs font-medium">
+                          {name}
+                        </span>
+                      ) : n.assistantId ? (
+                        <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs font-medium">
+                          {n.assistantId.slice(0, 8)}...
+                        </span>
+                      ) : (
+                        <span className="text-neutral-400">Not assigned</span>
+                      );
+                    })()}
                   </td>
                   <td className="px-5 py-3 text-sm text-neutral-400">{detectCountry(n.phoneNumber, n.country || "US")}</td>
                   <td className="px-5 py-3">

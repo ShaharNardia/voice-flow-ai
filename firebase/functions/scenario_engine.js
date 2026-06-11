@@ -167,6 +167,8 @@ function processStartNode(node, context, scenario) {
   return {
     nextNodeId: nextNode?.id || null,
     twiml: null, // No TwiML for start node
+    continueProcessing: true, // Must continue to the next node
+    logEntry: { action: "start", trigger: node.data?.trigger || "outbound" },
   };
 }
 
@@ -187,6 +189,7 @@ function processSayNode(node, context, scenario, twimlResponse) {
   return {
     nextNodeId: nextNode?.id || null,
     continueProcessing: true, // Can process next node immediately
+    logEntry: { action: "say", text: data.text || "", resolvedText: text, voice, language },
   };
 }
 
@@ -244,6 +247,7 @@ function processGatherNode(node, context, scenario, twimlResponse, callSessionId
   return {
     nextNodeId: null, // Wait for callback
     continueProcessing: false,
+    logEntry: { action: "gather", prompt: data.prompt || "", inputType: inputType, timeout: timeout, saveResponseTo: data.saveResponseTo || "userInput" },
   };
 }
 
@@ -320,6 +324,7 @@ function processConditionNode(node, context, scenario) {
   return {
     nextNodeId: nextNodes[0]?.node?.id || null,
     matchedCondition,
+    logEntry: { action: "condition", conditionType: data.conditionType || "keywords", matchedBranch: matchedCondition || "default", variable: data.variable, operator: data.operator },
   };
 }
 
@@ -349,6 +354,7 @@ function processSetVariableNode(node, context, scenario) {
     nextNodeId: nextNode?.id || null,
     continueProcessing: true,
     updatedVariables: context.variables,
+    logEntry: { action: "setVariable", name: data.variableName, value: value, type: data.valueType },
   };
 }
 
@@ -405,10 +411,11 @@ async function processApiCallNode(node, context, scenario, twimlResponse) {
       continueProcessing: true,
       updatedVariables: context.variables,
       apiResult: {success: true, data: response.data},
+      logEntry: { action: "apiCall", url: data.url, method: data.method, status: response?.status || null, responsePreview: JSON.stringify(response?.data || "").slice(0, 200), error: null },
     };
   } catch (error) {
     logger.error("API call failed in scenario", {error: error.message, url});
-    
+
     if (data.saveResponseTo) {
       context.variables = context.variables || {};
       context.variables[`${data.saveResponseTo}_error`] = error.message;
@@ -419,6 +426,7 @@ async function processApiCallNode(node, context, scenario, twimlResponse) {
       continueProcessing: true,
       updatedVariables: context.variables,
       apiResult: {success: false, error: error.message},
+      logEntry: { action: "apiCall", url: data.url, method: data.method, status: null, responsePreview: null, error: error.message },
     };
   }
 }
@@ -452,6 +460,7 @@ function processTransferNode(node, context, scenario, twimlResponse) {
   return {
     nextNodeId: null, // Transfer ends our handling
     continueProcessing: false,
+    logEntry: { action: "transfer", destinationType: data.destinationType, destination: data.destination, timeout: data.timeout },
   };
 }
 
@@ -478,6 +487,7 @@ function processRecordNode(node, context, scenario, twimlResponse, callSessionId
     return {
       nextNodeId: null,
       continueProcessing: false,
+      logEntry: { action: "record", recordAction: data.action, maxLength: data.maxLength, playBeep: data.playBeep },
     };
   }
 
@@ -486,6 +496,7 @@ function processRecordNode(node, context, scenario, twimlResponse, callSessionId
   return {
     nextNodeId: nextNode?.id || null,
     continueProcessing: true,
+    logEntry: { action: "record", recordAction: data.action, maxLength: data.maxLength, playBeep: data.playBeep },
   };
 }
 
@@ -502,6 +513,7 @@ function processWaitNode(node, context, scenario, twimlResponse) {
   return {
     nextNodeId: nextNode?.id || null,
     continueProcessing: true,
+    logEntry: { action: "wait", duration: data.duration },
   };
 }
 
@@ -534,6 +546,7 @@ async function processScheduleCallbackNode(node, context, scenario) {
   return {
     nextNodeId: nextNode?.id || null,
     continueProcessing: true,
+    logEntry: { action: "scheduleCallback", delay: data.delay, message: data.message, priority: data.priority },
   };
 }
 
@@ -573,6 +586,7 @@ async function processUpdateLeadNode(node, context, scenario) {
   return {
     nextNodeId: nextNode?.id || null,
     continueProcessing: true,
+    logEntry: { action: "updateLead", status: data.status, notes: data.notes },
   };
 }
 
@@ -594,6 +608,7 @@ function processEndNode(node, context, scenario, twimlResponse) {
     nextNodeId: null,
     continueProcessing: false,
     finalStatus: data.status || "completed",
+    logEntry: { action: "end", message: data.message || "", status: data.status || "completed" },
   };
 }
 
@@ -617,6 +632,7 @@ async function processNode(nodeId, scenario, context, callSessionId) {
   let currentNodeId = nodeId;
   let iterations = 0;
   const MAX_ITERATIONS = 50; // Prevent infinite loops
+  const executionLog = [];
 
   while (currentNodeId && iterations < MAX_ITERATIONS) {
     const currentNode = scenario.nodes.find((n) => n.id === currentNodeId);
@@ -669,6 +685,15 @@ async function processNode(nodeId, scenario, context, callSessionId) {
       context.variables = result.updatedVariables;
     }
 
+    // Log this node execution
+    executionLog.push({
+      nodeId: currentNode.id,
+      nodeType: currentNode.type,
+      nodeLabel: (currentNode.data && currentNode.data.label) || currentNode.type,
+      timestamp: new Date().toISOString(),
+      output: result.logEntry || null,
+    });
+
     // Check if we should continue processing
     if (!result.continueProcessing) {
       break;
@@ -689,6 +714,7 @@ async function processNode(nodeId, scenario, context, callSessionId) {
     lastNodeId: currentNodeId,
     context,
     finalStatus: result?.finalStatus,
+    executionLog,
   };
 }
 

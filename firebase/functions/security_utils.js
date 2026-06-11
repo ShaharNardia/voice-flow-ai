@@ -196,6 +196,7 @@ function validateRequired(payload, fields) {
 const ALLOWED_ORIGINS = [
   "https://voiceflow-ai-202509231639.web.app",
   "https://voiceflow-ai-202509231639.firebaseapp.com",
+    "https://voice.lancelotech.com",
 ];
 
 // Allow localhost only in development
@@ -271,6 +272,16 @@ async function extractUidFromRequest(req) {
   }
 }
 
+/**
+ * Get user document from Firestore, checking both `users` (new) and `user` (legacy) collections.
+ * Returns the DocumentSnapshot (may or may not exist).
+ */
+async function getUserDoc(db, uid) {
+  const newSnap = await db.collection("users").doc(uid).get();
+  if (newSnap.exists) return newSnap;
+  return db.collection("user").doc(uid).get();
+}
+
 module.exports = {
   stripHtml,
   sanitizeObject,
@@ -284,4 +295,5 @@ module.exports = {
   setCorsHeadersSafe,
   handleCorsSafe,
   extractUidFromRequest,
+  getUserDoc,
 };

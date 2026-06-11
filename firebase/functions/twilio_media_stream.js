@@ -33,8 +33,8 @@ const twilioClient =
 const activeConnections = new Map();
 
 // ── Latency constants ────────────────────────────────────────────────
-const BARGE_IN_CONFIDENCE_THRESHOLD = 0.35; // Lower = more sensitive (nova-3 en accuracy allows this)
-const BARGE_IN_TIME_THRESHOLD = 200; // ms – faster barge-in for natural feel
+const BARGE_IN_CONFIDENCE_THRESHOLD = 0.20; // Lowered from 0.35 — captures more speech, prevents word loss
+const BARGE_IN_TIME_THRESHOLD = 300; // ms – slightly longer to avoid cutting off first words (was 200)
 const MAX_CONVERSATION_HISTORY = 20; // Cap history to keep LLM fast
 const LLM_TIMEOUT_MS = 3000; // 3s max (GPT-4o-mini rarely exceeds 2s for ≤150 tokens)
 
@@ -131,13 +131,25 @@ const twilioMediaStream = onRequest(
     const PROJECT_ID = process.env.GCLOUD_PROJECT;
     const streamUrl = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/twilioMediaStream?callSid=${callSid}&callSessionId=${callSessionId}`;
 
+    // Speech speed from assistant settings (1.0 = normal, 1.1 = 110%, etc.)
+    const speechSpeed = assistant.speechSpeed || 1.0;
+
+    // Helper: escape XML special characters for SSML
+    const escapeXml = (str) => str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
     // Helper function to create TwiML for Say
     // NOTE: Uses <Start><Stream> (correct Twilio SDK method) for Media Streams.
     // This requires a wss:// WebSocket endpoint, not https://.
     // Firebase Cloud Functions cannot handle WebSocket; planned for Cloud Run.
     const createSayTwiML = (text) => {
       const twimlResponse = new twilio.twiml.VoiceResponse();
-      twimlResponse.say({voice: finalVoiceId, language: sayLanguage}, text);
+      if (speechSpeed && speechSpeed !== 1.0) {
+        const rate = Math.round(speechSpeed * 100) + "%";
+        const ssmlText = `<prosody rate="${rate}">${escapeXml(text)}</prosody>`;
+        twimlResponse.say({voice: finalVoiceId, language: sayLanguage}, ssmlText);
+      } else {
+        twimlResponse.say({voice: finalVoiceId, language: sayLanguage}, text);
+      }
       // Continue streaming after saying using correct TwiML verb
       const start = twimlResponse.start();
       start.stream({
@@ -175,34 +187,38 @@ const twilioMediaStream = onRequest(
       const now = Date.now();
 
       // ── Handle interim results for barge-in detection ──────────
-      if (!isFinal && text && text.trim() && confidence >= BARGE_IN_CONFIDENCE_THRESHOLD) {
+      if (!isFinal && text && text.trim()) {
+        // Always buffer interim text, even low confidence — prevents word loss
         transcriptBuffer = text;
-
-        const timeSinceLastInterim = now - lastInterimTime;
         lastInterimTime = now;
 
-        // If bot is speaking and we detect speech → barge-in!
-        if (isBotSpeaking && timeSinceLastInterim > BARGE_IN_TIME_THRESHOLD) {
-          const bargeInStartTime = Date.now();
-          logger.info("Barge-in detected - stopping bot speech", {
-            callSessionId,
-            callSid,
-            interimText: text,
-            confidence,
-            timeSinceLastInterim,
-          });
+        // Barge-in: only trigger if confidence is high enough to be real speech
+        if (confidence >= BARGE_IN_CONFIDENCE_THRESHOLD) {
+          const timeSinceLastInterim = now - lastInterimTime;
 
-          const bargeInTwiML = createBargeInTwiML();
-          const bargeInSent = await sendTwiMLToTwilio(bargeInTwiML, "barge-in");
-          const bargeInLatency = Date.now() - bargeInStartTime;
-
-          if (bargeInSent) {
-            isBotSpeaking = false;
-            logger.info("Barge-in executed", {
+          // If bot is speaking and we detect speech → barge-in!
+          if (isBotSpeaking && timeSinceLastInterim > BARGE_IN_TIME_THRESHOLD) {
+            const bargeInStartTime = Date.now();
+            logger.info("Barge-in detected - stopping bot speech", {
               callSessionId,
               callSid,
-              bargeInLatencyMs: bargeInLatency,
+              interimText: text,
+              confidence,
+              timeSinceLastInterim,
             });
+
+            const bargeInTwiML = createBargeInTwiML();
+            const bargeInSent = await sendTwiMLToTwilio(bargeInTwiML, "barge-in");
+            const bargeInLatency = Date.now() - bargeInStartTime;
+
+            if (bargeInSent) {
+              isBotSpeaking = false;
+              logger.info("Barge-in executed", {
+                callSessionId,
+                callSid,
+                bargeInLatencyMs: bargeInLatency,
+              });
+            }
           }
         }
 
@@ -211,6 +227,7 @@ const twilioMediaStream = onRequest(
           text,
           confidence,
           isBotSpeaking,
+          belowThreshold: confidence < BARGE_IN_CONFIDENCE_THRESHOLD,
         });
         return;
       }
@@ -290,7 +307,12 @@ const twilioMediaStream = onRequest(
 
           // ── STEP 4: Get LLM response ──────────────────────────
           const llmStartTime = Date.now();
-          const systemPrompt = llmService.buildSystemPrompt(assistant, companyData, language);
+          // If assistant has its own systemPrompt (custom instructions), use it directly
+          // Otherwise build from company data. This prevents company context bleeding
+          // into assistants that have their own identity (e.g., Australia Express vs LanceloTech)
+          const systemPrompt = assistant.systemPrompt
+            ? `You are ${assistant.name || "an AI assistant"}${assistant.companyName ? ` from ${assistant.companyName}` : ""}.\n\n${assistant.systemPrompt}`
+            : llmService.buildSystemPrompt(assistant, companyData, language);
           const llmHistory = llmService.getConversationHistory({conversationHistory: currentHistory});
 
           const llmResult = await llmService.getLLMResponse(
@@ -298,9 +320,9 @@ const twilioMediaStream = onRequest(
             text,
             llmHistory,
             {
-              model: "gpt-4o-mini",
-              maxTokens: 150,
-              temperature: 0.8,
+              model: assistant.llmModel || "gpt-4o-mini",
+              maxTokens: assistant.maxTokens || 150,
+              temperature: assistant.temperature ?? 0.8,
               tools: llmService.AGENT_TOOLS,
             },
           );
@@ -357,6 +379,38 @@ const twilioMediaStream = onRequest(
                   });
                   toolResults.push({id: toolCall.id, result: "Appointment created successfully"});
                   logger.info("Tool: appointment created", {service: toolArgs.service, callSessionId});
+                } else if (toolName === "book_appointment") {
+                  // Full booking: creates doc, sends ICS invite email w/ deep-links.
+                  // Gated via cap.appointments on the business owner.
+                  try {
+                    const {featureEnabledForUser} = require("./feature_gate");
+                    const ownerId = currentData.data()?.ownerId;
+                    const allowed = ownerId ? await featureEnabledForUser(ownerId, "cap.appointments") : false;
+                    if (!allowed) {
+                      toolResults.push({id: toolCall.id, result: "Booking tool is not enabled for this account."});
+                    } else {
+                      const {createAppointmentInternal} = require("./appointments_service");
+                      const result = await createAppointmentInternal({
+                        ownerId,
+                        assistantId: assistant?.id || null,
+                        callSessionId,
+                        title: toolArgs.title,
+                        startAt: toolArgs.startTime,
+                        endAt: toolArgs.endTime,
+                        attendeeName: toolArgs.customerName,
+                        attendeeEmail: toolArgs.customerEmail,
+                        attendeePhone: toolArgs.customerPhone,
+                        location: toolArgs.location,
+                        notes: toolArgs.notes,
+                        timezone: toolArgs.timezone,
+                      });
+                      toolResults.push({id: toolCall.id, result: `Booked. Calendar invite sent. Appointment id: ${result.id}`});
+                      logger.info("Tool: book_appointment succeeded", {id: result.id, callSessionId});
+                    }
+                  } catch (bookErr) {
+                    logger.error("book_appointment failed", bookErr);
+                    toolResults.push({id: toolCall.id, result: `Failed to book: ${bookErr.message}`});
+                  }
                 } else if (toolName === "transfer_call") {
                   // Transfer is handled via TwiML — set flag and skip second LLM call
                   const transferTwiML = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial>${toolArgs.to}</Dial></Response>`;
@@ -384,7 +438,7 @@ const twilioMediaStream = onRequest(
                 systemPrompt,
                 null,
                 [...llmHistory, ...toolResultMessages],
-                {model: "gpt-4o-mini", maxTokens: 60, temperature: 0.8},
+                {model: assistant.llmModel || "gpt-4o-mini", maxTokens: 60, temperature: assistant.temperature ?? 0.8},
               );
               aiResponse = confirmResult.text || "Done! Anything else I can help with?";
             } else {
