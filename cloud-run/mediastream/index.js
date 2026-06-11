@@ -642,7 +642,11 @@ async function openaiTTS(text, voice = "nova", speed = 1.0) {
 // This is the best-quality Hebrew voice path (#39). Uses the low-latency
 // Turbo v2.5 multilingual model. voiceId defaults to a configured Hebrew
 // voice; callers pass "elevenlabs:<voiceId>" or "elevenlabs:<voiceId>:<modelId>".
-const ELEVEN_DEFAULT_MODEL = "eleven_turbo_v2_5";
+// eleven_flash_v2_5 is ElevenLabs' lowest-latency model (~75ms model time vs
+// ~300ms for turbo), 32 languages incl. Hebrew. Slightly lower fidelity than
+// turbo but indistinguishable over an 8kHz phone line — the right tradeoff
+// for a real-time call. Saves ~200ms/turn.
+const ELEVEN_DEFAULT_MODEL = "eleven_flash_v2_5";
 async function elevenlabsTTS(text, voiceId, modelId = ELEVEN_DEFAULT_MODEL) {
   const KEY = process.env.ELEVENLABS_API_KEY;
   if (!KEY) throw new Error("No ElevenLabs key");
@@ -4449,7 +4453,10 @@ This applies to ALL languages. Never use digits in your response.`;
     // passing conversation) would complete within a single endpointing window
     // and be treated as full utterances.  400ms requires the noise to sustain
     // for twice as long before generating a final transcript.
-    endpointing: 400,
+    // Latency-tuned to 300ms (from 400) — shaves 100ms off every turn while
+    // staying above the 200ms that previously let background-noise bursts
+    // register as utterances. If false finals reappear, raise back to 400.
+    endpointing: 300,
   };
   // utterance_end_ms causes 400 errors on this Deepgram plan — disabled for all models
   console.log(`[${callSessionId}] Deepgram config: model=${dgOpts.model} lang=${dgOpts.language} endpointing=${dgOpts.endpointing}ms smartFormat=${supportsSmartFormat}`);
@@ -4500,12 +4507,15 @@ This applies to ALL languages. Never use digits in your response.`;
           // naturally filters out short ambient noise bursts.
           if (pendingTranscriptTimer) clearTimeout(pendingTranscriptTimer);
           pendingTranscriptText += (pendingTranscriptText ? " " : "") + transcript.trim();
+          // 150ms debounce (latency-tuned down from 250ms). Still catches the
+          // common double-final on a mid-sentence pause; if turns start
+          // splitting again, nudge back toward 200ms.
           pendingTranscriptTimer = setTimeout(() => {
             const combined = pendingTranscriptText;
             pendingTranscriptText = "";
             pendingTranscriptTimer = null;
             onTranscript({text: combined, isFinal: true, confidence}).catch(console.error);
-          }, 250);
+          }, 150);
         }
       } else if (isFinal) {
         console.log(`[${callSessionId}] DG final (empty) conf=${confidence.toFixed(2)}`);
