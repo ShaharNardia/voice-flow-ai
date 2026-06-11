@@ -2758,29 +2758,47 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   // socket opens via bridge.connect() below.
   bridge.prewarm();
 
-  // ── Hybrid half-duplex turn state (only used when hybridSTT) ──────────────
-  // The bot finishes its turn, THEN listens. While the bot is speaking we
-  // DEFER Deepgram finals instead of injecting them — this prevents the bot
-  // from interrupting itself, which v1 did constantly (the bot's own audio
-  // echoing back into the caller leg, or the caller answering mid-sentence,
-  // both fired promptModel mid-response and chopped every reply). Deferred
-  // user speech is injected once the bot's turn completes.
-  let botSpeaking = false;
-  let deferredUserText = "";
-  let botIdleTimer = null;
-  const injectUserTurn = (txt) => {
+  // ── Hybrid turn state machine (only used when hybridSTT) ──────────────────
+  // CRITICAL: Gemini Live treats ANY clientContent sent while it is mid-turn
+  // as a barge-in — it emits `interrupted` and ABORTS the turn with zero audio
+  // (verified in call vvWkg2ESgyP9OsuYRrjA: promptModel → "interrupted" 18ms
+  // later → turnComplete with turnAudioBytes=0 = the bot said nothing).
+  //
+  // So we must NEVER call promptModel while the model is generating. We track
+  // the model's real turn state — NOT audio playback (the v2 botSpeaking flag
+  // was derived from the paced output queue and went false 2s into an 8s
+  // greeting, so the caller's first turn interrupted the greeting). The model
+  // is "busy" from the moment we trigger a response (greeting or promptModel)
+  // until `turnComplete` arrives (response_done). While busy we QUEUE caller
+  // text; on turn end we send it all as ONE turn.
+  let modelBusy = false;
+  let pendingUserText = "";
+  let busyWatchdog = null;
+  const clearBusy = () => { modelBusy = false; if (busyWatchdog) { clearTimeout(busyWatchdog); busyWatchdog = null; } };
+  const armBusy = () => {
+    modelBusy = true;
+    if (busyWatchdog) clearTimeout(busyWatchdog);
+    // Safety: if turnComplete never arrives (model error / dropped frame),
+    // don't wedge the call forever — release after 15s so caller turns flow.
+    busyWatchdog = setTimeout(() => {
+      console.warn(`[${callSessionId}] [HYBRID] busy watchdog fired — forcing model idle`);
+      onModelIdle();
+    }, 15000);
+  };
+  const sendToModel = (txt) => {
     if (!txt || !txt.trim()) return;
     console.log(`[${callSessionId}] [HYBRID] user → Gemini: "${txt.trim()}"`);
-    try { bridge.promptModel(txt.trim()); }
+    try { bridge.promptModel(txt.trim()); armBusy(); }
     catch (e) { console.error(`[${callSessionId}] [HYBRID] promptModel failed: ${e.message}`); }
   };
-  const markBotDone = () => {
-    if (botIdleTimer) { clearTimeout(botIdleTimer); botIdleTimer = null; }
-    botSpeaking = false;
-    if (deferredUserText.trim()) {
-      const t = deferredUserText; deferredUserText = "";
-      console.log(`[${callSessionId}] [HYBRID] bot done → flushing deferred user turn`);
-      injectUserTurn(t);
+  // Called when the model's turn truly ends (turnComplete). Flush any caller
+  // speech that arrived while it was busy as a single new turn.
+  const onModelIdle = () => {
+    clearBusy();
+    if (pendingUserText.trim()) {
+      const t = pendingUserText; pendingUserText = "";
+      console.log(`[${callSessionId}] [HYBRID] model idle → flushing queued caller turn`);
+      sendToModel(t);
     }
   };
 
@@ -2887,14 +2905,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   bridge.on("audio", (mulawB64) => {
     if (streamSid && ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify({ event: "media", streamSid, media: { payload: mulawB64 } }));
-      // HYBRID: bot is speaking. Defer caller transcripts until it finishes.
-      // Reset an idle timer on every chunk — 1s of no audio = bot's turn done
-      // (belt-and-braces in case response_done doesn't fire).
-      if (hybridSTT) {
-        botSpeaking = true;
-        if (botIdleTimer) clearTimeout(botIdleTimer);
-        botIdleTimer = setTimeout(markBotDone, 1000);
-      }
+      // HYBRID turn-taking is driven by the model's real turn state (modelBusy,
+      // set on promptModel / cleared on turnComplete) — NOT by audio playback.
       // Capture bot's outbound audio for the stereo recording.
       recorder.pushOutbound(mulawB64);
       // Bot speaking counts as activity — don't let the silence watchdog
@@ -2944,15 +2956,12 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
   bridge.on("response_done", () => {
     costs.outputTokens += 100; // approximate; Gemini doesn't give exact token counts per-turn
-    // HYBRID: do NOT flush the deferred user turn here. response_done fires at
-    // turnComplete — i.e. when Gemini has finished *generating* — but the audio
-    // is still draining out of the 20ms-paced output queue for several seconds
-    // after that. Flushing now would promptModel() the caller's question WHILE
-    // the bot is still audibly speaking, which Gemini treats as a barge-in
-    // (emits `interrupted`, clears the queue) and muddies/drops turn 2 — the
-    // "I asked and got no response" bug. Instead the audio-idle timer in
-    // bridge.on("audio") owns turn-end: it fires markBotDone() 1s after the
-    // LAST chunk actually plays, which is the true end-of-speech moment.
+    // HYBRID: the model's turn truly ended (turnComplete). Release the busy
+    // lock and flush any caller speech that was queued while it generated.
+    // Sending the next turn now is safe — the model is idle, so no barge-in.
+    // (Its audio may still be draining to the caller; the next turn's audio
+    // simply queues behind it and plays seamlessly after.)
+    if (hybridSTT) onModelIdle();
     // Flush any user speech that completed in the meantime, then the assistant
     // turn we just finished. Order matters so history reads naturally.
     if (_accumUser.trim()) flushTranscript("user");
@@ -2976,6 +2985,9 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     if (callEnding || !bridgeReady) return;
     // Don't interrupt if the bot is currently speaking or hasn't said anything yet.
     if (!greetingTriggered) return;
+    // HYBRID: never inject a check-in while the model is mid-turn — that
+    // clientContent would be read as a barge-in and abort the turn (zero audio).
+    if (hybridSTT && modelBusy) return;
     const silentMs = Date.now() - lastUserActivityAt;
     if (silentMs < SILENCE_PROMPT_MS) return;
     silenceChecks++;
@@ -2989,6 +3001,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
           : (policy.silenceFarewell?.english || DEFAULT_SYSTEM_POLICY.silenceFarewell.english);
       console.log(`[${callSessionId}] [GL] Silence watchdog ending call (3rd timeout)`);
       bridge.promptModel(`Say exactly this and nothing else, then stop: "${farewell}"`);
+      if (hybridSTT) armBusy();
       callEnding = true;
       // Schedule the actual hangup after the goodbye audio has time to play.
       setTimeout(async () => {
@@ -3010,6 +3023,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         : (policy.silenceCheckIn?.english || DEFAULT_SYSTEM_POLICY.silenceCheckIn.english);
     console.log(`[${callSessionId}] [GL] Silence check-in #${silenceChecks}`);
     bridge.promptModel(`The caller has been silent. Say exactly: "${checkIn}"`);
+    if (hybridSTT) armBusy();
   }, 2000);
   // Make sure the timer dies when the call ends.
   bridge.on("close", () => { clearInterval(silenceWatchdog); });
@@ -3164,6 +3178,9 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     const elapsed = Date.now() - callStartTime;
     console.log(`[${callSessionId}] [GL] Triggering greeting (+${elapsed}ms)`);
     bridge.triggerResponse();
+    // HYBRID: the greeting is a model turn — mark busy so caller speech during
+    // the greeting is QUEUED (not injected mid-greeting, which would abort it).
+    if (hybridSTT) armBusy();
 
     // #58 watchdog — if no audio comes back within 5s of triggering, the
     // greeting was almost certainly silently dropped. Log loudly so future
@@ -3203,7 +3220,6 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     };
     console.log(`[${callSessionId}] [HYBRID] Deepgram config: model=${dgModel} lang=${dgOpts.language}`);
     const dg = createClient(process.env.DEEPGRAM_API_KEY);
-    let pendingText = "";
     let pendingTimer = null;
     dgConn = dg.listen.live(dgOpts);
     dgConn.on("open", () => {
@@ -3220,20 +3236,21 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       const wc = t.trim().split(/\s+/).length;
       if (conf < 0.50) { console.log(`[${callSessionId}] [HYBRID] drop low-conf "${t}"`); return; }
       if (wc < 2 && conf < 0.85 && !/\d/.test(t)) { console.log(`[${callSessionId}] [HYBRID] drop 1-word "${t}"`); return; }
-      console.log(`[${callSessionId}] [HYBRID] DG final: "${t}" conf=${conf.toFixed(2)} botSpeaking=${botSpeaking}`);
-      if (botSpeaking) {
-        // Half-duplex: the bot is talking. Defer this — do NOT interrupt.
-        // markBotDone() will inject it when the bot's turn ends. This is what
-        // stops the bot chopping its own replies (echo / caller-overlap).
-        deferredUserText += (deferredUserText ? " " : "") + t.trim();
-        console.log(`[${callSessionId}] [HYBRID] deferred (bot speaking): "${t.trim()}"`);
+      console.log(`[${callSessionId}] [HYBRID] DG final: "${t}" conf=${conf.toFixed(2)} modelBusy=${modelBusy}`);
+      if (modelBusy) {
+        // Model is generating its turn. Queue this — sending clientContent now
+        // would be read as a barge-in and abort the turn with zero audio.
+        // onModelIdle() flushes the queue as ONE turn when turnComplete arrives.
+        pendingUserText += (pendingUserText ? " " : "") + t.trim();
+        console.log(`[${callSessionId}] [HYBRID] queued (model busy): "${t.trim()}"`);
         return;
       }
+      // Model idle — debounce briefly to coalesce multi-part finals, then send.
       if (pendingTimer) clearTimeout(pendingTimer);
-      pendingText += (pendingText ? " " : "") + t.trim();
+      pendingUserText += (pendingUserText ? " " : "") + t.trim();
       pendingTimer = setTimeout(() => {
-        const combined = pendingText; pendingText = ""; pendingTimer = null;
-        injectUserTurn(combined);
+        const combined = pendingUserText; pendingUserText = ""; pendingTimer = null;
+        sendToModel(combined);
       }, 150);
     });
     dgConn.on("error", (e) => console.error(`[${callSessionId}] [HYBRID] Deepgram error: ${e?.message || e}`));
