@@ -638,6 +638,7 @@ class GeminiBridge extends EventEmitter {
             const inputRate = parseSampleRate(part.inlineData.mimeType);
             this._ensureResampler(inputRate);
             const pcmBuf = Buffer.from(rawB64, "base64");
+            this._turnAudioBytes = (this._turnAudioBytes || 0) + pcmBuf.length;
             try { this._ffmpeg.stdin.write(pcmBuf); } catch (e) {
               this._log(`ffmpeg stdin write failed: ${e.message}`);
             }
@@ -665,13 +666,23 @@ class GeminiBridge extends EventEmitter {
       }
     }
 
+    // Generation complete (model finished generating; audio may still be
+    // draining out of the paced queue). Distinct from turnComplete.
+    if (sc.generationComplete) {
+      this._log(`generation complete (turnAudioBytes=${this._turnAudioBytes || 0})`);
+    }
+
     // Turn complete — reset per-turn meta tracking.
     if (sc.turnComplete) {
       this._currentlyResponding = false;
       this._suppressAudio = false;
       this._turnHasMeta = false;
       this._turnText = "";
-      this._log("turn complete");
+      // Diagnostic: did this turn actually produce audio? A turnComplete with
+      // turnAudioBytes=0 means Gemini ended the turn WITHOUT speaking — the
+      // root signature of the hybrid "no response" symptom.
+      this._log(`turn complete (turnAudioBytes=${this._turnAudioBytes || 0})`);
+      this._turnAudioBytes = 0;
       this.emit("response_done");
     }
 
@@ -721,6 +732,7 @@ class GeminiBridge extends EventEmitter {
    */
   promptModel(text) {
     if (this._closed || !this._ready) return;
+    this._log(`promptModel → "${String(text).slice(0, 60)}" (expecting audio response)`);
     this._ws.send(JSON.stringify({
       clientContent: {
         turns: [{ role: "user", parts: [{ text }] }],

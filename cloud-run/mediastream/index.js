@@ -2944,9 +2944,15 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
   bridge.on("response_done", () => {
     costs.outputTokens += 100; // approximate; Gemini doesn't give exact token counts per-turn
-    // HYBRID: bot's turn is over — now listen, and flush any speech the caller
-    // got in while the bot was talking.
-    if (hybridSTT) markBotDone();
+    // HYBRID: do NOT flush the deferred user turn here. response_done fires at
+    // turnComplete — i.e. when Gemini has finished *generating* — but the audio
+    // is still draining out of the 20ms-paced output queue for several seconds
+    // after that. Flushing now would promptModel() the caller's question WHILE
+    // the bot is still audibly speaking, which Gemini treats as a barge-in
+    // (emits `interrupted`, clears the queue) and muddies/drops turn 2 — the
+    // "I asked and got no response" bug. Instead the audio-idle timer in
+    // bridge.on("audio") owns turn-end: it fires markBotDone() 1s after the
+    // LAST chunk actually plays, which is the true end-of-speech moment.
     // Flush any user speech that completed in the meantime, then the assistant
     // turn we just finished. Order matters so history reads naturally.
     if (_accumUser.trim()) flushTranscript("user");
