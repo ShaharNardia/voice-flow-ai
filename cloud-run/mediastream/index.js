@@ -646,7 +646,11 @@ async function openaiTTS(text, voice = "nova", speed = 1.0) {
 // ~300ms for turbo), 32 languages incl. Hebrew. Slightly lower fidelity than
 // turbo but indistinguishable over an 8kHz phone line — the right tradeoff
 // for a real-time call. Saves ~200ms/turn.
-const ELEVEN_DEFAULT_MODEL = "eleven_flash_v2_5";
+// turbo_v2_5: low-latency AND reliable Hebrew. (flash_v2_5 was ~200ms faster
+// but its Hebrew synth is unreliable; a failed Hebrew synth fell through to
+// the Twilio <Say> fallback, which then errored on the elevenlabs: voice
+// string → caller heard Twilio's "application error". Correctness > 200ms.)
+const ELEVEN_DEFAULT_MODEL = "eleven_turbo_v2_5";
 async function elevenlabsTTS(text, voiceId, modelId = ELEVEN_DEFAULT_MODEL) {
   const KEY = process.env.ELEVENLABS_API_KEY;
   if (!KEY) throw new Error("No ElevenLabs key");
@@ -3359,6 +3363,19 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
     : language.startsWith("el") ? "el-GR"
     : "en-US";
 
+  // CRITICAL: the <Say> fallback (used when the primary TTS provider fails)
+  // must pass a voice that Twilio's <Say> actually accepts. The per-assistant
+  // `voice` can be "elevenlabs:<id>" or "openai:<name>" — neither is a valid
+  // <Say> voice, and emitting <Say voice="elevenlabs:..."> makes Twilio reject
+  // the whole TwiML and play "We're sorry, an application error has occurred",
+  // ending the call. So for <Say> we ALWAYS use a known-good Google voice for
+  // the call language, never the raw assistant voice. (Bug: vJvTepvWNWYHOv1tjW9m)
+  const safeSayVoice = (voiceId && voiceId.startsWith("Google.")) ? voiceId
+    : language.startsWith("he") ? "Google.he-IL-Wavenet-A"
+    : language.startsWith("ar") ? "Google.ar-XA-Wavenet-A"
+    : language.startsWith("el") ? "Google.el-GR-Wavenet-A"
+    : "Google.en-US-Neural2-F";
+
   // Deepgram language code (base code)
   const deepgramLang = language.startsWith("he") ? "he"
     : language.startsWith("ar") ? "ar"
@@ -3543,9 +3560,9 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
     if (speechSpeed && speechSpeed !== 1.0) {
       const rate = Math.round(speechSpeed * 100) + "%";
       const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      r.say({voice: voiceId, language: sayLanguage}, `<prosody rate="${rate}">${escaped}</prosody>`);
+      r.say({voice: safeSayVoice, language: sayLanguage}, `<prosody rate="${rate}">${escaped}</prosody>`);
     } else {
-      r.say({voice: voiceId, language: sayLanguage}, text);
+      r.say({voice: safeSayVoice, language: sayLanguage}, text);
     }
     r.pause({length: "120"});
     return r.toString();
@@ -3625,9 +3642,9 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
       if (speechSpeed && speechSpeed !== 1.0) {
         const rate = Math.round(speechSpeed * 100) + "%";
         const escaped = text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-        r.say({voice: voiceId, language: sayLanguage}, `<prosody rate="${rate}">${escaped}</prosody>`);
+        r.say({voice: safeSayVoice, language: sayLanguage}, `<prosody rate="${rate}">${escaped}</prosody>`);
       } else {
-        r.say({voice: voiceId, language: sayLanguage}, text);
+        r.say({voice: safeSayVoice, language: sayLanguage}, text);
       }
       r.hangup();
       return await sendTwiML(r.toString(), reason);
@@ -4674,9 +4691,14 @@ This applies to ALL languages. Never use digits in your response.`;
 
   ws.on("close", async () => {
     console.log(`[${callSessionId}] WebSocket closed`);
-    // Flush any in-progress assistant turn that didn't get a response_done event
-    // (e.g. caller hung up while the model was still speaking).
-    _flushAssistantTurn();
+    // _flushAssistantTurn() belongs to the realtime/Gemini handler scope and
+    // is UNDEFINED in this standard-cascade path. Calling it bare threw a
+    // ReferenceError on EVERY call — and because it was the first statement
+    // here, the throw aborted the entire close handler: timers were never
+    // cleared, and cost/recording/transcript were never persisted. The
+    // typeof guard never throws on an undeclared name, so cleanup below
+    // always runs. (Cascade turns are already saved per-turn in onTranscript.)
+    if (typeof _flushAssistantTurn === "function") _flushAssistantTurn();
     // ── Cleanup all timers (Issue 2) ────────────────────────────────
     // Failing to clear these timers causes them to fire on a dead WebSocket,
     // wasting CPU and potentially throwing on closed connection objects.
