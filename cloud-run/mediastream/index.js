@@ -2749,6 +2749,15 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     language,
     callSessionId,
     tools: geminiTools,
+    // HYBRID voice quality: the default cascade model (gemini-3.1-flash-live-
+    // preview) sounds TTS-grade. Use a native-audio "dialog" model so the bot
+    // speaks in Gemini Live's natural voice. disableThinking stops that model
+    // from verbalizing its English chain-of-thought (the reason we'd avoided
+    // native-audio before). Overridable via GEMINI_HYBRID_MODEL.
+    ...(hybridSTT ? {
+      model: process.env.GEMINI_HYBRID_MODEL || "gemini-2.5-flash-native-audio-preview-12-2025",
+      disableThinking: true,
+    } : {}),
   });
 
   // Start the Gemini WS handshake now — the rest of the setup (tool

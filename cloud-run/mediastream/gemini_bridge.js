@@ -210,7 +210,7 @@ class GeminiBridge extends EventEmitter {
    * @param {string} [opts.callSessionId] - For logging
    * @param {string} [opts.vadMode]       - "auto" | "sensitivity" (Gemini has its own VAD)
    */
-  constructor({ apiKey, instructions, voice = "Aoede", language = "he-IL", callSessionId = "", tools = [] }) {
+  constructor({ apiKey, instructions, voice = "Aoede", language = "he-IL", callSessionId = "", tools = [], model = null, disableThinking = false }) {
     super();
     this._apiKey = apiKey;
     this._callSessionId = callSessionId;
@@ -245,7 +245,8 @@ class GeminiBridge extends EventEmitter {
     this._turnText = "";
     // Active model + retry tracking. If the primary 404s, we retry once with
     // the fallback. Avoids an infinite loop when both are unavailable.
-    this._modelName = GEMINI_MODEL;
+    this._modelName = model || GEMINI_MODEL;
+    this._disableThinking = disableThinking;
     this._fallbackTried = false;
     // Language-hint tracking. We send a BCP-47 languageCode on the input/
     // output transcription configs to force the caller's language. If the API
@@ -519,6 +520,13 @@ class GeminiBridge extends EventEmitter {
               },
             },
           },
+          // Native-audio "dialog" models can verbalize their chain-of-thought
+          // ("I've noted the caller said…") in English before the real reply —
+          // the caller hears English mumbling. Disabling thinking suppresses it
+          // at the source, which lets us use the natural native-audio voice
+          // instead of the TTS-grade cascade model. Only sent when requested so
+          // models that reject the field (cascade) keep a clean handshake.
+          ...(this._disableThinking ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
         },
         // NOTE: tried realtimeInputConfig.automaticActivityDetection with
         // silenceDurationMs: 250 to shave response latency. The Live API
