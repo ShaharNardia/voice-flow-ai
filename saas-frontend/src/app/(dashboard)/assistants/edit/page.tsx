@@ -409,7 +409,7 @@ interface AssistantExtended extends Assistant {
   realtimeVadMode?: "semantic" | "server";
   realtimeVadSensitivity?: "low" | "medium" | "high";
   realtimeScenarioId?: string;
-  voiceProvider?: "classic" | "openai-realtime" | "gemini-live" | "nlpearl";
+  voiceProvider?: "classic" | "openai-realtime" | "gemini-live" | "gemini-hybrid" | "nlpearl";
   // Telephony carrier — separate from the AI voice provider. Determines
   // whether outbound goes via Twilio REST or via our Asterisk+SIP bridge.
   telephonyProvider?: "twilio" | "sip" | "voximplant";
@@ -1315,7 +1315,8 @@ function AssistantEdit() {
   const isRealtime =
     !!(assistant as AssistantExtended)?.realtimeEnabled ||
     (assistant as AssistantExtended)?.voiceProvider === "openai-realtime" ||
-    (assistant as AssistantExtended)?.voiceProvider === "gemini-live";
+    (assistant as AssistantExtended)?.voiceProvider === "gemini-live" ||
+    (assistant as AssistantExtended)?.voiceProvider === "gemini-hybrid";
 
   if (loading) return <div className="p-8 text-center text-neutral-400 text-sm">Loading...</div>;
   if (!assistant) return (
@@ -1511,7 +1512,7 @@ function AssistantEdit() {
                       {(() => {
                         const provider = (assistant as AssistantExtended).voiceProvider
                           || ((assistant as AssistantExtended).realtimeEnabled ? "openai-realtime" : "classic");
-                        const setProvider = (p: "classic" | "openai-realtime" | "gemini-live" | "nlpearl") => {
+                        const setProvider = (p: "classic" | "openai-realtime" | "gemini-live" | "gemini-hybrid" | "nlpearl") => {
                           set("voiceProvider", p);
                           // Backwards-compatibility: keep realtimeEnabled in sync
                           set("realtimeEnabled", p === "openai-realtime");
@@ -1561,8 +1562,22 @@ function AssistantEdit() {
                                 <span className={`text-sm ${provider === "gemini-live" ? "" : "grayscale opacity-60"}`}>✦</span>
                                 <span className={`text-sm font-semibold ${provider === "gemini-live" ? "text-blue-700" : "text-neutral-700"}`}>Gemini Live</span>
                               </div>
-                              <p className="text-[11px] text-neutral-500 leading-snug">Google end-to-end. Native Hebrew. ~10x cheaper than OpenAI.</p>
+                              <p className="text-[11px] text-neutral-500 leading-snug">Google end-to-end. ~10x cheaper than OpenAI. Hebrew STT can drift.</p>
                               <p className="text-[10px] text-neutral-400 mt-1">~$0.03/min</p>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setProvider("gemini-hybrid")}
+                              className={`text-left p-3 rounded-xl border-2 transition-all ${
+                                provider === "gemini-hybrid" ? "border-emerald-500 bg-emerald-50" : "border-neutral-200 hover:border-neutral-300 bg-white"
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5 mb-1">
+                                <span className={`text-sm ${provider === "gemini-hybrid" ? "" : "grayscale opacity-60"}`}>✦</span>
+                                <span className={`text-sm font-semibold ${provider === "gemini-hybrid" ? "text-emerald-700" : "text-neutral-700"}`}>Gemini Hybrid</span>
+                              </div>
+                              <p className="text-[11px] text-neutral-500 leading-snug">Deepgram ears + Gemini voice. Best Hebrew, low latency. (beta)</p>
+                              <p className="text-[10px] text-neutral-400 mt-1">~$0.04/min</p>
                             </button>
                             {/* NLPearl provider removed — all NLPearl assistants
                                 automatically migrated to Gemini Live. */}
