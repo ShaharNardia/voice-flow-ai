@@ -4416,7 +4416,20 @@ This applies to ALL languages. Never use digits in your response.`;
   // nova-2 supports Arabic (and Hebrew) streaming reliably.
   // Keep nova-3 for Hebrew where it gives better accuracy; use nova-2 for Arabic.
   const defaultSttModel = deepgramLang === "he" ? "nova-3" : "nova-2";
-  const deepgramModel = assistant.sttModel || defaultSttModel;
+  let deepgramModel = assistant.sttModel || defaultSttModel;
+  // Guard against model↔language combos Deepgram rejects with HTTP 400 (which
+  // silently deafens the bot for the whole call — see jw56KoGyPq6NltHL4PuG).
+  // A stale per-assistant `sttModel` (e.g. nova-2 left over from an Arabic
+  // config) must NOT override these hard constraints:
+  //   • Hebrew streaming is supported ONLY on nova-3 (nova-2 + lang=he → 400)
+  //   • Arabic streaming is supported ONLY on nova-2 (nova-3 + lang=ar → silent)
+  if (deepgramLang === "he" && deepgramModel !== "nova-3") {
+    console.warn(`[${callSessionId}] Overriding sttModel ${deepgramModel}→nova-3 (Hebrew requires nova-3)`);
+    deepgramModel = "nova-3";
+  } else if (deepgramLang === "ar" && deepgramModel !== "nova-2") {
+    console.warn(`[${callSessionId}] Overriding sttModel ${deepgramModel}→nova-2 (Arabic requires nova-2)`);
+    deepgramModel = "nova-2";
+  }
   // FIX: smart_format and punctuate are NOT supported for all languages.
   // Sending them for Arabic (or Greek) with nova-2 causes a 400 Bad Request
   // at WebSocket upgrade time, silently deafening the bot.
