@@ -628,7 +628,7 @@ async function openaiTTS(text, voice = "nova", speed = 1.0) {
         console.log(`[OpenAI-TTS] OK: ${buf.length} bytes, ${ms}ms, voice=${voice}`);
         const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
         audioCache.set(id, {buffer: buf, contentType: "audio/mpeg", createdAt: Date.now()});
-        const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.me-west1.run.app";
+        const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-myg46khq7q-uc.a.run.app";
         resolve(`${cloudRunUrl}/audio/${id}`);
       });
     });
@@ -723,14 +723,14 @@ async function googleTTS(text, lang) {
     contentType: "audio/mpeg",
     createdAt: Date.now(),
   });
-  const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.me-west1.run.app";
+  const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-myg46khq7q-uc.a.run.app";
   return `${cloudRunUrl}/audio/${id}`;
 }
 
 // ── Pre-generated filler audio (Chirp3-HD, same voice as responses) ──
 const fillerAudioCache = {}; // {he: [{id, url}], en: [{id, url}]}
 async function preGenerateFillers() {
-  const CLOUD_RUN_URL = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.me-west1.run.app";
+  const CLOUD_RUN_URL = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-myg46khq7q-uc.a.run.app";
   const fillers = {
     he: ["רֶגַע...", "כֵּן...", "אוֹקֵיי...", "שְׁנִיָּה..."],
     en: ["Sure...", "Got it...", "One moment...", "Okay..."],
@@ -3619,14 +3619,14 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
         });
         const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
         audioCache.set(id, {buffer: response.audioContent, contentType: "audio/mpeg", createdAt: Date.now()});
-        const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.me-west1.run.app";
+        const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-myg46khq7q-uc.a.run.app";
         audioUrl = `${cloudRunUrl}/audio/${id}`;
       } else if (deepgramLang.startsWith("he") && TTS_MODELS[hebrewTtsModel]) {
         // Fallback: global Hebrew TTS model from admin config
         const audioBuf = await generateTTS(ttsText, hebrewTtsModel);
         const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
         audioCache.set(id, {buffer: audioBuf, contentType: "audio/mpeg", createdAt: Date.now()});
-        const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-900818829902.me-west1.run.app";
+        const cloudRunUrl = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-myg46khq7q-uc.a.run.app";
         audioUrl = `${cloudRunUrl}/audio/${id}`;
       } else {
         audioUrl = await googleTTS(text, deepgramLang);
