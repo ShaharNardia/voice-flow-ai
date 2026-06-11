@@ -2758,6 +2758,32 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   // socket opens via bridge.connect() below.
   bridge.prewarm();
 
+  // ── Hybrid half-duplex turn state (only used when hybridSTT) ──────────────
+  // The bot finishes its turn, THEN listens. While the bot is speaking we
+  // DEFER Deepgram finals instead of injecting them — this prevents the bot
+  // from interrupting itself, which v1 did constantly (the bot's own audio
+  // echoing back into the caller leg, or the caller answering mid-sentence,
+  // both fired promptModel mid-response and chopped every reply). Deferred
+  // user speech is injected once the bot's turn completes.
+  let botSpeaking = false;
+  let deferredUserText = "";
+  let botIdleTimer = null;
+  const injectUserTurn = (txt) => {
+    if (!txt || !txt.trim()) return;
+    console.log(`[${callSessionId}] [HYBRID] user → Gemini: "${txt.trim()}"`);
+    try { bridge.promptModel(txt.trim()); }
+    catch (e) { console.error(`[${callSessionId}] [HYBRID] promptModel failed: ${e.message}`); }
+  };
+  const markBotDone = () => {
+    if (botIdleTimer) { clearTimeout(botIdleTimer); botIdleTimer = null; }
+    botSpeaking = false;
+    if (deferredUserText.trim()) {
+      const t = deferredUserText; deferredUserText = "";
+      console.log(`[${callSessionId}] [HYBRID] bot done → flushing deferred user turn`);
+      injectUserTurn(t);
+    }
+  };
+
   // ── Tool execution — minimal but real ────────────────────────────────────
   async function executeGeminiTool(name, args) {
     try {
@@ -2861,6 +2887,14 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   bridge.on("audio", (mulawB64) => {
     if (streamSid && ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify({ event: "media", streamSid, media: { payload: mulawB64 } }));
+      // HYBRID: bot is speaking. Defer caller transcripts until it finishes.
+      // Reset an idle timer on every chunk — 1s of no audio = bot's turn done
+      // (belt-and-braces in case response_done doesn't fire).
+      if (hybridSTT) {
+        botSpeaking = true;
+        if (botIdleTimer) clearTimeout(botIdleTimer);
+        botIdleTimer = setTimeout(markBotDone, 1000);
+      }
       // Capture bot's outbound audio for the stereo recording.
       recorder.pushOutbound(mulawB64);
       // Bot speaking counts as activity — don't let the silence watchdog
@@ -2910,6 +2944,9 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
   bridge.on("response_done", () => {
     costs.outputTokens += 100; // approximate; Gemini doesn't give exact token counts per-turn
+    // HYBRID: bot's turn is over — now listen, and flush any speech the caller
+    // got in while the bot was talking.
+    if (hybridSTT) markBotDone();
     // Flush any user speech that completed in the meantime, then the assistant
     // turn we just finished. Order matters so history reads naturally.
     if (_accumUser.trim()) flushTranscript("user");
@@ -3177,14 +3214,20 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       const wc = t.trim().split(/\s+/).length;
       if (conf < 0.50) { console.log(`[${callSessionId}] [HYBRID] drop low-conf "${t}"`); return; }
       if (wc < 2 && conf < 0.85 && !/\d/.test(t)) { console.log(`[${callSessionId}] [HYBRID] drop 1-word "${t}"`); return; }
-      console.log(`[${callSessionId}] [HYBRID] DG final: "${t}" conf=${conf.toFixed(2)}`);
+      console.log(`[${callSessionId}] [HYBRID] DG final: "${t}" conf=${conf.toFixed(2)} botSpeaking=${botSpeaking}`);
+      if (botSpeaking) {
+        // Half-duplex: the bot is talking. Defer this — do NOT interrupt.
+        // markBotDone() will inject it when the bot's turn ends. This is what
+        // stops the bot chopping its own replies (echo / caller-overlap).
+        deferredUserText += (deferredUserText ? " " : "") + t.trim();
+        console.log(`[${callSessionId}] [HYBRID] deferred (bot speaking): "${t.trim()}"`);
+        return;
+      }
       if (pendingTimer) clearTimeout(pendingTimer);
       pendingText += (pendingText ? " " : "") + t.trim();
       pendingTimer = setTimeout(() => {
         const combined = pendingText; pendingText = ""; pendingTimer = null;
-        console.log(`[${callSessionId}] [HYBRID] user → Gemini: "${combined}"`);
-        try { bridge.promptModel(combined); }
-        catch (e) { console.error(`[${callSessionId}] [HYBRID] promptModel failed: ${e.message}`); }
+        injectUserTurn(combined);
       }, 150);
     });
     dgConn.on("error", (e) => console.error(`[${callSessionId}] [HYBRID] Deepgram error: ${e?.message || e}`));
