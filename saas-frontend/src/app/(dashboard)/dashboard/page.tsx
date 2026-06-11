@@ -204,8 +204,12 @@ export default function DashboardPage() {
     <div className="space-y-6">
       <UpgradeModal open={showUpgradeModal} onClose={() => setShowUpgradeModal(false)} />
 
-      {/* First-run banner pointing to the voice-enabled wizard */}
-      <WizardWelcomeBanner assistantCount={allCalls.length > 0 ? 1 : 0} />
+      {/* First-run banner pointing to the voice-enabled wizard.
+          Only decide visibility AFTER calls load — otherwise it flashes on
+          for established tenants during the loading window (allCalls starts
+          empty → looks like a new tenant → shows → hides ~1s later when the
+          snapshot arrives). Gate on !loading so it never flickers. */}
+      {!loading && <WizardWelcomeBanner assistantCount={allCalls.length > 0 ? 1 : 0} />}
 
       {/* ── BASIC upgrade banner ── */}
       {isBasic && planUsage && (
