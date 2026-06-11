@@ -2451,7 +2451,7 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
 // ── GEMINI LIVE SESSION ────────────────────────────────────────────────────
 // Bridges Twilio Media Stream ↔ Google Gemini Live API.
 // Same high-level structure as handleRealtimeSession but uses GeminiBridge.
-async function handleGeminiSession(ws, {callSessionId, data, assistant, assistantId, db, sessionRef, messageBuffer = [], markSetupComplete = null}) {
+async function handleGeminiSession(ws, {callSessionId, data, assistant, assistantId, db, sessionRef, messageBuffer = [], markSetupComplete = null, hybridSTT = false}) {
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   if (!GEMINI_API_KEY) {
     console.error(`[${callSessionId}] [GL] No GEMINI_API_KEY — cannot start Gemini Live session`);
@@ -3135,6 +3135,62 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     bridge.once("close", cancelWatchdog);
   }
 
+  // ── HYBRID STT: Deepgram ears + Gemini brain/voice ──────────────────────
+  // When hybridSTT is on, caller audio goes to Deepgram (reliable Hebrew),
+  // NOT to Gemini (whose Hebrew transcription drifts). Deepgram finals are
+  // fed to Gemini as user text turns; Gemini still produces the audio reply.
+  // Best of both: accurate Hebrew understanding + Gemini's natural voice.
+  let dgConn = null;
+  let dgReady = false;
+  const dgBuffer = [];
+  if (hybridSTT) {
+    const dgLang = language.startsWith("he") ? "he"
+      : language.startsWith("ar") ? "ar"
+      : language.startsWith("el") ? "el" : "en";
+    let dgModel = assistant.sttModel || (dgLang === "he" ? "nova-3" : "nova-2");
+    if (dgLang === "he" && dgModel !== "nova-3") dgModel = "nova-3";
+    if (dgLang === "ar" && dgModel !== "nova-2") dgModel = "nova-2";
+    const dgOpts = {
+      model: dgModel,
+      language: dgLang === "en" ? "en-US" : dgLang,
+      encoding: "mulaw", sample_rate: 8000, channels: 1,
+      ...((dgLang === "en" || dgLang === "he") ? { smart_format: true, punctuate: true } : {}),
+      interim_results: true,
+      endpointing: 300,
+    };
+    console.log(`[${callSessionId}] [HYBRID] Deepgram config: model=${dgModel} lang=${dgOpts.language}`);
+    const dg = createClient(process.env.DEEPGRAM_API_KEY);
+    let pendingText = "";
+    let pendingTimer = null;
+    dgConn = dg.listen.live(dgOpts);
+    dgConn.on("open", () => {
+      dgReady = true;
+      console.log(`[${callSessionId}] [HYBRID] Deepgram ready (flushing ${dgBuffer.length})`);
+      while (dgBuffer.length) { try { dgConn.send(dgBuffer.shift()); } catch (_) {} }
+    });
+    dgConn.on("Results", (evt) => {
+      const t = evt.channel?.alternatives?.[0]?.transcript;
+      const isFinal = evt.is_final || false;
+      const conf = evt.channel?.alternatives?.[0]?.confidence || 0;
+      if (!t || !t.trim() || !isFinal) return;
+      // Noise gate (same policy as the cascade): keep numeric / high-conf / multi-word.
+      const wc = t.trim().split(/\s+/).length;
+      if (conf < 0.50) { console.log(`[${callSessionId}] [HYBRID] drop low-conf "${t}"`); return; }
+      if (wc < 2 && conf < 0.85 && !/\d/.test(t)) { console.log(`[${callSessionId}] [HYBRID] drop 1-word "${t}"`); return; }
+      console.log(`[${callSessionId}] [HYBRID] DG final: "${t}" conf=${conf.toFixed(2)}`);
+      if (pendingTimer) clearTimeout(pendingTimer);
+      pendingText += (pendingText ? " " : "") + t.trim();
+      pendingTimer = setTimeout(() => {
+        const combined = pendingText; pendingText = ""; pendingTimer = null;
+        console.log(`[${callSessionId}] [HYBRID] user → Gemini: "${combined}"`);
+        try { bridge.promptModel(combined); }
+        catch (e) { console.error(`[${callSessionId}] [HYBRID] promptModel failed: ${e.message}`); }
+      }, 150);
+    });
+    dgConn.on("error", (e) => console.error(`[${callSessionId}] [HYBRID] Deepgram error: ${e?.message || e}`));
+    dgConn.on("close", () => { dgReady = false; });
+  }
+
   // ── Twilio message handler ────────────────────────────────────────────────
   function handleTwilioMessage(rawMsg) {
     let msg;
@@ -3153,7 +3209,14 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         break;
       case "media":
         if (msg.media?.payload) {
-          bridge.sendAudio(msg.media.payload);
+          if (hybridSTT) {
+            // Route caller audio to Deepgram, NOT to Gemini.
+            const chunk = Buffer.from(msg.media.payload, "base64");
+            if (dgReady && dgConn?.send) { try { dgConn.send(chunk); } catch (_) {} }
+            else dgBuffer.push(chunk);
+          } else {
+            bridge.sendAudio(msg.media.payload);
+          }
           // Capture caller's inbound audio for the stereo recording.
           recorder.pushInbound(msg.media.payload);
           costs.inputTokens += 5; // rough estimate
@@ -3162,6 +3225,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       case "stop":
         console.log(`[${callSessionId}] [GL] Stream stopped`);
         callEnding = true;
+        if (dgConn?.finish) { try { dgConn.finish(); } catch (_) {} }
         bridge.close();
         break;
     }
@@ -3177,6 +3241,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
   ws.on("close", () => {
     console.log(`[${callSessionId}] [GL] Twilio WS closed (${Date.now() - callStartTime}ms)`);
+    if (dgConn?.finish) { try { dgConn.finish(); } catch (_) {} }
     if (!callEnding) bridge.close();
   });
 }
@@ -3342,6 +3407,13 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
   const assistant = data.assistantDefinition || {};
   const assistantId = data.assistantId || null;
 
+  // ── GEMINI HYBRID MODE: Deepgram ears + Gemini brain/voice ───────
+  // Opt-in (voiceProvider="gemini-hybrid"). Reliable Hebrew STT (Deepgram)
+  // feeding Gemini Live as text; Gemini streams the natural audio reply.
+  if (assistant.voiceProvider === "gemini-hybrid") {
+    await handleGeminiSession(ws, {callSessionId, data, assistant, assistantId, db, sessionRef, messageBuffer, hybridSTT: true, markSetupComplete: (fn) => { dispatchMessage = fn; setupComplete = true; }});
+    return;
+  }
   // ── GEMINI LIVE MODE: bridge Twilio ↔ Google Gemini Live ─────────
   if (assistant.voiceProvider === "gemini-live" || assistant.realtimeProvider === "gemini") {
     await handleGeminiSession(ws, {callSessionId, data, assistant, assistantId, db, sessionRef, messageBuffer, markSetupComplete: (fn) => { dispatchMessage = fn; setupComplete = true; }});
