@@ -2876,7 +2876,14 @@ exports.twilioVoiceWebhook = onRequest(
           // Voice provider — determines which bridge Cloud Run uses
           voiceProvider: specificAssistant?.voiceProvider || (specificAssistant?.realtimeEnabled ? "openai-realtime" : "classic"),
           // Voice-to-voice settings (OpenAI Realtime + Gemini Live share these)
-          realtimeEnabled: (specificAssistant?.realtimeEnabled || specificAssistant?.voiceProvider === "gemini-live") ? true : false,
+          // gemini-hybrid MUST be here too: realtimeEnabled decides <Connect><Stream>
+          // (bidirectional — bot audio reaches the caller) vs Standard mode
+          // (Wavenet <Say> + one-way <Start><Stream>, where Gemini audio is
+          // silently discarded). Missing it sent hybrid calls down the Standard
+          // path: caller heard Wavenet TTS reading the raw greeting (incl. '<'),
+          // never Gemini (calls PuY9mjN2OuFtOWApOAap and earlier).
+          realtimeEnabled: (specificAssistant?.realtimeEnabled ||
+            ["gemini-live", "gemini-hybrid", "openai-realtime"].includes(specificAssistant?.voiceProvider)) ? true : false,
           realtimeVoice: specificAssistant?.realtimeVoice || "alloy",
           realtimeVadMode: specificAssistant?.realtimeVadMode || null,
           realtimeVadSensitivity: specificAssistant?.realtimeVadSensitivity || null,
