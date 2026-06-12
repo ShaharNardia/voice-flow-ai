@@ -102,6 +102,7 @@ function buildLanguageLock(language) {
       "If you are even slightly unsure what language you heard, assume Hebrew.",
       "All of your spoken responses are in natural, native Hebrew. No exceptions.",
       "Speak fluent, grammatically correct Hebrew in complete well-formed sentences, as an educated native speaker would on the phone.",
+      "NUMBERS: pronounce numbers as natural Hebrew number words, the way a person says them aloud. 510 is \"חמש מאות ועשר\", 231 is \"מאתיים שלושים ואחת\", 8 דקות is \"שמונה דקות\". NEVER read a number digit-by-digit (\"חמש אחת אפס\") unless it is a phone number or a code the caller must write down.",
       "",
       "",
     ].join("\n");
