@@ -941,19 +941,27 @@ function compactItem(item) {
   if (item == null || typeof item !== "object") return item;
   const out = {};
 
-  // Scalar fields commonly present across product/order/user catalogs.
-  const scalarKeep = [
-    "id", "uuid", "name", "title", "slug", "sku", "product_code", "model",
-    "brand", "manufacturer", "type",
-    "cost", "currency", "stock", "stock_status", "quantity",
-    "status", "state", "rating", "on_sale",
-    "is_in_stock", "is_purchasable", "is_on_backorder", "low_stock_remaining",
-    "email", "phone", "country",
-  ];
-  for (const k of scalarKeep) {
-    if (item[k] == null || typeof item[k] === "object") continue;
-    const v = item[k];
-    out[k] = typeof v === "string" && v.length > 180 ? v.slice(0, 180) + "…" : v;
+  // GENERIC scalar pass: keep EVERY non-null scalar field, not a hardcoded
+  // whitelist. The old whitelist was written for WooCommerce catalogs and
+  // silently dropped every field of any other API — the bus API's line number
+  // (Shilut), company, destination, and arrival times all vanished, leaving
+  // the model a ~92-char husk it then hallucinated "data" from (call
+  // Dk9zUotSvdZPk5uYhro2). Nulls/empties are dropped (they're noise), long
+  // strings truncated; the overall byte budget is enforced by the caller.
+  for (const [k, v] of Object.entries(item)) {
+    if (v == null || v === "") continue;
+    if (typeof v === "string") {
+      const s = v.trim();
+      if (!s) continue;
+      out[k] = s.length > 180 ? s.slice(0, 180) + "…" : s;
+    } else if (typeof v === "number" || typeof v === "boolean") {
+      out[k] = v;
+    } else if (Array.isArray(v) && v.length > 0 && v.length <= 24 &&
+               v.every((x) => x == null || typeof x !== "object")) {
+      // Small scalar arrays carry real data (e.g. MinutesToArrivalList:[0,5,10])
+      out[k] = v;
+    }
+    // Nested objects / object-arrays are handled by the special cases below.
   }
 
   // Clean HTML out of the name (WooCommerce escapes entities in names)
@@ -2796,6 +2804,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       allLines.join("\n") +
       "\nIf the caller asks about specific data (prices, schedules, availability, inventory, flights, anything operational) " +
       "and you have a tool that can fetch it — CALL THAT TOOL FIRST. Never guess or make up numbers. " +
+      "NEVER claim something is 'not found' or 'not in the system' without having CALLED the tool for that exact value in THIS turn. " +
+      "When you state data (names, numbers, times, lines), it must come VERBATIM from the latest tool response — if the response lacks it, say you don't have that detail. Inventing data is the worst possible failure. " +
       "If no tool can answer and you genuinely don't know, say so honestly and offer what you CAN help with.";
   }
 
