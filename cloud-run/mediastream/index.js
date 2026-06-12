@@ -868,14 +868,24 @@ app.get("/gemini-probe", (req, res) => {
 // are safely transmitted in query strings and decoded correctly by Express on the other end.
 function substitutePlaceholders(template, values) {
   if (!template || typeof template !== "string") return template;
-  return template.replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
-    const v = values?.[key];
-    if (v == null) return "";
-    const s = String(v);
-    // Only encode if the value will appear inside a URL query string (template contains "?").
-    // Encoding bare values that end up in JSON bodies would double-encode them.
-    return template.includes("?") ? encodeURIComponent(s) : s;
-  });
+  // Only encode if the value will appear inside a URL query string (template contains "?").
+  // Encoding bare values that end up in JSON bodies would double-encode them.
+  const enc = (s) => template.includes("?") ? encodeURIComponent(s) : s;
+  return template
+    // {{param}} style
+    .replace(/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/g, (_, key) => {
+      const v = values?.[key];
+      return v == null ? "" : enc(String(v));
+    })
+    // {param} style — what API docs use and what tool builders paste
+    // (e.g. .../GetRealtimeBusLineListByBustop/{stopId}/he/false). Without
+    // this the literal "{stopId}" hit the API and every lookup came back
+    // empty (call 2sNrZcMAyvkct9HpFGXO). Unknown keys are left untouched
+    // so unrelated braces in a template can't get mangled.
+    .replace(/\{([a-zA-Z0-9_]+)\}/g, (m, key) => {
+      const v = values?.[key];
+      return v == null ? m : enc(String(v));
+    });
 }
 
 /**
@@ -3272,7 +3282,11 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         // caller and then answer stale context. Stronger gate than the noise
         // gate above: real interruptions are full phrases or contain numbers;
         // line-echo fragments rarely pass conf>=0.75 with 3+ words.
-        const strongInterrupt = conf >= 0.75 && (wc >= 3 || /\d/.test(t));
+        // Two tiers: full phrases/digits at conf>=0.75, OR short emphatic
+        // interjections ("לא, לא") at very high confidence. 1-word stays
+        // queue-only — that's the echo-safety line.
+        const strongInterrupt = (conf >= 0.75 && (wc >= 3 || /\d/.test(t)))
+          || (conf >= 0.85 && wc >= 2);
         if (strongInterrupt && !callEnding) {
           console.log(`[${callSessionId}] [HYBRID] barge-in — cutting bot playback`);
           // Drop audio already buffered on Twilio's side…
@@ -3284,13 +3298,17 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         }
         return;
       }
-      // Model idle — debounce briefly to coalesce multi-part finals, then send.
+      // Model idle — debounce to coalesce multi-part finals into ONE turn.
+      // 150ms was too short for natural mid-sentence pauses: "תחנה מספר" and
+      // "41 יש לך?" arrived as separate turns and the bot answered the first
+      // fragment before the number landed (call 2sNrZcMAyvkct9HpFGXO). 500ms
+      // costs half a second of latency but buys whole-sentence understanding.
       if (pendingTimer) clearTimeout(pendingTimer);
       pendingUserText += (pendingUserText ? " " : "") + t.trim();
       pendingTimer = setTimeout(() => {
         const combined = pendingUserText; pendingUserText = ""; pendingTimer = null;
         sendToModel(combined);
-      }, 150);
+      }, 500);
     });
     dgConn.on("error", (e) => console.error(`[${callSessionId}] [HYBRID] Deepgram error: ${e?.message || e}`));
     dgConn.on("close", () => { dgReady = false; });

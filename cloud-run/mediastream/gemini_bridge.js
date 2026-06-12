@@ -101,6 +101,7 @@ function buildLanguageLock(language) {
       "You must NEVER transcribe or respond in English, Portuguese, Spanish, Italian, Arabic, or any non-Hebrew language. If a phrase genuinely sounds like another language, transcribe it phonetically in Hebrew script and continue in Hebrew.",
       "If you are even slightly unsure what language you heard, assume Hebrew.",
       "All of your spoken responses are in natural, native Hebrew. No exceptions.",
+      "Speak fluent, grammatically correct Hebrew in complete well-formed sentences, as an educated native speaker would on the phone.",
       "",
       "",
     ].join("\n");
