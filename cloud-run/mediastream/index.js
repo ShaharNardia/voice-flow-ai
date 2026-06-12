@@ -2742,6 +2742,13 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       "If no tool can answer and you genuinely don't know, say so honestly and offer what you CAN help with.";
   }
 
+  // FINAL safety net: the native-audio model is literal and will SPEAK any
+  // stray formatting/special chars (<, >, #, *, |, braces, brackets) that
+  // survive into the system instruction — including from the knowledge base
+  // and tool guidance appended above, which bypass the per-piece sanitize.
+  // Strip them all once here so nothing reaches the model unspoken-unfriendly.
+  instructions = sanitizeForSpeech(instructions);
+
   const bridge = new GeminiBridge({
     apiKey: GEMINI_API_KEY,
     instructions,
@@ -3346,6 +3353,7 @@ function _buildInstructionsForRealtime({ assistant, data, language, voiceHeaderO
   const DEFAULT_VOICE_HEADER =
     "VOICE CALL — your output is spoken aloud by TTS. " +
     "No markdown, no asterisks, no headers, no stage directions. " +
+    "Speak ONLY natural words. Never say symbol characters out loud — no < > # * _ | { } [ ] backtick, no \"less-than\", no \"hashtag\", no \"asterisk\". If your answer would contain a symbol, omit it or say its plain-language meaning. " +
     "No narrator phrases like \"Initiating Dialogue\" or \"Analyzing Input\". " +
     "Output only the literal words to speak, in plain prose, short sentences.\n" +
     "NEVER promise to call the caller back later, get back to them, follow up, or contact them. " +
