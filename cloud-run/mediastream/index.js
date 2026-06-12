@@ -2800,16 +2800,25 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   let modelBusy = false;
   let pendingUserText = "";
   let busyWatchdog = null;
+  let lastBotAudioAt = 0;   // updated on every outbound audio chunk (hybrid)
   const clearBusy = () => { modelBusy = false; if (busyWatchdog) { clearTimeout(busyWatchdog); busyWatchdog = null; } };
   const armBusy = () => {
     modelBusy = true;
     if (busyWatchdog) clearTimeout(busyWatchdog);
     // Safety: if turnComplete never arrives (model error / dropped frame),
-    // don't wedge the call forever — release after 15s so caller turns flow.
-    busyWatchdog = setTimeout(() => {
+    // don't wedge the call forever. BUT never force-idle while bot audio is
+    // still streaming — long tool-result answers exceed 15s, and releasing
+    // the lock mid-speech re-opens the mid-turn-injection hole (observed in
+    // call zIAapppwQPuiz6YFQHVM: 41s answer, watchdog fired at 15s).
+    const check = () => {
+      if (Date.now() - lastBotAudioAt < 2000) {
+        busyWatchdog = setTimeout(check, 5000);  // audibly mid-turn — extend
+        return;
+      }
       console.warn(`[${callSessionId}] [HYBRID] busy watchdog fired — forcing model idle`);
       onModelIdle();
-    }, 15000);
+    };
+    busyWatchdog = setTimeout(check, 15000);
   };
   const sendToModel = (txt) => {
     if (!txt || !txt.trim()) return;
@@ -2940,6 +2949,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       ws.send(JSON.stringify({ event: "media", streamSid, media: { payload: mulawB64 } }));
       // HYBRID turn-taking is driven by the model's real turn state (modelBusy,
       // set on promptModel / cleared on turnComplete) — NOT by audio playback.
+      // lastBotAudioAt only keeps the busy WATCHDOG from force-idling mid-speech.
+      if (hybridSTT) lastBotAudioAt = Date.now();
       // Capture bot's outbound audio for the stereo recording.
       recorder.pushOutbound(mulawB64);
       // Bot speaking counts as activity — don't let the silence watchdog
@@ -3397,6 +3408,7 @@ function _buildInstructionsForRealtime({ assistant, data, language, voiceHeaderO
     "Speak ONLY natural words. Never say symbol characters out loud — no < > # * _ | { } [ ] backtick, no \"less-than\", no \"hashtag\", no \"asterisk\". If your answer would contain a symbol, omit it or say its plain-language meaning. " +
     "No narrator phrases like \"Initiating Dialogue\" or \"Analyzing Input\". " +
     "Output only the literal words to speak, in plain prose, short sentences.\n" +
+    "When data contains a LIST (bus lines, products, updates): never read the whole list. Say how many there are, give the 3 most relevant, and ask if the caller wants more. Long monologues lose the caller.\n" +
     "NEVER promise to call the caller back later, get back to them, follow up, or contact them. " +
     "Either answer now with information you have, or honestly say you don't know that specific thing — " +
     "then offer what you CAN help with. The caller is here right now; help them right now.\n" +
