@@ -3318,9 +3318,13 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       const conf = evt.channel?.alternatives?.[0]?.confidence || 0;
       if (!t || !t.trim() || !isFinal) return;
       // Noise gate (same policy as the cascade): keep numeric / high-conf / multi-word.
+      // EXCEPTION: yes/no/ack words are legitimate one-word answers to the
+      // bot's questions — dropping "כן." left the bot waiting in silence until
+      // the watchdog asked "are you still there?" (call NXOmqH3KBDVNNYe1LC6J).
       const wc = t.trim().split(/\s+/).length;
-      if (conf < 0.50) { console.log(`[${callSessionId}] [HYBRID] drop low-conf "${t}"`); return; }
-      if (wc < 2 && conf < 0.85 && !/\d/.test(t)) { console.log(`[${callSessionId}] [HYBRID] drop 1-word "${t}"`); return; }
+      const isAckWord = /^(כן|לא|נכון|בסדר|אוקיי|אוקי|טוב|בטח|סבבה|yes|no|yeah|yep|nope|ok|okay|sure|right)[.!?]?$/i.test(t.trim());
+      if (conf < 0.50 && !isAckWord) { console.log(`[${callSessionId}] [HYBRID] drop low-conf "${t}"`); return; }
+      if (wc < 2 && conf < 0.85 && !/\d/.test(t) && !isAckWord) { console.log(`[${callSessionId}] [HYBRID] drop 1-word "${t}"`); return; }
       console.log(`[${callSessionId}] [HYBRID] DG final: "${t}" conf=${conf.toFixed(2)} modelBusy=${modelBusy}`);
       if (modelBusy) {
         // Model is generating its turn. Queue this — sending clientContent now
