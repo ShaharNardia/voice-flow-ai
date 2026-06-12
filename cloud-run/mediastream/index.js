@@ -903,6 +903,39 @@ async function fetchKnowledgeContext(astId, query) {
   }
 }
 
+// Build a meaningful, sanitize-proof description for a custom API tool when
+// the admin left the description empty. The old fallback was
+// "Custom API: GET https://…" — but the system-instruction sanitizer strips
+// raw URLs, leaving "new_tool: Custom API: GET", i.e. NOTHING. With a
+// meaningless name like "new_tool" the model had no idea the tool existed
+// and answered lookups from thin air (call BK0tFLsns1fNsav0aBJ4: zero tool
+// calls in a whole bus-lookup conversation). Derive the description from the
+// endpoint path words + parameter names instead — no protocol, survives
+// sanitization, and tells the model exactly when to call.
+function describeApiTool(ct) {
+  if (ct?.description && ct.description.trim()) return ct.description.trim();
+  try {
+    const u = new URL(ct.url);
+    // Last meaningful path segments, skipping {param} placeholders and
+    // boilerplate ("api", "webapi", version segments).
+    const segs = u.pathname.split("/").filter(Boolean)
+      .filter((s) => !/^\{/.test(s) && !/^(api|webapi|v\d+|true|false|[a-z]{2})$/i.test(s) && s.length >= 4);
+    // The endpoint name is the longest CamelCase-ish segment, not whatever
+    // happens to be last (locale/flag segments like /he/false often trail).
+    const byLen = [...segs].sort((a, b) => b.length - a.length).slice(0, 2);
+    const chosen = segs.filter((s) => byLen.includes(s));
+    // Split CamelCase endpoint names into words: GetRealtimeBusLineListByBustop
+    // → "Get Realtime Bus Line List By Bustop".
+    const endpoint = chosen.join(" ").replace(/([a-z])([A-Z])/g, "$1 $2");
+    const params = (ct.parameters || []).map((p) => p?.name).filter(Boolean).join(", ");
+    return `Live data lookup from ${u.hostname}: "${endpoint}"` +
+      (params ? ` (parameters: ${params}).` : ".") +
+      " ALWAYS call this when the caller asks for information this endpoint can return.";
+  } catch (_) {
+    return `Custom ${(ct?.method || "POST").toUpperCase()} API data lookup — call it when the caller asks for live data.`;
+  }
+}
+
 // Substitute {{placeholder}} tokens in a string using the given values map.
 // Values are URL-encoded so that non-ASCII characters (Hebrew, Arabic, spaces, etc.)
 // are safely transmitted in query strings and decoded correctly by Express on the other end.
@@ -1626,7 +1659,7 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
       type: "function",
       function: {
         name: ct.name.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 64),
-        description: ct.description || `Custom API: ${ct.method || "POST"} ${ct.url}`,
+        description: describeApiTool(ct),
         parameters: {type: "object", properties, required},
       },
     });
@@ -1635,7 +1668,7 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
     console.log(`[${callSessionId}] [RT] Registered ${customTools.length} custom API tool(s)`);
     // Push the model toward using the tools — without this it tends to answer
     // from the (possibly stale) knowledge base instead of checking live data.
-    const toolList = customTools.map((t) => `  - ${t.name}: ${t.description || "(no description)"}`).join("\n");
+    const toolList = customTools.map((t) => `  - ${t.name}: ${describeApiTool(t)}`).join("\n");
     instructions += `\n\n===== MANDATORY TOOL USAGE =====\nYou have LIVE API TOOLS:\n${toolList}\n\nRULES (non-negotiable):\n1. The knowledge base below is FAQ/company info only. It may list products but those entries are outdated.\n2. For ANY question about a specific product, model name, brand, SKU, price, stock, or availability — you MUST call the matching tool BEFORE answering. Never say "we don't have X" or "X is out of stock" without calling the tool first.\n3. If you even suspect the caller is asking about a product, CALL THE TOOL. It is always better to call the tool unnecessarily than to answer with stale data.\n4. After the tool returns, use ONLY its response to answer questions about that product. Ignore what the knowledge base says about the product.\n5. Before calling the tool, you MUST say a short natural filler — then call it immediately. Use one of these (vary them, never repeat the same one twice in a row): ${_rtLang === "he" ? '"רגע...", "שנייה...", "אני בודק...", "רגע בבקשה..."' : _rtLang === "ar" ? '"لحظة...", "ثانية...", "سأتحقق من ذلك...", "انتظر لحظة..."' : _rtLang === "el" ? '"Μια στιγμή...", "Ένα λεπτό...", "Ελέγχω...", "Αμέσως..."' : _rtLang === "af" ? '"Een oomblik...", "Ek kyk gou...", "Net \'n sekonde...", "Wag net..."' : _rtLang === "zu" ? '"Mzuzwana...", "Ngiyabheka...", "Ngizokhangela..."' : '"One moment...", "Let me check...", "Just a sec...", "Give me a moment..."'}.`;
   }
 
@@ -2709,7 +2742,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       type: "function",
       function: {
         name: sanitizedName,
-        description: ct.description || `Custom API: ${ct.method || "POST"} ${ct.url}`,
+        description: describeApiTool(ct),
         parameters: { type: "object", properties, required },
       },
     });
@@ -2783,9 +2816,20 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     console.log(`[${callSessionId}] [GL] Registered ${_customApiTools.length} custom API tool(s): ${_customApiTools.map((t) => t.function.name).join(", ")}`);
   }
 
+  // SAFETY NET sanitize: the native-audio model is literal and will SPEAK any
+  // stray formatting/special chars (<, >, #, *, _) that survive into the
+  // system instruction — including from the knowledge base. This MUST run
+  // BEFORE the tools block below: the sanitizer strips underscores and raw
+  // URLs, which previously mangled tool names ("new_tool" → "newtool") and
+  // gutted descriptions — the model lost the tools entirely and answered
+  // lookups from thin air (call BK0tFLsns1fNsav0aBJ4: zero tool calls).
+  instructions = sanitizeForSpeech(instructions);
+
   // Tool-awareness note appended to system instructions. The model sees the
   // tool schemas already in setup.tools, but a plain-language summary makes
   // it dramatically more likely to call them at the right time vs. invent.
+  // Appended AFTER the sanitize — this text is code-controlled (no markdown,
+  // no raw URLs via describeApiTool), so it stays intact.
   {
     const builtinLines = [
       "  • search_knowledge_base(query) — when caller asks a fact that should be in the KB.",
@@ -2809,12 +2853,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       "If no tool can answer and you genuinely don't know, say so honestly and offer what you CAN help with.";
   }
 
-  // FINAL safety net: the native-audio model is literal and will SPEAK any
-  // stray formatting/special chars (<, >, #, *, |, braces, brackets) that
-  // survive into the system instruction — including from the knowledge base
-  // and tool guidance appended above, which bypass the per-piece sanitize.
-  // Strip them all once here so nothing reaches the model unspoken-unfriendly.
-  instructions = sanitizeForSpeech(instructions);
+  // (Full-instruction sanitize happens ABOVE, before the tools block — do NOT
+  // re-sanitize here or tool names/descriptions get mangled again.)
 
   const bridge = new GeminiBridge({
     apiKey: GEMINI_API_KEY,
@@ -4074,7 +4114,7 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
       type: "function",
       function: {
         name: ct.name.replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 64),
-        description: ct.description || `Custom API: ${ct.method || "POST"} ${ct.url}`,
+        description: describeApiTool(ct),
         parameters: {type: "object", properties, required},
       },
     });
