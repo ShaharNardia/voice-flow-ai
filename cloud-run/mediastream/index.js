@@ -2948,6 +2948,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     const result = await executeGeminiTool(name, args || {});
     bridge.addConversationItem({
       tool_call_id: callId,
+      name,
       content: String(result || ""),
     });
   });

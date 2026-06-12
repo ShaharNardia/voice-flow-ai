@@ -576,6 +576,28 @@ class GeminiBridge extends EventEmitter {
       return;
     }
 
+    // Tool calls arrive as a TOP-LEVEL toolCall message (BidiGenerateContentToolCall),
+    // NOT inside serverContent. Missing this wedged whole calls: the model asked
+    // for a tool, we silently dropped it, and it waited forever for a response —
+    // no audio, no turnComplete, session dead (call 4SPtDfLzTTeIBKWLDDXp, the
+    // "כל הקווים" turn). The legacy modelTurn.parts functionCall path below is
+    // kept for older model variants.
+    if (msg.toolCall?.functionCalls?.length) {
+      for (const fc of msg.toolCall.functionCalls) {
+        this._log(`tool call: ${fc.name}(${JSON.stringify(fc.args || {}).slice(0, 120)}) id=${fc.id || "-"}`);
+        this.emit("tool_call", {
+          name: fc.name,
+          args: fc.args || {},
+          callId: fc.id || fc.name,
+        });
+      }
+      return;
+    }
+    if (msg.toolCallCancellation) {
+      this._log(`tool call cancelled: ${JSON.stringify(msg.toolCallCancellation.ids || [])}`);
+      return;
+    }
+
     const sc = msg.serverContent;
     if (!sc) return;
 
@@ -792,10 +814,12 @@ class GeminiBridge extends EventEmitter {
     const content = typeof item.content === "string"
       ? item.content
       : JSON.stringify(item.content);
+    this._log(`tool response → id=${item.tool_call_id || "-"} name=${item.name || "-"} (${content.length} chars)`);
     this._ws.send(JSON.stringify({
       toolResponse: {
         functionResponses: [{
           id: item.tool_call_id || "tool_result",
+          ...(item.name ? { name: item.name } : {}),
           response: { output: content },
         }],
       },
