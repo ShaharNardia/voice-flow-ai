@@ -20,25 +20,40 @@ class RealtimeRecorder {
     this.startedAt = Date.now();
     this._inboundChunks = []; // {at: ms, buf: Buffer}
     this._outboundChunks = []; // {at: ms, buf: Buffer}
-    // Track play clock for outbound audio — OpenAI ships audio in bursts,
-    // but Twilio plays it back at 8 kHz real-time. We simulate when each
-    // chunk will actually reach the caller by advancing a play clock.
+    // CONTIGUOUS placement clocks. Audio chunks arrive every ~20ms with a few
+    // ms of wall-clock jitter; placing each chunk at its own arrival time and
+    // rounding to a sample offset left 1-10 sample gaps/overlaps between
+    // consecutive chunks — an audible click every few chunks, i.e. constant
+    // crackle over the whole recording. Instead each stream appends seamlessly
+    // to its running clock, and only RESYNCs to wall-time when there's a
+    // genuine gap (> RESYNC_MS, e.g. between turns / caller silence).
+    this._inboundClockMs = null;
     this._outboundPlayClockMs = 0;
   }
+
+  static get RESYNC_MS() { return 250; }
 
   /** Called on each inbound (user) mulaw chunk from Twilio. */
   pushInbound(base64Mulaw) {
     const buf = Buffer.from(base64Mulaw, "base64");
-    const at = Date.now() - this.startedAt;
-    this._inboundChunks.push({at, buf});
+    const now = Date.now() - this.startedAt;
+    if (this._inboundClockMs === null ||
+        Math.abs(now - this._inboundClockMs) > RealtimeRecorder.RESYNC_MS) {
+      this._inboundClockMs = now;   // first chunk or a real gap — resync
+    }
+    this._inboundChunks.push({at: this._inboundClockMs, buf});
+    this._inboundClockMs += buf.length * 1000 / SAMPLE_RATE;
   }
 
-  /** Called on each outbound (assistant) mulaw chunk from OpenAI. */
+  /** Called on each outbound (assistant) mulaw chunk from the bridge. */
   pushOutbound(base64Mulaw) {
     const buf = Buffer.from(base64Mulaw, "base64");
     const now = Date.now() - this.startedAt;
-    // If the bot has been silent for a while, snap play clock up to now
-    if (this._outboundPlayClockMs < now) this._outboundPlayClockMs = now;
+    // Snap forward only on a genuine silence gap — NOT on every few-ms drift,
+    // which fragmented steady 20ms-paced playback into crackle.
+    if (now - this._outboundPlayClockMs > RealtimeRecorder.RESYNC_MS) {
+      this._outboundPlayClockMs = now;
+    }
     const at = this._outboundPlayClockMs;
     this._outboundChunks.push({at, buf});
     // Advance play clock by this chunk's duration (8 kHz → 1 byte per 0.125 ms)
