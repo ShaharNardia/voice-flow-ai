@@ -1031,10 +1031,13 @@ function summarizeApiResponse(data, maxChars = 20000) {
  * substitute them into the URL/headers/body template and fire the request.
  * Response body gets smart-summarized before being handed back to the model.
  */
-async function executeCustomApiTool(tool, args, callSessionId) {
+async function executeCustomApiTool(tool, args, callSessionId, meta = {}) {
   try {
     const url = substitutePlaceholders(tool.url, args);
     const method = (tool.method || "POST").toUpperCase();
+    // Expose the resolved request to the caller (for transcript display).
+    meta.method = method;
+    meta.url = url;
     const headers = {};
     for (const [k, v] of Object.entries(tool.headers || {})) {
       headers[k] = substitutePlaceholders(v, args);
@@ -1047,6 +1050,10 @@ async function executeCustomApiTool(tool, args, callSessionId) {
     console.log(`[${callSessionId}] [RT] Custom API: ${method} ${url}`);
     const resp = await axios(axiosConfig);
     const summary = summarizeApiResponse(resp.data);
+    meta.status = resp.status;
+    // Raw body (truncated) for transcript display — the summary the model
+    // gets may collapse detail the admin wants to inspect.
+    try { meta.rawBody = JSON.stringify(resp.data).slice(0, 1500); } catch (_) { meta.rawBody = String(resp.data).slice(0, 1500); }
     console.log(`[${callSessionId}] [RT] Custom API ${tool.name} → ${resp.status} (${summary.length} chars summary)`);
     return `HTTP ${resp.status}\n${summary}`;
   } catch (e) {
@@ -2889,6 +2896,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     try {
       console.log(`[${callSessionId}] [GL] Tool call: ${name}(${JSON.stringify(args).slice(0, 200)})`);
       let result = "OK";
+      let apiMeta = null;  // filled by executeCustomApiTool with the resolved request/response
       if (name === "end_call") {
         callEnding = true;
         setTimeout(async () => {
@@ -2953,7 +2961,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         // Each _customApiTools entry carries its _config which has url/method/headers.
         const customMatch = _customApiTools.find((t) => t.function.name === name);
         if (customMatch) {
-          result = await executeCustomApiTool(customMatch._config, args, callSessionId);
+          apiMeta = {};
+          result = await executeCustomApiTool(customMatch._config, args, callSessionId, apiMeta);
         } else {
           result = `Unknown or unsupported tool: ${name}`;
         }
@@ -2961,12 +2970,20 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
       // ONE consolidated tool-call row in conversationHistory so the UI
       // renders a single ⚡ "API call · {name}" pill with args + result.
+      // For custom HTTP tools, also persist the RESOLVED request (method+URL)
+      // and the raw response body so the transcript view shows exactly what
+      // was called and what came back — not just the model-facing summary.
       sessionRef.update({
         conversationHistory: FieldValue.arrayUnion({
           role: "tool",
           name,
           args,
           result: String(result).slice(0, 2000),
+          ...(apiMeta?.url ? {
+            request: `${apiMeta.method} ${apiMeta.url}`,
+            httpStatus: apiMeta.status ?? null,
+            responseBody: apiMeta.rawBody || null,
+          } : {}),
           timestamp: new Date().toISOString(),
         }),
       }).catch(() => {});

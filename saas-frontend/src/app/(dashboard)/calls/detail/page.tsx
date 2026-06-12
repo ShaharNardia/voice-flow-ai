@@ -27,6 +27,9 @@ interface Message {
   name?: string;
   args?: Record<string, unknown>;
   result?: string;
+  request?: string;        // resolved HTTP request, e.g. "GET https://api…/510/he/false"
+  httpStatus?: number | null;
+  responseBody?: string | null;  // raw API response (truncated server-side)
   timestamp?: { toDate?: () => Date } | string | Date;
   ts?: string;   // legacy field name written by older Gemini path; UI reads both
 }
@@ -1052,10 +1055,33 @@ function CallDetail() {
                         {msg.args && Object.keys(msg.args).length > 0 ? (
                           <>args: <span className="font-mono text-violet-600">{JSON.stringify(msg.args).slice(0, 80)}</span></>
                         ) : <>no arguments</>}
+                        {typeof msg.httpStatus === "number" && (
+                          <span className={`ml-2 px-1.5 py-0.5 rounded font-mono text-[10px] ${
+                            msg.httpStatus < 400 ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                          }`}>HTTP {msg.httpStatus}</span>
+                        )}
                       </summary>
-                      <pre className="mt-2 text-[10px] text-neutral-700 whitespace-pre-wrap font-mono overflow-auto max-h-40">
-                        {msg.result || "(no result)"}
-                      </pre>
+                      {msg.request && (
+                        <div className="mt-2">
+                          <div className="text-[9px] uppercase tracking-wide text-violet-400 font-semibold">Request</div>
+                          <pre className="text-[10px] text-neutral-700 whitespace-pre-wrap font-mono overflow-auto max-h-20 break-all" dir="ltr">{msg.request}</pre>
+                        </div>
+                      )}
+                      {msg.responseBody && (
+                        <div className="mt-2">
+                          <div className="text-[9px] uppercase tracking-wide text-violet-400 font-semibold">Response</div>
+                          <pre className="text-[10px] text-neutral-700 whitespace-pre-wrap font-mono overflow-auto max-h-40" dir="ltr">{(() => {
+                            try { return JSON.stringify(JSON.parse(msg.responseBody!), null, 2); }
+                            catch { return msg.responseBody; }
+                          })()}</pre>
+                        </div>
+                      )}
+                      <div className="mt-2">
+                        <div className="text-[9px] uppercase tracking-wide text-violet-400 font-semibold">{msg.request ? "Result given to the model" : "Result"}</div>
+                        <pre className="text-[10px] text-neutral-700 whitespace-pre-wrap font-mono overflow-auto max-h-40">
+                          {msg.result || "(no result)"}
+                        </pre>
+                      </div>
                     </details>
                   </div>
                 );
