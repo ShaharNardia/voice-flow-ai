@@ -863,6 +863,46 @@ app.get("/gemini-probe", (req, res) => {
   ws.on("error", (e) => { clearTimeout(t); res.json({ok: false, error: e.message, keyPrefix: key.slice(0,8)}); });
 });
 
+// ── Knowledge context lookup (module scope) ──────────────────────────
+// MUST live at module scope: the Gemini and OpenAI-realtime handlers both
+// call it from their search_knowledge_base tool executors, but the original
+// definition was nested inside the Standard-cascade handler — so every
+// search_knowledge_base call on the realtime paths threw
+// "fetchKnowledgeContext is not defined" (call 1tsMnhqpQx8TahXScCtP).
+// The cascade handler's nested copy shadows this one there; same behavior.
+async function fetchKnowledgeContext(astId, query) {
+  if (!astId || !query) return [];
+  const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_API_KEY) return [];
+  try {
+    const embedRes = await axios.post(
+      "https://api.openai.com/v1/embeddings",
+      {model: "text-embedding-3-small", input: [query]},
+      {headers: {"Authorization": `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json"}, timeout: 8000},
+    );
+    const queryVec = embedRes.data.data[0].embedding;
+    const snap = await getFirestore().collection("knowledge_chunks")
+      .where("assistantId", "==", astId)
+      .get();
+    if (snap.empty) return [];
+    const scored = snap.docs.map((doc) => {
+      const d = doc.data();
+      if (!d.embedding) return {content: d.content, score: 0};
+      const dot = queryVec.reduce((s, v, i) => s + v * d.embedding[i], 0);
+      const magA = Math.sqrt(queryVec.reduce((s, v) => s + v * v, 0));
+      const magB = Math.sqrt(d.embedding.reduce((s, v) => s + v * v, 0));
+      return {content: d.content, score: dot / (magA * magB)};
+    });
+    return scored
+      .filter((c) => c.score > 0.25)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3);
+  } catch (e) {
+    console.warn(`Knowledge context failed:`, e.message);
+    return [];
+  }
+}
+
 // Substitute {{placeholder}} tokens in a string using the given values map.
 // Values are URL-encoded so that non-ASCII characters (Hebrew, Arabic, spaces, etc.)
 // are safely transmitted in query strings and decoded correctly by Express on the other end.

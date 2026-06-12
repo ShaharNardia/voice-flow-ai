@@ -251,6 +251,14 @@ class GeminiBridge extends EventEmitter {
     this._modelName = model || GEMINI_MODEL;
     this._disableThinking = disableThinking;
     this._fallbackTried = false;
+    // Session resumption: Gemini Live kills connections on a server deadline
+    // ("1011 Deadline expired", observed ~2-3 min into call 1tsMnhqpQx8TahXScCtP)
+    // — without resumption the whole phone call dies mid-sentence. We request
+    // resumption handles in setup, store the latest, and on an unexpected
+    // close reconnect with the handle: conversation context survives server-side.
+    this._resumeHandle = null;
+    this._resumeAttempts = 0;
+    this._resumptionUnsupported = false;
     // Barge-in (hybrid): drop the REST of the current turn's audio. Distinct
     // from _suppressAudio, which the modelTurn handler resets on every chunk —
     // this one is reset ONLY at turnComplete, so a cut turn stays cut.
@@ -460,6 +468,7 @@ class GeminiBridge extends EventEmitter {
         this._log(`primary model unavailable — falling back to ${this._modelName} and reconnecting`);
         this._ws = null;
         this._ready = false;
+        this._setupSent = false;  // without this the reconnect never re-sends setup
         // Re-enter connect on next tick so this close handler returns cleanly.
         setImmediate(() => { if (!this._closed) this.connect(); });
         return;
@@ -478,6 +487,33 @@ class GeminiBridge extends EventEmitter {
         this._log(`languageCode field rejected by API — reconnecting without language hint`);
         this._ws = null;
         this._ready = false;
+        this._setupSent = false;
+        setImmediate(() => { if (!this._closed) this.connect(); });
+        return;
+      }
+
+      // If the API rejects the sessionResumption field itself, retry once without it.
+      if (code === 1007 && !this._resumptionUnsupported && !this._closed &&
+          /session_resumption|sessionResumption/i.test(reasonStr)) {
+        this._resumptionUnsupported = true;
+        this._log("sessionResumption field rejected — reconnecting without it");
+        this._ws = null;
+        this._ready = false;
+        this._setupSent = false;
+        setImmediate(() => { if (!this._closed) this.connect(); });
+        return;
+      }
+
+      // Mid-call server kill (deadline / network / goAway). We didn't initiate
+      // this close (_closed is only set by our close()), so if we hold a
+      // resumption handle, reconnect and RESUME — the caller hears a brief
+      // pause instead of a dead line. Capped at 3 attempts per call.
+      if (!this._closed && this._resumeHandle && this._resumeAttempts < 3) {
+        this._resumeAttempts++;
+        this._log(`unexpected close (${code}) — resuming session, attempt ${this._resumeAttempts}/3`);
+        this._ws = null;
+        this._ready = false;
+        this._setupSent = false;
         setImmediate(() => { if (!this._closed) this.connect(); });
         return;
       }
@@ -552,6 +588,12 @@ class GeminiBridge extends EventEmitter {
         // handshake + reconnect — not worth it.
         outputAudioTranscription: {},
         inputAudioTranscription:  {},
+        // Ask the server for resumption handles so a mid-call deadline kill
+        // can be survived (see _resumeHandle in the constructor). With a stored
+        // handle this RESUMES the previous session — context intact.
+        ...(this._resumptionUnsupported ? {} : {
+          sessionResumption: this._resumeHandle ? { handle: this._resumeHandle } : {},
+        }),
         systemInstruction: {
           // langDirective goes FIRST (primacy) — a language lock buried at
           // the end of a long prompt loses to mid-call audio cues.
@@ -574,6 +616,18 @@ class GeminiBridge extends EventEmitter {
       this._log("setup confirmed — session ready");
       this._ready = true;
       this.emit("ready");
+      return;
+    }
+
+    // Session-resumption handle updates — store the newest so an unexpected
+    // close can resume with full context. GoAway warns the deadline is near.
+    if (msg.sessionResumptionUpdate) {
+      const u = msg.sessionResumptionUpdate;
+      if (u.resumable && u.newHandle) this._resumeHandle = u.newHandle;
+      return;
+    }
+    if (msg.goAway) {
+      this._log(`goAway from server — timeLeft=${msg.goAway.timeLeft || "?"} (will resume on close)`);
       return;
     }
 
