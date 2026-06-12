@@ -2804,8 +2804,15 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   const sendToModel = (txt) => {
     if (!txt || !txt.trim()) return;
     console.log(`[${callSessionId}] [HYBRID] user → Gemini: "${txt.trim()}"`);
-    try { bridge.promptModel(txt.trim()); armBusy(); }
-    catch (e) { console.error(`[${callSessionId}] [HYBRID] promptModel failed: ${e.message}`); }
+    try {
+      bridge.promptModel(txt.trim());
+      armBusy();
+      // HYBRID transcript: Gemini never receives caller AUDIO in this mode, so
+      // it emits no inputTranscription — without this, the call page shows only
+      // the bot's side. Record the Deepgram text as the user turn ourselves.
+      _accumUser += txt.trim();
+      flushTranscript("user");
+    } catch (e) { console.error(`[${callSessionId}] [HYBRID] promptModel failed: ${e.message}`); }
   };
   // Called when the model's turn truly ends (turnComplete). Flush any caller
   // speech that arrived while it was busy as a single new turn.
@@ -3259,6 +3266,21 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         // onModelIdle() flushes the queue as ONE turn when turnComplete arrives.
         pendingUserText += (pendingUserText ? " " : "") + t.trim();
         console.log(`[${callSessionId}] [HYBRID] queued (model busy): "${t.trim()}"`);
+        // BARGE-IN: if this is confident, substantial speech (not echo/noise),
+        // cut the bot off mid-sentence so it doesn't keep talking over the
+        // caller and then answer stale context. Stronger gate than the noise
+        // gate above: real interruptions are full phrases or contain numbers;
+        // line-echo fragments rarely pass conf>=0.75 with 3+ words.
+        const strongInterrupt = conf >= 0.75 && (wc >= 3 || /\d/.test(t));
+        if (strongInterrupt && !callEnding) {
+          console.log(`[${callSessionId}] [HYBRID] barge-in — cutting bot playback`);
+          // Drop audio already buffered on Twilio's side…
+          if (streamSid && ws.readyState === ws.OPEN) {
+            try { ws.send(JSON.stringify({event: "clear", streamSid})); } catch (_) {}
+          }
+          // …and everything queued/incoming for the rest of this turn locally.
+          bridge.suppressTurn();
+        }
         return;
       }
       // Model idle — debounce briefly to coalesce multi-part finals, then send.

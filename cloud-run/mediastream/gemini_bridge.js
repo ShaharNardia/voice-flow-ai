@@ -250,6 +250,10 @@ class GeminiBridge extends EventEmitter {
     this._modelName = model || GEMINI_MODEL;
     this._disableThinking = disableThinking;
     this._fallbackTried = false;
+    // Barge-in (hybrid): drop the REST of the current turn's audio. Distinct
+    // from _suppressAudio, which the modelTurn handler resets on every chunk —
+    // this one is reset ONLY at turnComplete, so a cut turn stays cut.
+    this._dropTurnAudio = false;
     // Language-hint tracking. We send a BCP-47 languageCode on the input/
     // output transcription configs to force the caller's language. If the API
     // rejects with 1007 ("Cannot find field"), we retry without it. Without
@@ -302,7 +306,7 @@ class GeminiBridge extends EventEmitter {
       if (this._closed) return;
       if (this._outQueue.length === 0) return;
       const chunk = this._outQueue.shift();
-      if (!this._suppressAudio) this.emit("audio", chunk);
+      if (!this._suppressAudio && !this._dropTurnAudio) this.emit("audio", chunk);
     }, 20);
   }
 
@@ -631,7 +635,7 @@ class GeminiBridge extends EventEmitter {
       for (const part of sc.modelTurn.parts) {
         // Audio output — log the MIME type on first chunk so we know the actual format
         if (part.inlineData?.mimeType?.startsWith("audio/")) {
-          if (!this._suppressAudio) {
+          if (!this._suppressAudio && !this._dropTurnAudio) {
             const mt = (part.inlineData.mimeType || "").toLowerCase();
             const rawB64 = part.inlineData.data;
 
@@ -686,6 +690,7 @@ class GeminiBridge extends EventEmitter {
     if (sc.turnComplete) {
       this._currentlyResponding = false;
       this._suppressAudio = false;
+      this._dropTurnAudio = false;  // barge-in cut ends with the turn
       this._turnHasMeta = false;
       this._turnText = "";
       // Diagnostic: did this turn actually produce audio? A turnComplete with
@@ -749,6 +754,18 @@ class GeminiBridge extends EventEmitter {
         turnComplete: true,
       },
     }));
+  }
+
+  /**
+   * Barge-in (hybrid): silence the rest of the CURRENT turn — flush whatever
+   * is queued for playback and drop any further audio chunks of this turn.
+   * The model keeps "finishing" the turn server-side (its history stays
+   * intact); the caller just stops hearing it. Auto-resets at turnComplete.
+   */
+  suppressTurn() {
+    this._dropTurnAudio = true;
+    this._flushQueue();
+    this._log("suppressTurn — remaining audio of current turn dropped (barge-in)");
   }
 
   /**
