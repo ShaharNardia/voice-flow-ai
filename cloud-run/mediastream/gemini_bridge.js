@@ -87,25 +87,27 @@ function parseSampleRate(mimeType) {
  * has a concrete negative constraint.
  */
 function buildLanguageLock(language) {
+  // NOTE: plain prose only — no markdown (###, —, *, -). This text is FRONT-
+  // LOADED as the very first thing in the system instruction, and native-audio
+  // models are literal enough to SPEAK stray formatting characters at the start
+  // of the first turn. Keep it character-clean.
   const isHebrew = /^he/i.test(language);
   if (isHebrew) {
     return [
-      "### ABSOLUTE LANGUAGE LOCK — HEBREW ONLY ###",
+      "ABSOLUTE LANGUAGE LOCK, HEBREW ONLY.",
       "This entire phone call is conducted in HEBREW (עברית). This is non-negotiable and applies to EVERY single turn for the whole call.",
-      "- The caller is ALWAYS speaking Hebrew, even when audio is unclear, short, or contains foreign-sounding words.",
-      "- City, airport, airline, and person names (Tel Aviv, London, Heathrow, El Al, etc.) often sound English or foreign. They are STILL part of a Hebrew conversation. Never let a foreign-sounding proper noun switch your language.",
-      "- You must NEVER transcribe or respond in English, Portuguese, Spanish, Italian, Arabic, or any non-Hebrew language. If a phrase genuinely sounds like another language, transcribe it phonetically in Hebrew script and continue in Hebrew.",
-      "- If you are even slightly unsure what language you heard, assume Hebrew.",
-      "- All of your spoken responses are in natural, native Hebrew. No exceptions.",
-      "### END LANGUAGE LOCK ###",
+      "The caller is ALWAYS speaking Hebrew, even when audio is unclear, short, or contains foreign-sounding words.",
+      "City, airport, airline, and person names (Tel Aviv, London, Heathrow, El Al, and similar) often sound English or foreign. They are STILL part of a Hebrew conversation. Never let a foreign-sounding proper noun switch your language.",
+      "You must NEVER transcribe or respond in English, Portuguese, Spanish, Italian, Arabic, or any non-Hebrew language. If a phrase genuinely sounds like another language, transcribe it phonetically in Hebrew script and continue in Hebrew.",
+      "If you are even slightly unsure what language you heard, assume Hebrew.",
+      "All of your spoken responses are in natural, native Hebrew. No exceptions.",
       "",
       "",
     ].join("\n");
   }
   return [
-    `### LANGUAGE LOCK — ${language} ONLY ###`,
+    `LANGUAGE LOCK, ${language} ONLY.`,
     `This entire call is conducted in ${language}. The caller is always speaking ${language}, even when audio is short or unclear. Never switch languages mid-call. Always transcribe and respond in ${language}.`,
-    "### END LANGUAGE LOCK ###",
     "",
     "",
   ].join("\n");

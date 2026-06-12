@@ -3328,10 +3328,14 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
  * builder (which is 200+ lines in handleRealtimeSession).
  */
 function _buildInstructionsForRealtime({ assistant, data, language, voiceHeaderOverride }) {
-  const base     = assistant.systemPrompt || assistant.instructions || "";
+  // Strip markdown/special chars from caller-authored text — the native-audio
+  // model is literal and will SPEAK "###", "**", "—" etc. at turn start (the
+  // transcript hid this because stripMeta cleans it post-hoc). Cascade path
+  // already sanitizes systemPrompt; the realtime path must too.
+  const base     = sanitizeForSpeech(assistant.systemPrompt || assistant.instructions || "");
   const name     = assistant.name || assistant.assistantName || "Assistant";
   const company  = assistant.companyName || data.companyName || "";
-  const firstMsg = assistant.firstMessage || "";
+  const firstMsg = sanitizeForSpeech(assistant.firstMessage || "");
 
   // VOICE-MODE HEADER — terse but covers four critical behaviors:
   //   1. No markdown / narrator-speak (Gemini 2.5 native-audio leak guard)
