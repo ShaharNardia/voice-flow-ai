@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { releasePhoneNumber, listPhoneNumbers, configurePhoneNumber, assistantsList, type Assistant } from "@/lib/firebase-functions";
+import { useAuth } from "@/hooks/useAuth";
 import Link from "next/link";
-import { Phone, Plus, Trash2, RefreshCw, Loader2, Settings, X, Check, Server } from "lucide-react";
+import { Phone, Plus, Trash2, RefreshCw, Loader2, Settings, X, Check, Server, PencilLine } from "lucide-react";
 
 interface PhoneNumberDoc {
   id: string;
@@ -36,10 +37,22 @@ function detectCountry(phoneNumber: string, twilioCountry: string): string {
 }
 
 export default function PhoneNumbersPage() {
+  const { role } = useAuth();
+  const isAdmin = role === "admin" || role === "super_admin";
+
   const [numbers, setNumbers] = useState<PhoneNumberDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncError, setSyncError] = useState("");
+
+  // Manual add modal (admin only) — for registering a SIP DID or any number
+  // that didn't come from a Twilio sync.
+  const [showAdd, setShowAdd] = useState(false);
+  const [addNumber, setAddNumber] = useState("");
+  const [addName, setAddName] = useState("");
+  const [addProvider, setAddProvider] = useState<"sip" | "twilio">("sip");
+  const [addError, setAddError] = useState("");
+  const [addSaving, setAddSaving] = useState(false);
 
   // Configure assistant modal
   const [assistants, setAssistants] = useState<Assistant[]>([]);
@@ -92,6 +105,43 @@ export default function PhoneNumbersPage() {
       setSyncError(e instanceof Error ? e.message : "Sync failed");
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const handleAddManual = async () => {
+    setAddError("");
+    // Normalize to E.164: keep leading +, strip spaces/dashes/parens.
+    const raw = addNumber.trim();
+    const normalized = raw.startsWith("+")
+      ? "+" + raw.slice(1).replace(/\D/g, "")
+      : raw.replace(/\D/g, "");
+    if (!/^\+?\d{6,15}$/.test(normalized)) {
+      setAddError("Enter a valid number in E.164 format, e.g. +972747054946");
+      return;
+    }
+    const e164 = normalized.startsWith("+") ? normalized : `+${normalized}`;
+    if (numbers.some((n) => n.phoneNumber === e164)) {
+      setAddError("That number already exists in the list.");
+      return;
+    }
+    setAddSaving(true);
+    try {
+      await setDoc(doc(db, "phone_numbers", e164), {
+        phoneNumber: e164,
+        friendlyName: addName.trim(),
+        country: detectCountry(e164, "US"),
+        provider: addProvider,
+        sid: null,
+        manualEntry: true,
+      }, { merge: true });
+      setShowAdd(false);
+      setAddNumber("");
+      setAddName("");
+      setAddProvider("sip");
+    } catch (e: unknown) {
+      setAddError(e instanceof Error ? e.message : "Failed to add number");
+    } finally {
+      setAddSaving(false);
     }
   };
 
@@ -187,6 +237,16 @@ export default function PhoneNumbersPage() {
             {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
             Sync from Twilio
           </button>
+          {isAdmin && (
+            <button
+              onClick={() => { setAddError(""); setShowAdd(true); }}
+              title="Manually register a number (e.g. a SIP DID)"
+              className="flex items-center gap-2 border border-neutral-200 hover:bg-neutral-50 text-neutral-700 text-sm font-medium px-3 py-2 rounded-lg transition-colors"
+            >
+              <PencilLine className="w-4 h-4" />
+              Add Manually
+            </button>
+          )}
           <Link
             href="/phone-numbers/buy"
             className="flex items-center gap-2 bg-[#F22F46] hover:bg-[#d9243b] text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
@@ -303,6 +363,85 @@ export default function PhoneNumbersPage() {
           </table>
         )}
       </div>
+
+      {/* Manual Add Modal (admin only) */}
+      {showAdd && isAdmin && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+          <div className="bg-white rounded-xl shadow-xl p-6 w-full max-w-sm mx-4">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <h3 className="text-base font-semibold text-neutral-900">Add Number Manually</h3>
+                <p className="text-xs text-neutral-400 mt-0.5">Register a SIP DID or any number not synced from Twilio.</p>
+              </div>
+              <button onClick={() => setShowAdd(false)} className="text-neutral-400 hover:text-neutral-600">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {addError && (
+              <div className="mb-3 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">{addError}</div>
+            )}
+
+            <div className="mb-3">
+              <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">Phone Number (E.164)</label>
+              <input
+                value={addNumber}
+                onChange={(e) => setAddNumber(e.target.value)}
+                placeholder="+972747054946"
+                autoFocus
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm font-mono focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
+              />
+            </div>
+
+            <div className="mb-3">
+              <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">Friendly Name (optional)</label>
+              <input
+                value={addName}
+                onChange={(e) => setAddName(e.target.value)}
+                placeholder="Jerusalem main line"
+                className="w-full border border-neutral-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-[#F22F46] focus:ring-1 focus:ring-[#F22F46]"
+              />
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">Provider</label>
+              <div className="flex gap-2">
+                {(["sip", "twilio"] as const).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setAddProvider(p)}
+                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                      addProvider === p
+                        ? (p === "sip" ? "border-teal-400 bg-teal-50 text-teal-700" : "border-red-400 bg-red-50 text-red-700")
+                        : "border-neutral-200 text-neutral-500 hover:bg-neutral-50"
+                    }`}
+                  >
+                    {p === "sip" ? "SIP Trunk" : "Twilio"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleAddManual}
+                disabled={addSaving}
+                className="flex-1 flex items-center justify-center gap-2 bg-[#F22F46] hover:bg-[#d9243b] disabled:opacity-60 text-white text-sm font-medium py-2.5 rounded-lg transition-colors"
+              >
+                {addSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+                {addSaving ? "Adding..." : "Add Number"}
+              </button>
+              <button
+                onClick={() => setShowAdd(false)}
+                className="px-4 py-2.5 text-sm text-neutral-600 hover:text-neutral-900 border border-neutral-200 rounded-lg transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+            <p className="text-[11px] text-neutral-400 mt-3">After adding, click the ⚙ to assign an assistant.</p>
+          </div>
+        </div>
+      )}
 
       {/* Configure Assistant Modal */}
       {configuring && (
