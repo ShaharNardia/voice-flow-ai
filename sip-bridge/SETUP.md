@@ -88,7 +88,7 @@ BRIDGE_SECRET=vf_bridge_2024_secure
 FIREBASE_URL=https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net
 
 # Cloud Run media stream
-CLOUD_RUN_URL=https://voiceflow-mediastream-900818829902.me-west1.run.app
+CLOUD_RUN_URL=https://voiceflow-mediastream-900818829902.us-central1.run.app
 
 # Google Cloud TTS — download service account JSON from GCP Console
 # IAM → Service Accounts → voiceflow → Keys → Add Key → JSON
@@ -141,7 +141,7 @@ firebase deploy --only functions --project voiceflow-ai-202509231639
 ### Cloud Run
 ```bash
 gcloud run services update voiceflow-mediastream \
-  --region me-west1 \
+  --region us-central1 \
   --project voiceflow-ai-202509231639 \
   --update-env-vars "SIP_BRIDGE_URL=http://YOUR_SERVER_IP:3000,SIP_BRIDGE_SECRET=vf_bridge_2024_secure"
 ```

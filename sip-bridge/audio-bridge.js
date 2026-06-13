@@ -97,7 +97,14 @@ class AudioBridge {
     });
 
     // ── WebSocket to Cloud Run ────────────────────────────────────────────────
-    const wsUrl = `${this.cloudRunWsUrl.replace(/^http/, 'ws')}/stream/${this.callSid}`;
+    // The TwiML <Connect><Stream url="wss://…/stream/{sessionId}"/> already
+    // carries the FULL path with the correct Firestore session id. Use it
+    // verbatim — do NOT append another /stream/{callSid} (that produced
+    // ".../stream/{sessionId}/stream/{callSid}" with the wrong id, which Cloud
+    // Run rejected as "session not found"). Only synthesize the path when given
+    // a bare host (the CLOUD_RUN_URL fallback with no /stream/ segment).
+    const base = this.cloudRunWsUrl.replace(/^http/, 'ws');
+    const wsUrl = /\/stream\//.test(base) ? base : `${base.replace(/\/$/, '')}/stream/${this.callSid}`;
     this.ws = new WebSocket(wsUrl);
 
     await new Promise((resolve, reject) => {
