@@ -16,7 +16,20 @@ interface PhoneNumberDoc {
   assistantName?: string;
   country?: string;
   sid?: string;
-  provider?: "twilio" | "sip";
+  provider?: "twilio" | "sip" | "voximplant";
+}
+
+/** Provider badge — keep in sync with the assistant editor's carrier colors. */
+function ProviderBadge({ provider }: { provider?: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    sip:        { label: "SIP",        cls: "bg-teal-50 text-teal-700" },
+    voximplant: { label: "Voximplant", cls: "bg-orange-50 text-orange-700" },
+    twilio:     { label: "Twilio",     cls: "bg-red-50 text-red-700" },
+  };
+  const { label, cls } = map[provider || "twilio"] || map.twilio;
+  return (
+    <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase ${cls}`}>{label}</span>
+  );
 }
 
 /** Detect country from phone number E.164 prefix when Twilio returns wrong data */
@@ -50,7 +63,7 @@ export default function PhoneNumbersPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [addNumber, setAddNumber] = useState("");
   const [addName, setAddName] = useState("");
-  const [addProvider, setAddProvider] = useState<"sip" | "twilio">("sip");
+  const [addProvider, setAddProvider] = useState<"sip" | "twilio" | "voximplant">("sip");
   const [addError, setAddError] = useState("");
   const [addSaving, setAddSaving] = useState(false);
 
@@ -314,11 +327,7 @@ export default function PhoneNumbersPage() {
                   <td className="px-5 py-3 text-sm font-mono text-neutral-800">
                     <div className="flex items-center gap-2">
                       <span>{n.phoneNumber}</span>
-                      {n.provider === "sip" ? (
-                        <span className="inline-flex items-center px-1.5 py-0.5 bg-teal-50 text-teal-700 rounded text-[10px] font-semibold uppercase">SIP</span>
-                      ) : (
-                        <span className="inline-flex items-center px-1.5 py-0.5 bg-red-50 text-red-700 rounded text-[10px] font-semibold uppercase">Twilio</span>
-                      )}
+                      <ProviderBadge provider={n.provider} />
                     </div>
                   </td>
                   <td className="px-5 py-3 text-sm text-neutral-600">{n.friendlyName || "—"}</td>
@@ -406,17 +415,19 @@ export default function PhoneNumbersPage() {
             <div className="mb-4">
               <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">Provider</label>
               <div className="flex gap-2">
-                {(["sip", "twilio"] as const).map((p) => (
+                {([
+                  { id: "sip",        label: "SIP Trunk",  on: "border-teal-400 bg-teal-50 text-teal-700" },
+                  { id: "voximplant", label: "Voximplant", on: "border-orange-400 bg-orange-50 text-orange-700" },
+                  { id: "twilio",     label: "Twilio",     on: "border-red-400 bg-red-50 text-red-700" },
+                ] as const).map((p) => (
                   <button
-                    key={p}
-                    onClick={() => setAddProvider(p)}
-                    className={`flex-1 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                      addProvider === p
-                        ? (p === "sip" ? "border-teal-400 bg-teal-50 text-teal-700" : "border-red-400 bg-red-50 text-red-700")
-                        : "border-neutral-200 text-neutral-500 hover:bg-neutral-50"
+                    key={p.id}
+                    onClick={() => setAddProvider(p.id)}
+                    className={`flex-1 px-2 py-2 rounded-lg text-xs font-medium border transition-colors ${
+                      addProvider === p.id ? p.on : "border-neutral-200 text-neutral-500 hover:bg-neutral-50"
                     }`}
                   >
-                    {p === "sip" ? "SIP Trunk" : "Twilio"}
+                    {p.label}
                   </button>
                 ))}
               </div>
