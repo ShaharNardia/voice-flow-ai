@@ -68,6 +68,12 @@ class AudioBridge {
     this._onAudioOut   = null;  // callback(mulawBuf)
     this._onBargein    = null;  // callback()
     this.started       = false;
+    // Outbound audio that arrived from Cloud Run BEFORE we learned Asterisk's
+    // RTP address (the bot greets first while the caller is silent). Buffer it
+    // and flush the moment the first inbound packet reveals where to send.
+    // Capped so a never-arriving inbound leg can't grow memory unbounded.
+    this._pendingOut   = [];
+    this._maxPendingOut = 500;  // ~10s of 20ms µ-law frames
   }
 
   /** Set callback called when Cloud Run sends audio that should go to caller */
@@ -88,7 +94,11 @@ class AudioBridge {
       // Remember where Asterisk is sending from (for the return path)
       if (!this.asteriskAddr) {
         this.asteriskAddr = { address: rinfo.address, port: rinfo.port };
-        console.log(`[Audio] Asterisk RTP from ${rinfo.address}:${rinfo.port}`);
+        console.log(`[Audio] Asterisk RTP from ${rinfo.address}:${rinfo.port}` +
+          (this._pendingOut.length ? ` — flushing ${this._pendingOut.length} buffered frames` : ''));
+        // Flush any greeting audio that arrived before we knew where to send it.
+        const queued = this._pendingOut; this._pendingOut = [];
+        for (const buf of queued) this._sendToAsterisk(buf);
       }
       if (msg.length <= RTP_HEADER_SIZE) return;
 
@@ -139,6 +149,7 @@ class AudioBridge {
           this._sendToAsterisk(audio);
           if (this._onAudioOut) this._onAudioOut(audio);
         } else if (msg.event === 'clear') {
+          this._pendingOut = [];   // discard buffered audio not yet sent (barge-in)
           if (this._onBargein) this._onBargein();
         }
       } catch (_) {}
@@ -180,7 +191,12 @@ class AudioBridge {
   }
 
   _sendToAsterisk(mulawBuf) {
-    if (!this.asteriskAddr || !this.udpSocket) return;
+    if (!this.udpSocket) return;
+    // Address not learned yet (caller silent, bot greeting first) → buffer.
+    if (!this.asteriskAddr) {
+      if (this._pendingOut.length < this._maxPendingOut) this._pendingOut.push(mulawBuf);
+      return;
+    }
 
     // Build minimal RTP header
     const packet = Buffer.allocUnsafe(RTP_HEADER_SIZE + mulawBuf.length);
