@@ -1,9 +1,66 @@
 # Asterisk → VoiceFlow — Complete Setup & Test
 
-Everything to configure on **your Asterisk box** to connect it to VoiceFlow,
-plus exactly how to test. Asterisk talks to the local `sip-bridge` Node app
-(this folder) over ARI; the bridge translates to the cloud. You configure
-Asterisk + run the bridge on the **same** server.
+> ## ⚠️ READ FIRST — two paths, do not mix them
+> This document has a **greenfield path** (Path A) that *replaces* `extensions.conf`
+> and adds a *static* trunk. **DO NOT apply Path A to an existing PBX.**
+>
+> If your Asterisk already runs a production dialplan (queues, conferences,
+> routing) and/or **PJSIP Realtime** (`ps_endpoints => odbc`, endpoints in the DB) —
+> e.g. the **mAIestro** PBX — applying Path A's file replacements will **destroy**
+> your dialplan and collide with your existing trunk. Use **Path B (additive)**
+> below instead: it touches **only** `ari.conf` (added section) + runs the bridge +
+> sets cloud env vars, and changes **nothing** in your PBX.
+>
+> Quick test for which path you're on:
+> ```bash
+> asterisk -rx "dialplan show" | wc -l      # >100 lines → existing PBX → Path B
+> asterisk -rx "pjsip show endpoints"       # endpoints you didn't put in pjsip.conf → Realtime → Path B
+> ```
+
+---
+
+## Path B — Existing PBX (additive, non-destructive)  ← use this if in doubt
+
+Your DID routing already sends AI calls to `Stasis(voiceflow-app)` (e.g. a DID with
+`route_type = "AI / Stasis"`). The telephony is already wired. The bot is silent
+only because the **bridge process isn't running** (`ari show apps` is empty — the
+`voiceflow-app` Stasis app registers *only* while the bridge is connected). To
+bring it up, change nothing in `extensions.conf` or your trunk; just:
+
+1. **`ari.conf`** — add a user (ADD a section; do not replace `[general]` if it exists):
+   ```ini
+   [voiceflow]
+   type = user
+   password = CHANGE_ME_ari_secret      ; must equal ARI_PASS in sip-bridge/.env
+   read_only = no
+   ```
+   Then `asterisk -rx "module reload res_ari.so"`.
+2. **`http.conf`** — confirm it's already enabled on `127.0.0.1:8088` (it is on mAIestro). No change if so.
+3. **Bridge `.env`** — set `ARI_PASS` to match step 1, and pin the **existing** trunk
+   for outbound (Realtime auto-detect can't read it from a near-empty static file):
+   ```env
+   ARI_PASS=CHANGE_ME_ari_secret
+   SIP_OUTBOUND_TRUNK=operator-trunk     ; your real trunk name — NOT a new static one
+   ```
+4. **Start the bridge** → `pm2 start index.js --name voiceflow-bridge` →
+   `asterisk -rx "ari show apps"` now shows `voiceflow-app`.
+5. **Cloud env** (step 7 below).
+
+> Do **NOT** use the bridge's `/sip/trunks` · `/sip/extensions` · `/sip/routing`
+> admin endpoints on a Realtime/large PBX — they read & rewrite the static
+> `pjsip.conf`/`extensions.conf` and are meant only for the greenfield deployment.
+
+---
+
+## Path A — Greenfield only (dedicated single-bot box)
+
+Everything below assumes a **fresh** Asterisk with no production dialplan. It
+*replaces* `extensions.conf` and adds a *static* trunk. **Never run this on an
+existing PBX** — see Path B.
+
+Asterisk talks to the local `sip-bridge` Node app (this folder) over ARI; the
+bridge translates to the cloud. You configure Asterisk + run the bridge on the
+**same** server.
 
 ```
 SIP operator ──SIP/RTP──▶ Asterisk ──Stasis(voiceflow-app)──▶ sip-bridge (localhost)
