@@ -2568,10 +2568,21 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   // to the model's supported set, falling back to Aoede.
   const NATIVE_AUDIO_VOICES = ["Aoede","Charon","Fenrir","Kore","Puck","Zephyr","Leda","Orus"];
   const LIVE_VOICES         = ["Aoede","Charon","Fenrir","Kore","Puck","Orbit","Zephyr","Leda","Orus"];
+  // Gender of each known voice, so an unsupported choice falls back to a voice
+  // of the SAME gender (picking "Orbit"=male must NOT silently become Aoede=female).
+  const VOICE_GENDER = {
+    Aoede:"female", Kore:"female", Leda:"female", Zephyr:"female",
+    Puck:"male", Charon:"male", Fenrir:"male", Orus:"male", Orbit:"male",
+  };
   const allowedVoices = hybridSTT ? NATIVE_AUDIO_VOICES : LIVE_VOICES;
-  const geminiVoice = allowedVoices.includes(rawVoice) ? rawVoice : "Aoede";
-  if (geminiVoice !== rawVoice) {
-    console.warn(`[${callSessionId}] [GL] voice "${rawVoice}" unsupported on ${hybridSTT ? "native-audio" : "live"} model — using ${geminiVoice}`);
+  let geminiVoice;
+  if (allowedVoices.includes(rawVoice)) {
+    geminiVoice = rawVoice;
+  } else {
+    // Fall back to a supported voice matching the requested gender (male→Charon, female→Aoede).
+    const wantMale = (VOICE_GENDER[rawVoice] || (assistant.callerGender === "male" ? "male" : "")) === "male";
+    geminiVoice = wantMale ? "Charon" : "Aoede";
+    console.warn(`[${callSessionId}] [GL] voice "${rawVoice}" unsupported on ${hybridSTT ? "native-audio" : "live"} model — using ${geminiVoice} (${wantMale ? "male" : "female"})`);
   }
 
   const vadMode        = assistant.realtimeVadMode        || "semantic";
