@@ -2914,7 +2914,11 @@ exports.twilioVoiceWebhook = onRequest(
           companyPhone: incomingNumber,
           companyName: companyName,  // Must use the resolved companyName (prefers specificAssistant.companyName)
           assistantName: assistantName,  // Must use the resolved assistantName (prefers specificAssistant)
-          telephonyProvider: "twilio",
+          // Carrier detection: the SIP bridge posts AccountSid = BRIDGE_SECRET,
+          // real Twilio posts an "AC..." account SID. Tag the true carrier so
+          // cost attribution is right AND in-call updateCall (hangup/transfer)
+          // routes to the SIP bridge instead of 404ing against Twilio REST.
+          telephonyProvider: String(req.body?.AccountSid || "").startsWith("AC") ? "twilio" : "sip",
           status: "in-progress",
           twilioSid: callSid,
           callType: "inbound",
