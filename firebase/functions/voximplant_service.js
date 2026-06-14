@@ -178,6 +178,23 @@ async function handleWebhook(req, res) {
 
   logger.info(`[VoxImplant] Webhook event=${event} session=${callSessionId}`);
 
+  // INBOUND BOOTSTRAP — the VoxEngine scenario has no session for an inbound
+  // call (rules pass no customData). It POSTs inbound.start with {from, to(DID)};
+  // we resolve the DID→assistant, create the session, and hand back the id +
+  // Cloud Run URL so the scenario can open the audio WebSocket. Handled BEFORE
+  // the callSessionId guard because no session exists yet.
+  if (event === "inbound.start") {
+    try {
+      const voxInbound = require("./voximplant_inbound.js");
+      const result = await voxInbound.createInboundSession({ from: body.from, to: body.to });
+      if (!result) return res.status(404).json({ error: `No assistant mapped to DID ${body.to}` });
+      return res.json({ ok: true, ...result });
+    } catch (e) {
+      logger.error("[VoxImplant] inbound.start failed:", e.message);
+      return res.status(500).json({ error: e.message });
+    }
+  }
+
   if (!callSessionId) return res.status(400).json({ error: "Missing callSessionId" });
 
   try {

@@ -48,9 +48,14 @@ try {
   Logger.write("[VFA] Failed to parse customData: " + e.message);
 }
 
-const SESSION_ID  = cfg.callSessionId  || ("vox-" + Date.now());
-const CLOUD_RUN   = cfg.cloudRunUrl    || "";   // wss://mediastream-xxx.run.app/voximplant
-const WEBHOOK_URL = cfg.webhookUrl     || "";   // https://.../voxImplantWebhook
+// Static fallbacks so an INBOUND scenario (which receives no customData) can
+// still reach the platform. Override via customData for staging.
+const DEFAULT_WEBHOOK_URL = "https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net/voxImplantWebhook";
+const DEFAULT_CLOUD_RUN   = "https://voiceflow-mediastream-myg46khq7q-uc.a.run.app";
+
+let SESSION_ID  = cfg.callSessionId  || "";     // empty for inbound until bootstrap
+let CLOUD_RUN   = cfg.cloudRunUrl    || "";     // resolved at bootstrap for inbound
+const WEBHOOK_URL = cfg.webhookUrl   || DEFAULT_WEBHOOK_URL;
 const MODE        = cfg.mode || (cfg.to ? "outbound" : "inbound");
 const TO          = cfg.to;
 const FROM        = cfg.from   || cfg.callerId;
@@ -59,6 +64,8 @@ const GREETING    = cfg.greeting || "";
 let pstnCall   = null;
 let ws         = null;
 let answeredAt = 0;
+let inboundDid = TO || "";   // for inbound, set from CallAlerting destination
+let FROM_NUM   = FROM || "";
 let mediaBridgedInbound  = false;
 let mediaBridgedOutbound = false;
 
@@ -90,15 +97,41 @@ function teardown(reason) {
   VoxEngine.terminate();
 }
 
+// ── Inbound bootstrap: ask the platform to create a session for this DID ──
+// Inbound rules carry no customData, so we resolve the session at answer time.
+function bootstrapInbound(cb) {
+  Logger.write("[VFA] inbound bootstrap: from=" + FROM_NUM + " to=" + inboundDid);
+  try {
+    Net.httpRequestAsync(WEBHOOK_URL, {
+      method: "POST",
+      headers: ["Content-Type: application/json"],
+      postData: JSON.stringify({ event: "inbound.start", from: FROM_NUM, to: inboundDid }),
+    }).then(function (res) {
+      let d = {};
+      try { d = JSON.parse(res.text || "{}"); } catch (_) {}
+      if (!d.callSessionId) {
+        Logger.write("[VFA] inbound bootstrap: no callSessionId in response — " + (res.text || "").slice(0, 200));
+        teardown("inbound bootstrap: no session");
+        return;
+      }
+      SESSION_ID = d.callSessionId;
+      CLOUD_RUN  = d.cloudRunUrl || DEFAULT_CLOUD_RUN;
+      Logger.write("[VFA] inbound bootstrap ok: session=" + SESSION_ID);
+      cb();
+    }).catch(function (err) {
+      Logger.write("[VFA] inbound bootstrap failed: " + (err && err.message ? err.message : err));
+      teardown("inbound bootstrap error");
+    });
+  } catch (e) {
+    Logger.write("[VFA] inbound bootstrap threw: " + e.message);
+    teardown("inbound bootstrap threw");
+  }
+}
+
 // ── Open WebSocket to Cloud Run and bridge audio ─────────────────────────
 
 function openBridge() {
-  if (!CLOUD_RUN) {
-    Logger.write("[VFA] cloudRunUrl missing — terminating");
-    emit("call.failed", { reason: "missing_cloudRunUrl" });
-    teardown("no cloud run url");
-    return;
-  }
+  if (!CLOUD_RUN) CLOUD_RUN = DEFAULT_CLOUD_RUN;
 
   // Use path-style URL — the existing Twilio path uses /stream/:id because
   // some upstream proxies strip the WS upgrade query string. We mirror the
@@ -162,8 +195,17 @@ function attachCallHandlers(call) {
   call.addEventListener(CallEvents.Connected, () => {
     answeredAt = Date.now();
     Logger.write("[VFA] call connected, id=" + call.id());
-    emit("call.connected", { at: answeredAt });
-    openBridge();
+    // Inbound with no pre-created session → bootstrap (resolve DID→session),
+    // then emit connected + open the bridge. Outbound already has SESSION_ID.
+    if (MODE === "inbound" && !SESSION_ID) {
+      bootstrapInbound(function () {
+        emit("call.connected", { at: answeredAt });
+        openBridge();
+      });
+    } else {
+      emit("call.connected", { at: answeredAt });
+      openBridge();
+    }
   });
 
   call.addEventListener(CallEvents.Disconnected, () => {
@@ -198,7 +240,9 @@ if (MODE === "outbound") {
   // application. The platform creates the Call object for us and dispatches
   // VoxEngine.events.CallAlerting.
   VoxEngine.addEventListener(AppEvents.CallAlerting, (e) => {
-    Logger.write("[VFA] inbound CallAlerting from " + e.callerid);
+    Logger.write("[VFA] inbound CallAlerting from " + e.callerid + " to " + (e.destination || e.called));
+    FROM_NUM   = e.callerid || FROM_NUM;
+    inboundDid = e.destination || e.called || inboundDid;   // the dialed DID
     attachCallHandlers(e.call);
     e.call.answer();
   });
