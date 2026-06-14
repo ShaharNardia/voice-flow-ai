@@ -2017,7 +2017,22 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
     const asteriskConfig = await asteriskService.getAsteriskConfig(companyId);
     const useAsterisk    = asteriskConfig !== null;
 
-    const assistantWantsVox = rawAssistantDefinition?.telephonyProvider === "voximplant";
+    // GLOBAL TELEPHONY OVERRIDE (admin master switch, default off). When set to
+    // "voximplant", every Twilio-assigned (or unset) assistant routes OUTBOUND
+    // via Voximplant. Explicit per-assistant sip/voximplant are untouched. This
+    // is the deliberate "move the whole platform off Twilio" lever — distinct
+    // from the per-company flag we intentionally do NOT honor (see note above).
+    let globalTelephonyOverride = "none";
+    try {
+      const polSnap = await getFirestore().doc("system_policies/global").get();
+      if (polSnap.exists) globalTelephonyOverride = polSnap.data().globalTelephonyOverride || "none";
+    } catch (e) {
+      logger.warn("placeCall: could not read globalTelephonyOverride", { error: e.message });
+    }
+    const assistantProvider = rawAssistantDefinition?.telephonyProvider || "twilio";
+    const overrideToVox = globalTelephonyOverride === "voximplant" && assistantProvider === "twilio";
+
+    const assistantWantsVox = assistantProvider === "voximplant" || overrideToVox;
     const voxConfig = (!useAsterisk && assistantWantsVox)
       ? await voximplantService.getVoxConfig(companyId, { requireProviderFlag: false })
       : null;
@@ -2026,6 +2041,7 @@ exports.placeCall = onRequest({...corsOptions, minInstances: 1, memory: "512MiB"
     logger.info("placeCall provider decision", {
       companyId,
       assistantProvider: rawAssistantDefinition?.telephonyProvider || null,
+      globalTelephonyOverride, overrideToVox,
       useAsterisk, useVoxImplant,
     });
 

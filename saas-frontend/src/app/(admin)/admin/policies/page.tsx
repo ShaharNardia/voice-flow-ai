@@ -12,7 +12,7 @@
 import { useEffect, useState } from "react";
 import {
   Loader2, Save, RotateCcw, AlertTriangle, Check, ChevronDown, ChevronUp,
-  Mic2, MessageSquare, Clock, BookOpen, Wrench, Eye,
+  Mic2, MessageSquare, Clock, BookOpen, Wrench, Eye, Network,
 } from "lucide-react";
 import { getSystemPolicies, updateSystemPolicies, type SystemPolicy } from "@/lib/firebase-functions";
 
@@ -131,6 +131,64 @@ export default function SystemPoliciesPage() {
       >
         <DisplayToggles policy={policy} defaults={defaults} onSave={save} saving={saving} />
       </Section>
+
+      <Section
+        id="telephony" icon={<Network className="w-4 h-4" />} title="Global Telephony Carrier"
+        description="Master switch to route ALL Twilio-assigned outbound calls through Voximplant instead. The lever for moving the platform off Twilio."
+        expanded={expanded} setExpanded={setExpanded}
+      >
+        <TelephonyOverrideEditor policy={policy} defaults={defaults} onSave={save} saving={saving} />
+      </Section>
+    </div>
+  );
+}
+
+// ── Global telephony carrier override ────────────────────────────────────────
+
+function TelephonyOverrideEditor({ policy, defaults, onSave, saving }: {
+  policy: SystemPolicy; defaults: SystemPolicy;
+  onSave: (p: Partial<SystemPolicy>) => void;
+  saving: boolean;
+}) {
+  const current = (policy.globalTelephonyOverride ?? defaults.globalTelephonyOverride ?? "none") as "none" | "voximplant";
+  const [val, setVal] = useState<"none" | "voximplant">(current);
+  const dirty = val !== current;
+  return (
+    <div className="space-y-3">
+      <Field
+        label="Outbound carrier override"
+        hint="‘Voximplant’ routes every assistant whose carrier is Twilio (or unset) through Voximplant for OUTBOUND calls. Per-assistant SIP/Voximplant choices are untouched. No-ops safely if the company has no Voximplant credentials (falls back to Twilio)."
+      >
+        <select
+          value={val}
+          onChange={(e) => setVal(e.target.value as "none" | "voximplant")}
+          className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm"
+        >
+          <option value="none">None — normal per-assistant routing (Twilio default)</option>
+          <option value="voximplant">Voximplant — route all Twilio outbound via Voximplant</option>
+        </select>
+      </Field>
+      {val === "voximplant" && (
+        <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-amber-800 text-xs">
+          <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+          <span>
+            Affects <b>outbound dialing only</b> — inbound calls still arrive on whatever carrier owns the DID
+            (porting numbers to Voximplant is a separate provisioning step). Verify a live Voximplant call works
+            before relying on this for production traffic.
+          </span>
+        </div>
+      )}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={() => onSave({ globalTelephonyOverride: val })}
+          disabled={saving || !dirty}
+          className="flex items-center gap-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white text-sm font-semibold rounded-lg disabled:opacity-40"
+        >
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+          Save
+        </button>
+        {dirty && <span className="text-xs text-neutral-400">unsaved</span>}
+      </div>
     </div>
   );
 }

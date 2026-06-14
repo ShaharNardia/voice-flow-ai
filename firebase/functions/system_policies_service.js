@@ -99,6 +99,17 @@ const DEFAULT_POLICY = {
 
   // Whether the strip-meta pass runs (set false to debug what model emits raw)
   stripMetaEnabled: true,
+
+  // GLOBAL TELEPHONY OVERRIDE — the master "switch everything off Twilio" lever.
+  //   "none"       → normal per-assistant routing (default).
+  //   "voximplant" → every assistant whose carrier is Twilio (or unset) places
+  //                  OUTBOUND calls via Voximplant instead. Explicit per-assistant
+  //                  "sip"/"voximplant" are unaffected. No-ops safely if the
+  //                  company has no Voximplant credentials (falls back to Twilio).
+  // NOTE: this only moves OUTBOUND dialing. Inbound carrier is determined by
+  // where the DID physically lives (porting the numbers to Voximplant is a
+  // provisioning step, not a software toggle).
+  globalTelephonyOverride: "none",
 };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

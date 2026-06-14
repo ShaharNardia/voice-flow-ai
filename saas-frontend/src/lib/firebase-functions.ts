@@ -645,6 +645,7 @@ export interface SystemPolicy {
   maxCallDurationSec?: number;
   showToolCallsInTranscript?: boolean;
   stripMetaEnabled?: boolean;
+  globalTelephonyOverride?: "none" | "voximplant";
 }
 export const getSystemPolicies = () =>
   httpGet<{ policy: SystemPolicy; defaults: SystemPolicy }>("/getSystemPolicies");
