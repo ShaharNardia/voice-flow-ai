@@ -47,6 +47,49 @@ which targets the right service and `cd`s into the right source dir.
   **Standard** with an **ElevenLabs** Hebrew voice (Deepgram-he STT + ElevenLabs
   TTS), or **Voice-to-Voice** (OpenAI Realtime). See docs/HEBREW.md.
 
+## Voximplant inbound test
+
+Validates an inbound Voximplant call end-to-end. The backend "inbound brain"
+(`inbound.start`) is verified; the VoxEngine scenario half needs a live call.
+
+**Setup (in the Voximplant panel):**
+1. Scenarios → paste `voximplant/scenario.js`, save.
+2. Attach it to a Rule on the app; point a DID at that rule.
+3. In our UI: Phone Numbers → **Add Manually** the DID (defaults to Voximplant),
+   then ⚙ → assign an assistant whose Voice Provider is **gemini-hybrid**
+   (so `inbound.start` resolves the DID → builds a realtime session).
+
+**Verify the backend resolver first (no call needed):**
+```bash
+curl -s -X POST https://voximplantwebhook-myg46khq7q-uc.a.run.app \
+  -H "Content-Type: application/json" \
+  -d '{"event":"inbound.start","from":"+972500000000","to":"<DID digits>"}'
+# Expect: {"ok":true,"callSessionId":"VX…","cloudRunUrl":"…","assistantName":"…"}
+# 404 "No assistant mapped" → the DID isn't in any Company.phoneNumberMap yet.
+```
+
+**Place the call, capture both logs:**
+- Voximplant scenario **Logger**: expect `inbound bootstrap ok: session=VX…`,
+  `WS open`. Watch for `sendMediaTo failed` or `inbound bootstrap failed`.
+- Cloud Run: `connected to Gemini Live → Triggering greeting →
+  turn complete (turnAudioBytes>0)`.
+  ```bash
+  gcloud logging read 'resource.labels.service_name="voiceflow-mediastream" AND textPayload:"VX…"' \
+    --project voiceflow-ai-202509231639 --freshness=15m --format="value(timestamp,textPayload)" | sort
+  ```
+
+**Interpreting failure:**
+| Symptom | Cause | Fix |
+|---|---|---|
+| Logger has no `WS open` | bootstrap failed / wrong webhook URL | check the curl above; confirm `DEFAULT_WEBHOOK_URL` in scenario.js |
+| Cloud Run never logs the `VX…` session | WS never connected | check the `/voximplant/stream` URL the scenario built |
+| Audio garbled / wrong speed | VoxEngine WS media ≠ PCM16 @ 8 kHz | adjust the codec/sample-rate in `voximplant_audio.js` |
+| `turnAudioBytes>0` but caller hears nothing | `ws.sendMediaTo(call)` not bridged | check the scenario's `openBridge()` media wiring |
+
+Two assumptions only a live call confirms: VoxEngine WS media format (raw PCM16
+@ 8 kHz binary) and the VoxEngine API surface (`createWebSocket`, `sendMediaTo`,
+`Net.httpRequestAsync().then`).
+
 ## Rollback
 
 - **Cloud Run:** revisions are retained. List: `gcloud run revisions list --service voiceflow-mediastream --region us-central1`. Shift traffic: `gcloud run services update-traffic voiceflow-mediastream --region us-central1 --to-revisions <REV>=100`.
