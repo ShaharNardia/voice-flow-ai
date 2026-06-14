@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { releasePhoneNumber, listPhoneNumbers, configurePhoneNumber, assistantsList, type Assistant } from "@/lib/firebase-functions";
+import { releasePhoneNumber, listPhoneNumbers, configurePhoneNumber, assistantsList, getSystemPolicies, type Assistant } from "@/lib/firebase-functions";
 import { useAuth } from "@/hooks/useAuth";
 import Link from "next/link";
 import { Phone, Plus, Trash2, RefreshCw, Loader2, Settings, X, Check, Server, PencilLine } from "lucide-react";
@@ -64,6 +64,16 @@ export default function PhoneNumbersPage() {
   const [addNumber, setAddNumber] = useState("");
   const [addName, setAddName] = useState("");
   const [addProvider, setAddProvider] = useState<"sip" | "twilio" | "voximplant">("sip");
+
+  // Global telephony override (admin master switch). When "voximplant", new
+  // numbers default to Voximplant and we surface that this is the active carrier.
+  const [globalOverride, setGlobalOverride] = useState<"none" | "voximplant">("none");
+  useEffect(() => {
+    if (!isAdmin) return;
+    getSystemPolicies()
+      .then((r) => setGlobalOverride((r.policy?.globalTelephonyOverride as "none" | "voximplant") || "none"))
+      .catch(() => {});
+  }, [isAdmin]);
   const [addError, setAddError] = useState("");
   const [addSaving, setAddSaving] = useState(false);
 
@@ -266,7 +276,7 @@ export default function PhoneNumbersPage() {
           </button>
           {isAdmin && (
             <button
-              onClick={() => { setAddError(""); setShowAdd(true); }}
+              onClick={() => { setAddError(""); setAddProvider(globalOverride === "voximplant" ? "voximplant" : "sip"); setShowAdd(true); }}
               title="Manually register a number (e.g. a SIP DID)"
               className="flex items-center gap-2 border border-neutral-200 hover:bg-neutral-50 text-neutral-700 text-sm font-medium px-3 py-2 rounded-lg transition-colors"
             >
@@ -304,6 +314,17 @@ export default function PhoneNumbersPage() {
 
       {syncError && (
         <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-600 text-sm">{syncError}</div>
+      )}
+
+      {isAdmin && globalOverride === "voximplant" && (
+        <div className="mb-4 p-3 bg-orange-50 border border-orange-200 rounded-lg text-orange-800 text-sm flex items-start gap-2">
+          <Server className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>
+            <b>Global carrier is Voximplant.</b> New numbers default to Voximplant, and Twilio-assigned assistants
+            route outbound via Voximplant. To add a Voximplant DID, provision it in the Voximplant console, then
+            register it here with <b>Add Manually</b>. (Change this in <Link href="/admin/policies" className="underline">Admin → Policies</Link>.)
+          </span>
+        </div>
       )}
 
       <div className="bg-white border border-neutral-200 rounded-xl overflow-hidden">
