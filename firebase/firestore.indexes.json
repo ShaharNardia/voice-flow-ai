@@ -409,6 +409,11 @@
         { "order": "ASCENDING",  "queryScope": "COLLECTION" },
         { "order": "DESCENDING", "queryScope": "COLLECTION" }
       ]
+    },
+    {
+      "collectionGroup": "knowledge_chunks",
+      "fieldPath": "embedding",
+      "indexes": []
     }
   ]
 }

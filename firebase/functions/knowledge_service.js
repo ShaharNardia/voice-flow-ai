@@ -1066,9 +1066,12 @@ async function _processUrl(uid, assistantId, url) {
         embeddings.push(...await embedTexts(pageChunks.slice(i, i + 50)));
       }
       const now = FieldValue.serverTimestamp();
-      for (let i = 0; i < pageChunks.length; i += 20) {
+      // 10 docs/commit: even before the embedding index-exemption fully
+      // propagates, a 10-doc commit stays well under Firestore's transaction
+      // size limit ("Transaction too big" on the 1536-dim embedding arrays).
+      for (let i = 0; i < pageChunks.length; i += 10) {
         const batch = db.batch();
-        pageChunks.slice(i, i + 20).forEach((content, j) => {
+        pageChunks.slice(i, i + 10).forEach((content, j) => {
           batch.set(db.collection("knowledge_chunks").doc(), {
             assistantId, ownerId: uid, content, embedding: embeddings[i + j],
             sourceFile: page.url, sourceRoot: url, sourceType: "url",
