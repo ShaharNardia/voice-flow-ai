@@ -1023,39 +1023,14 @@ async function _processUrl(uid, assistantId, url) {
   const pages = await crawlSite(url);
   logger.info(`[KB] Crawled ${pages.length} pages from ${url}`);
 
-  // 2. For each page, chunk its text and collect all chunks with their source page URL.
-  const allChunks = [];           // {content, sourceUrl, chunkIndexOnPage}
-  for (const page of pages) {
-    const pageText = `${page.url}\n\n${page.text}`; // prepend URL so chunks have context
-    const pageChunks = chunkText(pageText);
-    for (let i = 0; i < pageChunks.length; i++) {
-      allChunks.push({content: pageChunks[i], sourceUrl: page.url, chunkIndexOnPage: i});
-    }
-  }
-  if (allChunks.length === 0) throw new Error("No text chunks extracted from crawled pages");
-
-  // 3. Embed in batches of 50.
-  const allEmbeddings = [];
-  for (let i = 0; i < allChunks.length; i += 50) {
-    const slice = allChunks.slice(i, i + 50).map((c) => c.content);
-    const embeddings = await embedTexts(slice);
-    allEmbeddings.push(...embeddings);
-  }
-
   const db = getFirestore();
-  const now = FieldValue.serverTimestamp();
 
-  // 4. Delete any existing chunks that came from any page under this site root.
-  //    Each chunk (~6 KB embedding + text) means ~500 deletes still stays
-  //    under Firestore's 10 MB/txn limit, but we chunk at 400 for safety.
-  const existingByRoot = await db.collection("knowledge_chunks")
-    .where("assistantId", "==", assistantId)
-    .where("sourceRoot", "==", url)
-    .get();
-  const existingLegacy = await db.collection("knowledge_chunks")
-    .where("assistantId", "==", assistantId)
-    .where("sourceFile", "==", url)
-    .get();
+  // 2. Delete existing chunks for this root FIRST so a re-sync replaces cleanly.
+  //    (Nothing to delete on a first-time add.)
+  const [existingByRoot, existingLegacy] = await Promise.all([
+    db.collection("knowledge_chunks").where("assistantId", "==", assistantId).where("sourceRoot", "==", url).get(),
+    db.collection("knowledge_chunks").where("assistantId", "==", assistantId).where("sourceFile", "==", url).get(),
+  ]);
   const toDelete = [];
   const seenIds = new Set();
   [existingByRoot, existingLegacy].forEach((snap) => snap.forEach((doc) => {
@@ -1067,39 +1042,52 @@ async function _processUrl(uid, assistantId, url) {
     await batch.commit();
   }
 
-  // 5. Batch-write new chunks. Firestore caps each batch at 10 MB. Each
-  //    doc is ~6 KB embedding + up to ~2 KB text = ~8 KB; 100 docs/batch
-  //    gives ~800 KB per commit â€" safe margin even for very long chunks.
-  const WRITE_BATCH_SIZE = 20;
-  for (let i = 0; i < allChunks.length; i += WRITE_BATCH_SIZE) {
-    const batch = db.batch();
-    const slice = allChunks.slice(i, i + WRITE_BATCH_SIZE);
-    slice.forEach((c, j) => {
-      const globalIdx = i + j;
-      const docRef = db.collection("knowledge_chunks").doc();
-      batch.set(docRef, {
-        assistantId,
-        ownerId: uid,
-        content: c.content,
-        embedding: allEmbeddings[globalIdx],
-        sourceFile: c.sourceUrl,
-        sourceRoot: url,
-        sourceType: "url",
-        storagePath: null,
-        chunkIndex: globalIdx,
-        chunkIndexOnPage: c.chunkIndexOnPage,
-        syncedAt: now,
-        createdAt: now,
-      });
-    });
-    await batch.commit();
+  // 3. Per-page: chunk -> embed -> WRITE IMMEDIATELY, each page isolated.
+  //    This makes the crawl resilient instead of all-or-nothing: one page's
+  //    failure (or hitting the time budget before the 540s function limit)
+  //    leaves every page already written intact and visible in the coverage
+  //    report. Previously a single embed/write error or a timeout discarded
+  //    the entire crawl — which is exactly what stuck on large/slow sites.
+  const startedAt = Date.now();
+  const TIME_BUDGET_MS = 480000;   // stop gracefully ~1 min before the 540s limit
+  let chunksCreated = 0, pagesWritten = 0, globalIdx = 0, partial = false;
+  const failedPages = [];
+  for (const page of pages) {
+    if (Date.now() - startedAt > TIME_BUDGET_MS) {
+      partial = true;
+      logger.warn(`[KB] time budget reached after ${pagesWritten}/${pages.length} pages for ${url}`);
+      break;
+    }
+    try {
+      const pageChunks = chunkText(`${page.url}\n\n${page.text}`);
+      if (pageChunks.length === 0) continue;
+      const embeddings = [];
+      for (let i = 0; i < pageChunks.length; i += 50) {
+        embeddings.push(...await embedTexts(pageChunks.slice(i, i + 50)));
+      }
+      const now = FieldValue.serverTimestamp();
+      for (let i = 0; i < pageChunks.length; i += 20) {
+        const batch = db.batch();
+        pageChunks.slice(i, i + 20).forEach((content, j) => {
+          batch.set(db.collection("knowledge_chunks").doc(), {
+            assistantId, ownerId: uid, content, embedding: embeddings[i + j],
+            sourceFile: page.url, sourceRoot: url, sourceType: "url",
+            storagePath: null, chunkIndex: globalIdx++, chunkIndexOnPage: i + j,
+            syncedAt: now, createdAt: now,
+          });
+        });
+        await batch.commit();
+      }
+      chunksCreated += pageChunks.length;
+      pagesWritten++;
+    } catch (e) {
+      failedPages.push(page.url);
+      logger.warn(`[KB] page failed (${page.url}): ${e.message}`);
+    }
   }
 
-  return {
-    chunksCreated: allChunks.length,
-    pagesCrawled: pages.length,
-    url,
-  };
+  if (chunksCreated === 0) throw new Error("No text chunks extracted from crawled pages");
+  return { chunksCreated, pagesCrawled: pages.length, pagesWritten, failedPages: failedPages.length, partial, url };
 }
 
 // â"€â"€ Add a URL as a knowledge source â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€

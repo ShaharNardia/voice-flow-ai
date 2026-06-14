@@ -1088,14 +1088,22 @@ function AssistantEdit() {
     try { new URL(url); } catch { setKbError("Invalid URL — include https://"); return; }
     setUrlAdding(true); setKbError(""); setKbUploadStatus("Crawling site & embedding pages — this can take ~1 minute...");
     try {
-      const result = await knowledgeProcessUrl({ assistantId: id, url });
-      const pagesNote = result.pagesCrawled ? ` across ${result.pagesCrawled} page${result.pagesCrawled === 1 ? "" : "s"}` : "";
-      setKbUploadStatus(`Done — ${result.chunksCreated} chunks indexed${pagesNote}`);
+      const result = await knowledgeProcessUrl({ assistantId: id, url }) as { chunksCreated: number; pagesCrawled?: number; pagesWritten?: number; partial?: boolean };
+      const written = result.pagesWritten ?? result.pagesCrawled;
+      const pagesNote = written ? ` across ${written} page${written === 1 ? "" : "s"}` : "";
+      setKbUploadStatus(result.partial
+        ? `Partial — indexed ${result.chunksCreated} chunks${pagesNote} (crawl hit the time limit; click "view coverage" to see what was captured, then Re-sync for the rest)`
+        : `Done — ${result.chunksCreated} chunks indexed${pagesNote}`);
       setUrlInput("");
       await loadKbFiles();
-      setTimeout(() => setKbUploadStatus(""), 4000);
+      setTimeout(() => setKbUploadStatus(""), result.partial ? 12000 : 4000);
     } catch (e: unknown) {
-      setKbError(e instanceof Error ? e.message : "Failed to add URL");
+      // The crawl now writes pages incrementally, so even a timeout/dropped
+      // connection usually leaves pages stored. Reload the list so the user
+      // sees what was captured rather than assuming total failure.
+      await loadKbFiles().catch(() => {});
+      setKbError((e instanceof Error ? e.message : "Crawl interrupted") +
+        " — some pages may still have been captured; check the list below and click \"view coverage\". Re-sync to finish.");
       setKbUploadStatus("");
     } finally {
       setUrlAdding(false);
