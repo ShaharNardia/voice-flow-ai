@@ -493,6 +493,19 @@ class GeminiBridge extends EventEmitter {
         return;
       }
 
+      // Voice not available for this model (1007) — reconnect once with the
+      // safe default voice instead of dropping the call. The voice clamp in
+      // index.js should prevent this, but a model swap could reintroduce it.
+      if (code === 1007 && !this._voiceFallbackTried && !this._closed &&
+          /voice .*(not available|unsupported|unknown)/i.test(reasonStr)) {
+        this._voiceFallbackTried = true;
+        this._log(`voice "${this._voice}" rejected by model — retrying with Aoede`);
+        this._voice = "Aoede";
+        this._ws = null; this._ready = false; this._setupSent = false;
+        setImmediate(() => { if (!this._closed) this.connect(); });
+        return;
+      }
+
       // If the API rejects the sessionResumption field itself, retry once without it.
       if (code === 1007 && !this._resumptionUnsupported && !this._closed &&
           /session_resumption|sessionResumption/i.test(reasonStr)) {

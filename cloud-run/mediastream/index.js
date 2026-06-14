@@ -2560,9 +2560,19 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   const callStartTime = Date.now();
   const language    = assistant.language || "he-IL";
   const rawVoice    = assistant.realtimeVoice || "Aoede";
-  // Gemini voices: Aoede, Charon, Fenrir, Kore, Puck, Orbit, Zephyr
-  const geminiVoice = ["Aoede","Charon","Fenrir","Kore","Puck","Orbit","Zephyr"].includes(rawVoice)
-    ? rawVoice : "Aoede";
+  // Voice validity is MODEL-specific. The hybrid path forces the native-audio
+  // model (gemini-2.5-flash-native-audio-*), which supports only the classic
+  // voice set — NOT newer names like "Orbit" (valid on gemini-3.1-flash-live).
+  // Picking an unsupported voice makes Gemini reject setup with 1007 and the
+  // call dies instantly (observed: voice "Orbit" on the hybrid model). Clamp
+  // to the model's supported set, falling back to Aoede.
+  const NATIVE_AUDIO_VOICES = ["Aoede","Charon","Fenrir","Kore","Puck","Zephyr","Leda","Orus"];
+  const LIVE_VOICES         = ["Aoede","Charon","Fenrir","Kore","Puck","Orbit","Zephyr","Leda","Orus"];
+  const allowedVoices = hybridSTT ? NATIVE_AUDIO_VOICES : LIVE_VOICES;
+  const geminiVoice = allowedVoices.includes(rawVoice) ? rawVoice : "Aoede";
+  if (geminiVoice !== rawVoice) {
+    console.warn(`[${callSessionId}] [GL] voice "${rawVoice}" unsupported on ${hybridSTT ? "native-audio" : "live"} model — using ${geminiVoice}`);
+  }
 
   const vadMode        = assistant.realtimeVadMode        || "semantic";
   const vadSensitivity = assistant.realtimeVadSensitivity || "medium";
