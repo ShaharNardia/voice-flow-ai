@@ -343,6 +343,11 @@ export const knowledgeDeleteFile = (data: { assistantId: string; sourceFile: str
 export const knowledgeProcessUrl = (data: { assistantId: string; url: string }) =>
   httpPost<{ chunksCreated: number; pagesCrawled?: number; url: string }>("/knowledgeProcessUrl", data);
 
+export interface CrawlPage { url: string; chunks: number; chars: number }
+export interface CrawlReport { sourceRoot: string; totalPages: number; totalChunks: number; totalChars: number; pages: CrawlPage[] }
+export const knowledgeCrawlReport = (assistantId: string, sourceRoot: string) =>
+  httpGet<CrawlReport>(`/knowledgeCrawlReport?assistantId=${encodeURIComponent(assistantId)}&sourceRoot=${encodeURIComponent(sourceRoot)}`);
+
 export const knowledgeSync = (data: { assistantId: string; url: string }) =>
   httpPost<{ chunksCreated: number; pagesCrawled?: number; url: string }>("/knowledgeSync", data);
 

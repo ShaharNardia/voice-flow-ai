@@ -176,6 +176,7 @@ exports.getIntegrationStatus = healthCheck.getIntegrationStatus;
 const knowledgeService = require("./knowledge_service.js");
 exports.knowledgeProcessFile = knowledgeService.knowledgeProcessFile;
 exports.knowledgeListFiles   = knowledgeService.knowledgeListFiles;
+exports.knowledgeCrawlReport = knowledgeService.knowledgeCrawlReport;
 exports.knowledgeDeleteFile  = knowledgeService.knowledgeDeleteFile;
 exports.knowledgeProcessText = knowledgeService.knowledgeProcessText;
 exports.knowledgeProcessUrl  = knowledgeService.knowledgeProcessUrl;

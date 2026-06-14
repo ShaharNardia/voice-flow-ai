@@ -297,6 +297,57 @@ exports.knowledgeListFiles = onRequest({...corsOptions, secrets: [OPENAI_API_KEY
   }
 });
 
+// â"€â"€ Crawl coverage report â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
+//
+// Per-page breakdown of a crawled site so the user can SEE every page that was
+// read and how much text each yielded — proof that no pages were lost. Built
+// from the stored chunks (each carries sourceFile=pageUrl, sourceRoot=site),
+// so it works for already-crawled sites too. Filters sourceRoot in memory to
+// reuse the existing (assistantId, ownerId) index — no new composite index.
+exports.knowledgeCrawlReport = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "GET") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
+  const uid = await extractUidFromRequest(req);
+  if (!uid) { res.status(401).json({status: "error", message: "Unauthorized"}); return; }
+  try {
+    const {assistantId, sourceRoot} = req.query;
+    if (!assistantId || !sourceRoot) {
+      res.status(400).json({status: "error", message: "assistantId and sourceRoot required"});
+      return;
+    }
+    const db = getFirestore();
+    const snap = await db.collection("knowledge_chunks")
+      .where("assistantId", "==", assistantId)
+      .where("ownerId", "==", uid)
+      .get();
+
+    const pages = {};      // pageUrl → { url, chunks, chars }
+    let totalChunks = 0, totalChars = 0;
+    snap.forEach((doc) => {
+      const d = doc.data();
+      if (d.sourceType !== "url" || d.sourceRoot !== sourceRoot) return;
+      const url = d.sourceFile || "(unknown)";
+      if (!pages[url]) pages[url] = { url, chunks: 0, chars: 0 };
+      const chars = (d.content || "").length;
+      pages[url].chunks += 1;
+      pages[url].chars  += chars;
+      totalChunks += 1;
+      totalChars  += chars;
+    });
+    const pageList = Object.values(pages).sort((a, b) => a.url.localeCompare(b.url));
+    res.status(200).json({
+      sourceRoot,
+      totalPages:  pageList.length,
+      totalChunks,
+      totalChars,
+      pages: pageList,
+    });
+  } catch (error) {
+    logger.error("knowledgeCrawlReport failed", error);
+    res.status(500).json({status: "error", message: "Failed to build crawl report"});
+  }
+});
+
 // â"€â"€ Delete a file and its chunks â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 exports.knowledgeDeleteFile = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {

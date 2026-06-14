@@ -8,9 +8,9 @@ import VoiceCloneRecorder from "@/components/voice-clone/VoiceCloneRecorder";
 import {
   assistantsGet, assistantsUpdate, assistantTestChat,
   knowledgeListFiles, knowledgeProcessFile, knowledgeDeleteFile,
-  knowledgeProcessUrl, knowledgeSync, knowledgeProcessText,
+  knowledgeProcessUrl, knowledgeSync, knowledgeProcessText, knowledgeCrawlReport,
   getCostConfig, scenariosList, scenariosCreate, scenarioWizardChat, scenarioWizardGenerate,
-  type Assistant, type KnowledgeFile, type RateCard, type ScenarioDoc, type WizardMessage,
+  type Assistant, type KnowledgeFile, type RateCard, type ScenarioDoc, type WizardMessage, type CrawlReport,
 } from "@/lib/firebase-functions";
 import { storage, auth } from "@/lib/firebase";
 import { ref, uploadBytes } from "firebase/storage";
@@ -915,6 +915,17 @@ function AssistantEdit() {
   const [kbUploadStatus, setKbUploadStatus] = useState("");
   const [kbError, setKbError] = useState("");
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
+  // Crawl coverage report — per-page breakdown so the user can verify nothing was missed.
+  const [reportFor, setReportFor] = useState<string | null>(null);   // sourceRoot currently expanded
+  const [reportData, setReportData] = useState<CrawlReport | null>(null);
+  const [reportLoading, setReportLoading] = useState(false);
+  async function toggleCrawlReport(sourceRoot: string) {
+    if (reportFor === sourceRoot) { setReportFor(null); setReportData(null); return; }
+    setReportFor(sourceRoot); setReportData(null); setReportLoading(true);
+    try { setReportData(await knowledgeCrawlReport(id, sourceRoot)); }
+    catch { setReportData(null); }
+    finally { setReportLoading(false); }
+  }
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Settings sub-tab
@@ -2387,30 +2398,83 @@ function AssistantEdit() {
                 const label = isUrl
                   ? (() => { try { return new URL(file.sourceFile).hostname + new URL(file.sourceFile).pathname; } catch { return file.sourceFile; } })()
                   : file.sourceFile;
+                const pages = (file as KnowledgeFile & { pagesCount?: number }).pagesCount || 0;
+                const open = reportFor === file.sourceFile;
                 return (
-                  <div key={file.sourceFile} className="flex items-center justify-between p-3 border border-neutral-100 rounded-lg hover:bg-neutral-50 group">
-                    <div className="flex items-center gap-2.5 min-w-0">
-                      {isUrl ? <Link2 className="w-4 h-4 text-blue-400 flex-shrink-0" /> : <FileText className="w-4 h-4 text-neutral-400 flex-shrink-0" />}
-                      <div className="min-w-0">
-                        <p className="text-sm text-neutral-700 truncate" title={file.sourceFile}>{label}</p>
-                        <p className="text-xs text-neutral-400">{file.chunkCount} chunk{file.chunkCount !== 1 ? "s" : ""}{isUrl ? " · URL" : ""}</p>
+                  <div key={file.sourceFile} className="border border-neutral-100 rounded-lg overflow-hidden">
+                    <div className="flex items-center justify-between p-3 hover:bg-neutral-50 group">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        {isUrl ? <Link2 className="w-4 h-4 text-blue-400 flex-shrink-0" /> : <FileText className="w-4 h-4 text-neutral-400 flex-shrink-0" />}
+                        <div className="min-w-0">
+                          <p className="text-sm text-neutral-700 truncate" title={file.sourceFile}>{label}</p>
+                          <p className="text-xs text-neutral-400">
+                            {isUrl && pages > 0
+                              ? <>{pages} page{pages !== 1 ? "s" : ""} crawled · {file.chunkCount} chunks · <button onClick={() => toggleCrawlReport(file.sourceFile)} className="text-blue-500 hover:underline font-medium">{open ? "hide coverage" : "view coverage"}</button></>
+                              : <>{file.chunkCount} chunk{file.chunkCount !== 1 ? "s" : ""}{isUrl ? " · URL" : ""}</>}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-1 ml-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                        {isUrl && (
+                          <button onClick={() => handleSyncUrl(file.sourceFile)} disabled={syncingUrl === file.sourceFile}
+                            className="p-1.5 text-neutral-400 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-60" title="Re-sync URL"
+                          >
+                            {syncingUrl === file.sourceFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          </button>
+                        )}
+                        <button onClick={() => handleDeleteFile(file.sourceFile)} disabled={deletingFile === file.sourceFile}
+                          className="p-1.5 text-neutral-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors disabled:opacity-60"
+                          title={isUrl ? "Remove URL" : "Delete file"}
+                        >
+                          {deletingFile === file.sourceFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-center gap-1 ml-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                      {isUrl && (
-                        <button onClick={() => handleSyncUrl(file.sourceFile)} disabled={syncingUrl === file.sourceFile}
-                          className="p-1.5 text-neutral-400 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-60" title="Re-sync URL"
-                        >
-                          {syncingUrl === file.sourceFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-                        </button>
-                      )}
-                      <button onClick={() => handleDeleteFile(file.sourceFile)} disabled={deletingFile === file.sourceFile}
-                        className="p-1.5 text-neutral-300 hover:text-red-500 hover:bg-red-50 rounded-md transition-colors disabled:opacity-60"
-                        title={isUrl ? "Remove URL" : "Delete file"}
-                      >
-                        {deletingFile === file.sourceFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                      </button>
-                    </div>
+
+                    {/* Crawl coverage — every page the crawler read + how much text each yielded */}
+                    {open && (
+                      <div className="border-t border-neutral-100 bg-neutral-50/60 px-3 py-2.5">
+                        {reportLoading ? (
+                          <div className="flex items-center gap-2 text-xs text-neutral-400 py-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Building coverage report…</div>
+                        ) : !reportData || reportData.pages.length === 0 ? (
+                          <p className="text-xs text-neutral-400 py-2">No page data found for this source.</p>
+                        ) : (
+                          <>
+                            <div className="flex items-center justify-between mb-2 text-xs">
+                              <span className="font-semibold text-neutral-600">{reportData.totalPages} pages · {reportData.totalChunks} chunks · {reportData.totalChars.toLocaleString()} characters indexed</span>
+                            </div>
+                            <div className="max-h-64 overflow-y-auto rounded-md border border-neutral-200 bg-white">
+                              <table className="w-full text-xs">
+                                <thead className="sticky top-0 bg-neutral-50 text-neutral-400">
+                                  <tr>
+                                    <th className="text-left font-medium px-2 py-1.5">Page</th>
+                                    <th className="text-right font-medium px-2 py-1.5 w-20">Chars</th>
+                                    <th className="text-right font-medium px-2 py-1.5 w-16">Chunks</th>
+                                  </tr>
+                                </thead>
+                                <tbody className="divide-y divide-neutral-50">
+                                  {reportData.pages.map((p) => {
+                                    let short = p.url;
+                                    try { const u = new URL(p.url); short = (u.pathname === "/" ? u.hostname : u.pathname) + u.search; } catch {}
+                                    const thin = p.chars < 200;   // flag near-empty pages
+                                    return (
+                                      <tr key={p.url} className="hover:bg-neutral-50">
+                                        <td className="px-2 py-1.5 max-w-0">
+                                          <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate block" title={p.url}>{short}</a>
+                                        </td>
+                                        <td className={`px-2 py-1.5 text-right tabular-nums ${thin ? "text-amber-600 font-medium" : "text-neutral-600"}`} title={thin ? "Very little text extracted from this page" : ""}>{p.chars.toLocaleString()}</td>
+                                        <td className="px-2 py-1.5 text-right tabular-nums text-neutral-400">{p.chunks}</td>
+                                      </tr>
+                                    );
+                                  })}
+                                </tbody>
+                              </table>
+                            </div>
+                            <p className="text-[11px] text-neutral-400 mt-2">Amber = little text extracted (page may be image-only or JS-rendered). Re-sync after the site updates to refresh coverage.</p>
+                          </>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
