@@ -995,6 +995,9 @@ exports.assistantsCreate = onRequest(corsOptions, async (req, res) => {
       // Voice provider selection: "openai-realtime" (V2V via OpenAI Realtime),
       // "nlpearl" (managed platform), or "classic" (Deepgram + LLM + TTS).
       voiceProvider:         payload.voiceProvider         || (payload.realtimeEnabled ? "openai-realtime" : "classic"),
+      // Telephony carrier (twilio | sip | voximplant). Was omitted here — new
+      // assistants always persisted the default and the editor's choice was lost.
+      telephonyProvider:     payload.telephonyProvider     || "twilio",
       nlpearlPearlId:        payload.nlpearlPearlId        || null,
       nlpearlPhoneNumberId:  payload.nlpearlPhoneNumberId  || null,
       // Personality/style fields
@@ -1106,6 +1109,9 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
     if (payload.realtimeVadMode !== undefined) updates.realtimeVadMode = payload.realtimeVadMode;
     if (payload.realtimeVadSensitivity !== undefined) updates.realtimeVadSensitivity = payload.realtimeVadSensitivity;
     if (payload.voiceProvider !== undefined) updates.voiceProvider = payload.voiceProvider;
+    // Telephony carrier — was missing from the whitelist, so the editor's
+    // "SIP Trunk"/"Voximplant" selection was silently dropped on save.
+    if (payload.telephonyProvider !== undefined) updates.telephonyProvider = payload.telephonyProvider;
     if (payload.nlpearlPearlId !== undefined) updates.nlpearlPearlId = payload.nlpearlPearlId || null;
     if (payload.nlpearlPhoneNumberId !== undefined) updates.nlpearlPhoneNumberId = payload.nlpearlPhoneNumberId || null;
     if (payload.realtimeScenarioId !== undefined) updates.realtimeScenarioId = payload.realtimeScenarioId || null;
@@ -1142,6 +1148,7 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
       realtimeVadSensitivity: d.realtimeVadSensitivity,
       realtimeScenarioId: d.realtimeScenarioId || null,
       voiceProvider: d.voiceProvider || (d.realtimeEnabled ? "openai-realtime" : "classic"),
+      telephonyProvider: d.telephonyProvider || "twilio",
       nlpearlPearlId: d.nlpearlPearlId || null,
       nlpearlPhoneNumberId: d.nlpearlPhoneNumberId || null,
       voiceAccent: d.voiceAccent || "default",
@@ -1591,6 +1598,7 @@ exports.assistantsGet = onRequest(corsOptions, async (req, res) => {
       realtimeVadMode: data.realtimeVadMode || null,
       realtimeVadSensitivity: data.realtimeVadSensitivity || null,
       voiceProvider: data.voiceProvider || (data.realtimeEnabled ? "openai-realtime" : "classic"),
+      telephonyProvider: data.telephonyProvider || "twilio",
       nlpearlPearlId: data.nlpearlPearlId || null,
       nlpearlPhoneNumberId: data.nlpearlPhoneNumberId || null,
       voiceAccent: data.voiceAccent || "default",
