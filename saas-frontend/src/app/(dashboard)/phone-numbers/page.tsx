@@ -205,19 +205,33 @@ export default function PhoneNumbersPage() {
       }, { merge: true });
 
       // Also update ALL Company phoneNumberMap entries for this number (used by inbound calls)
-      // This ensures inbound calls route to the correct assistant
+      // This ensures inbound calls route to the correct assistant.
+      // MATCH BY SUFFIX: the UI number may carry a country code (+972747054945)
+      // while the routing map stores the bare inbound DID (747054945) — a full
+      // digits-equality check missed that and left routing unmapped even though
+      // the UI showed the assignment. Compare on the shorter number's digits as
+      // a suffix (min 7 digits to avoid false matches).
       try {
+        const cfgDigits = configuring.phoneNumber.replace(/\D/g, "");
+        const digitsMatch = (a: string, b: string) => {
+          const da = a.replace(/\D/g, ""), db2 = b.replace(/\D/g, "");
+          if (!da || !db2) return false;
+          if (da === db2) return true;
+          const short = da.length <= db2.length ? da : db2;
+          const long = da.length <= db2.length ? db2 : da;
+          return short.length >= 7 && long.endsWith(short);
+        };
         const companiesSnap = await getDocs(query(collection(db, "Company")));
         for (const companyDoc of companiesSnap.docs) {
           const data = companyDoc.data();
           const phoneMap: Array<{ phoneNumber?: string; assistantId?: string; [key: string]: unknown }> = data.phoneNumberMap || [];
           const idx = phoneMap.findIndex((e: { phoneNumber?: string }) =>
-            e.phoneNumber && (e.phoneNumber === configuring.phoneNumber || e.phoneNumber.replace(/\D/g, "") === configuring.phoneNumber.replace(/\D/g, ""))
+            e.phoneNumber && digitsMatch(e.phoneNumber, cfgDigits)
           );
           if (idx >= 0) {
-            // Update the assistantId in the matching entry
+            // Update the assistantId + name in the matching entry
             const updated = [...phoneMap];
-            updated[idx] = { ...updated[idx], assistantId: configAssistantId || "" };
+            updated[idx] = { ...updated[idx], assistantId: configAssistantId || "", assistantName: (assistant?.name || assistant?.assistantName || "") };
             await setDoc(doc(db, "Company", companyDoc.id), { phoneNumberMap: updated }, { merge: true });
           }
         }
