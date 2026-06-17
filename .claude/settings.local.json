@@ -117,7 +117,11 @@
       "PowerShell($f = \"C:\\\\Users\\\\Chen\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Repos-voice-flow-ai\\\\0138c6f6-3fb2-47e2-9757-2ad1ff9a7180\\\\tasks\\\\bea7vvlzv.output\"; \\(Get-Item $f\\).Length; Get-Content $f -Tail 20)",
       "PowerShell(Get-Process | Where-Object { $_.Name -match \"python|gcloud|cmd|powershell\" } | Select-Object Name, Id, CPU, StartTime | Format-Table -AutoSize)",
       "Bash(gcloud projects *)",
-      "Bash(cd /mnt/c/Repos/voice-flow-ai/firebase/functions && firebase deploy --only functions --project voiceflow-ai-202509231639 2>&1)"
+      "Bash(cd /mnt/c/Repos/voice-flow-ai/firebase/functions && firebase deploy --only functions --project voiceflow-ai-202509231639 2>&1)",
+      "Read(//c/Users/Chen/.claude/skills/**)",
+      "Read(//c/Users/Chen/.claude/**)",
+      "Bash(claude *)",
+      "Bash(bash *)"
     ]
   }
 }

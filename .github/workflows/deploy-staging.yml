@@ -1,0 +1,54 @@
+name: Deploy Staging
+
+# Auto-deploys the whole stack to the STAGING project on every push to the
+# `staging` branch. This is the "publish from here" half of the flow — safe to
+# run freely; it never touches production.
+#
+# Required repo secrets (set by a repo admin):
+#   GCP_SA_KEY_STAGING     — JSON key for gh-deployer@voiceflow-staging
+#   FUNCTIONS_ENV_STAGING  — contents of firebase/functions/.env.voiceflow-staging
+
+on:
+  push:
+    branches: [staging]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy → voiceflow-staging
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_STAGING }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Firebase CLI
+        run: npm i -g firebase-tools
+
+      - name: Restore staging functions env
+        run: printf '%s' "${{ secrets.FUNCTIONS_ENV_STAGING }}" > firebase/functions/.env.voiceflow-staging
+
+      - name: Install dependencies
+        run: |
+          (cd saas-frontend && npm ci)
+          (cd firebase/functions && npm ci)
+
+      - name: Deploy all to staging
+        # GOOGLE_APPLICATION_CREDENTIALS (exported by the auth step) authenticates
+        # both gcloud and firebase-tools. The env-aware script builds the frontend
+        # with .env.staging, deploys hosting+functions+firestore, and the Cloud Run
+        # voice service.
+        run: bash scripts/deploy.sh staging all

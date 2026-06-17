@@ -830,8 +830,16 @@ function sanitizeForSpeech(text) {
     .replace(/^>\s*/gm, "")
     // Remove horizontal rules (---, ***, ___)
     .replace(/^[-*_]{3,}\s*$/gm, "")
-    // Remove remaining special chars that TTS might read aloud
+    // Remove remaining special chars that TTS / native-audio models might read
+    // aloud (the native-audio model has been heard speaking quote marks).
     .replace(/[#*_~`|<>{}[\]\\]/g, "")
+    // Strip every kind of quotation mark (straight + curly + guillemets) — the
+    // words inside stay, the marks go. Caller never wants to hear "quote".
+    .replace(/["'«»“”‘’„‟]/g, "")
+    // Turn slashes and pipes into a spoken-safe space ("ו/או" → "ו או", not "סלאש")
+    .replace(/[/\\]/g, " ")
+    // Drop parentheses but keep their contents
+    .replace(/[()]/g, " ")
     // Collapse multiple spaces/newlines
     .replace(/\n{3,}/g, "\n\n")
     .replace(/ {2,}/g, " ")
@@ -870,33 +878,78 @@ app.get("/gemini-probe", (req, res) => {
 // search_knowledge_base call on the realtime paths threw
 // "fetchKnowledgeContext is not defined" (call 1tsMnhqpQx8TahXScCtP).
 // The cascade handler's nested copy shadows this one there; same behavior.
+// Per-instance KB cache: { assistantId → { chunks:[{content,embedding,mag}], ts } }.
+// The previous code re-read EVERY chunk (with its 1536-float embedding) from
+// Firestore on EVERY search_knowledge_base call — for a 500-chunk KB that's a
+// ~7MB read taking 10-15s, so the bot went dead-silent after a question and the
+// caller hung up (call au0wi6K1QbUbSaMbEUFs). Now we load+cache once per warm
+// instance; every later search is in-memory cosine (~ms). Embeddings carry a
+// precomputed magnitude so each query is O(n·d) without re-norming chunks.
+const _kbCache = new Map();
+const _kbInflight = new Map();
+const KB_CACHE_TTL_MS = 5 * 60 * 1000;
+
+async function loadKbChunks(astId) {
+  const hit = _kbCache.get(astId);
+  if (hit && (Date.now() - hit.ts) < KB_CACHE_TTL_MS) return hit.chunks;
+  if (_kbInflight.has(astId)) return _kbInflight.get(astId);   // de-dupe concurrent loads
+  const p = (async () => {
+    const snap = await getFirestore().collection("knowledge_chunks")
+      .where("assistantId", "==", astId)
+      .select("content", "embedding")
+      .limit(1500)
+      .get();
+    const chunks = [];
+    snap.forEach((doc) => {
+      const d = doc.data();
+      if (!d.embedding) return;
+      let mag = 0; for (let i = 0; i < d.embedding.length; i++) mag += d.embedding[i] * d.embedding[i];
+      chunks.push({ content: d.content, embedding: d.embedding, mag: Math.sqrt(mag) || 1 });
+    });
+    _kbCache.set(astId, { chunks, ts: Date.now() });
+    _kbInflight.delete(astId);
+    console.log(`[KB] cached ${chunks.length} chunks for assistant ${astId}`);
+    return chunks;
+  })().catch((e) => { _kbInflight.delete(astId); console.warn(`[KB] load failed: ${e.message}`); return []; });
+  _kbInflight.set(astId, p);
+  return p;
+}
+
+// Warm the cache ahead of the first question (called at session start, not awaited).
+function prewarmKb(astId) { if (astId) loadKbChunks(astId).catch(() => {}); }
+
 async function fetchKnowledgeContext(astId, query) {
   if (!astId || !query) return [];
   const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
   if (!OPENAI_API_KEY) return [];
-  try {
-    const embedRes = await axios.post(
-      "https://api.openai.com/v1/embeddings",
-      {model: "text-embedding-3-small", input: [query]},
-      {headers: {"Authorization": `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json"}, timeout: 8000},
-    );
+  // Hard cap the whole lookup so a slow embedding call or cold cache can NEVER
+  // leave the caller in dead air — return [] and let the bot answer gracefully.
+  const TIMEOUT_MS = 5000;
+  const work = (async () => {
+    const [embedRes, chunks] = await Promise.all([
+      axios.post(
+        "https://api.openai.com/v1/embeddings",
+        {model: "text-embedding-3-small", input: [query]},
+        {headers: {"Authorization": `Bearer ${OPENAI_API_KEY}`, "Content-Type": "application/json"}, timeout: 4000},
+      ),
+      loadKbChunks(astId),
+    ]);
+    if (!chunks.length) return [];
     const queryVec = embedRes.data.data[0].embedding;
-    const snap = await getFirestore().collection("knowledge_chunks")
-      .where("assistantId", "==", astId)
-      .get();
-    if (snap.empty) return [];
-    const scored = snap.docs.map((doc) => {
-      const d = doc.data();
-      if (!d.embedding) return {content: d.content, score: 0};
-      const dot = queryVec.reduce((s, v, i) => s + v * d.embedding[i], 0);
-      const magA = Math.sqrt(queryVec.reduce((s, v) => s + v * v, 0));
-      const magB = Math.sqrt(d.embedding.reduce((s, v) => s + v * v, 0));
-      return {content: d.content, score: dot / (magA * magB)};
+    let qmag = 0; for (let i = 0; i < queryVec.length; i++) qmag += queryVec[i] * queryVec[i];
+    qmag = Math.sqrt(qmag) || 1;
+    const scored = chunks.map((c) => {
+      let dot = 0; const e = c.embedding;
+      for (let i = 0; i < queryVec.length; i++) dot += queryVec[i] * e[i];
+      return { content: c.content, score: dot / (qmag * c.mag) };
     });
-    return scored
-      .filter((c) => c.score > 0.25)
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 3);
+    return scored.filter((c) => c.score > 0.25).sort((a, b) => b.score - a.score).slice(0, 3);
+  })();
+  try {
+    return await Promise.race([
+      work,
+      new Promise((resolve) => setTimeout(() => resolve(null), TIMEOUT_MS)),
+    ]) || [];
   } catch (e) {
     console.warn(`Knowledge context failed:`, e.message);
     return [];
@@ -1855,7 +1908,7 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
       if (name === "search_knowledge_base") {
         const results = await fetchKnowledgeContext(assistantId, args.query || "");
         if (!results.length) return "No relevant information found in the knowledge base.";
-        return results.map((r, i) => `[${i + 1}] ${r.content}`).join("\n\n");
+        return results.map((r) => sanitizeForSpeech(r.content)).filter(Boolean).join("\n\n");
       }
       if (name === "save_lead") {
         // Upsert: if lead with same phone already exists, update it; otherwise create
@@ -2570,9 +2623,18 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   const LIVE_VOICES         = ["Aoede","Charon","Fenrir","Kore","Puck","Orbit","Zephyr","Leda","Orus"];
   // Gender of each known voice, so an unsupported choice falls back to a voice
   // of the SAME gender (picking "Orbit"=male must NOT silently become Aoede=female).
+  // Includes BOTH Gemini voices AND the OpenAI Realtime voice names the editor's
+  // picker offers (e.g. "Ash"=male): the hybrid path runs the Gemini native-audio
+  // model, so an OpenAI voice like "Ash" is unsupported and MUST map to a
+  // same-gender Gemini voice (Ash→Charon), not silently to Aoede (female).
+  // Keys are lowercase; lookup is case-insensitive.
   const VOICE_GENDER = {
-    Aoede:"female", Kore:"female", Leda:"female", Zephyr:"female",
-    Puck:"male", Charon:"male", Fenrir:"male", Orus:"male", Orbit:"male",
+    // Gemini
+    aoede:"female", kore:"female", leda:"female", zephyr:"female",
+    puck:"male", charon:"male", fenrir:"male", orus:"male", orbit:"male",
+    // OpenAI Realtime (as labeled in the editor's voice picker)
+    alloy:"female", coral:"female", sage:"female", shimmer:"female", marin:"female",
+    ash:"male", ballad:"male", echo:"male", verse:"male", cedar:"male",
   };
   const allowedVoices = hybridSTT ? NATIVE_AUDIO_VOICES : LIVE_VOICES;
   let geminiVoice;
@@ -2580,7 +2642,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     geminiVoice = rawVoice;
   } else {
     // Fall back to a supported voice matching the requested gender (male→Charon, female→Aoede).
-    const wantMale = (VOICE_GENDER[rawVoice] || (assistant.callerGender === "male" ? "male" : "")) === "male";
+    const voiceGender = VOICE_GENDER[String(rawVoice).toLowerCase()];
+    const wantMale = (voiceGender || (assistant.callerGender === "male" ? "male" : "")) === "male";
     geminiVoice = wantMale ? "Charon" : "Aoede";
     console.warn(`[${callSessionId}] [GL] voice "${rawVoice}" unsupported on ${hybridSTT ? "native-audio" : "live"} model — using ${geminiVoice} (${wantMale ? "male" : "female"})`);
   }
@@ -2603,6 +2666,10 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     try {
       const kbSnap = await db.collection("knowledge_chunks")
         .where("assistantId", "==", assistantId)
+        .select("content")   // CRITICAL: never pull the 1536-float embedding — for a
+                             // 500-chunk KB (e.g. Pegi) the unprojected read is ~7-10MB
+                             // and stalls call setup so long the caller hears silence.
+        .limit(200)
         .get();
       if (!kbSnap.empty) {
         // KB char cap — sourced from admin policy (default 8000). Higher caps
@@ -2618,6 +2685,9 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     } catch (e) {
       console.warn(`[${callSessionId}] [GL] KB fetch failed:`, e.message);
     }
+    // Warm the search_knowledge_base cache in the background so the first KB
+    // question doesn't stall on a cold ~7MB chunk load (caller-hangup bug).
+    prewarmKb(assistantId);
   }
 
   // Build instructions, with KB appended as a REFERENCE section.
@@ -2919,9 +2989,18 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   let pendingUserText = "";
   let busyWatchdog = null;
   let lastBotAudioAt = 0;   // updated on every outbound audio chunk (hybrid)
+  let bargedThisTurn = false; // fired a barge-in for the current bot turn already?
+  let _activeToolCalls = 0; // count of tool calls currently awaiting a result
+  // Dedup by name+args: Gemini-2.5-flash-native-audio assigns DIFFERENT callIds
+  // to what is logically the same tool invocation and sends it twice. Deduping
+  // by callId alone (the bridge-level fix) doesn't help. We track by name:args
+  // so the second identical call reuses the first call's result and we still
+  // send Gemini a response for its second callId (otherwise it waits forever).
+  const _toolResultCache = new Map(); // `${name}:${JSON.stringify(args)}` → { done, result, pendingCallIds }
   const clearBusy = () => { modelBusy = false; if (busyWatchdog) { clearTimeout(busyWatchdog); busyWatchdog = null; } };
   const armBusy = () => {
     modelBusy = true;
+    bargedThisTurn = false;   // new bot turn — allow one fast barge-in
     if (busyWatchdog) clearTimeout(busyWatchdog);
     // Safety: if turnComplete never arrives (model error / dropped frame),
     // don't wedge the call forever. BUT never force-idle while bot audio is
@@ -2929,6 +3008,10 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     // the lock mid-speech re-opens the mid-turn-injection hole (observed in
     // call zIAapppwQPuiz6YFQHVM: 41s answer, watchdog fired at 15s).
     const check = () => {
+      if (_activeToolCalls > 0) {
+        busyWatchdog = setTimeout(check, 5000);  // tool call in flight — extend
+        return;
+      }
       if (Date.now() - lastBotAudioAt < 2000) {
         busyWatchdog = setTimeout(check, 5000);  // audibly mid-turn — extend
         return;
@@ -2960,6 +3043,41 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       console.log(`[${callSessionId}] [HYBRID] model idle → flushing queued caller turn`);
       sendToModel(t);
     }
+  };
+
+  // ── DTMF (keypad) capture ────────────────────────────────────────────────
+  // Twilio (and Voximplant via the scenario) deliver caller key presses as a
+  // "dtmf" media-stream event. Buffer the digits and feed them to Gemini as one
+  // turn — flushed on '#' (submit), '*' (clear), or a 1.5s inter-digit pause.
+  // Routed through the SAME busy-gate as speech so a press mid-turn is queued,
+  // not treated as a barge-in that aborts the model.
+  let dtmfDigits = "";
+  let dtmfTimer  = null;
+  const flushDtmf = () => {
+    if (dtmfTimer) { clearTimeout(dtmfTimer); dtmfTimer = null; }
+    const digits = dtmfDigits; dtmfDigits = "";
+    if (!digits) return;
+    const phrase = /^he/i.test(language)
+      ? `המתקשר הקיש בלוח המקשים את הספרות: ${digits}`
+      : `The caller pressed these keypad digits: ${digits}`;
+    console.log(`[${callSessionId}] [HYBRID] DTMF flush: "${digits}" modelBusy=${modelBusy}`);
+    if (modelBusy) {
+      // Don't barge-in on keypad — queue and let onModelIdle flush it.
+      pendingUserText += (pendingUserText ? " " : "") + phrase;
+    } else {
+      sendToModel(phrase);
+    }
+  };
+  const onDtmfDigit = (digit) => {
+    if (digit == null) return;
+    const d = String(digit).trim();
+    if (!d) return;
+    if (d === "#") { flushDtmf(); return; }                    // submit
+    if (d === "*") { dtmfDigits = ""; if (dtmfTimer) { clearTimeout(dtmfTimer); dtmfTimer = null; } return; }  // clear
+    dtmfDigits += d;
+    console.log(`[${callSessionId}] [HYBRID] DTMF digit: ${d} (buffer="${dtmfDigits}")`);
+    if (dtmfTimer) clearTimeout(dtmfTimer);
+    dtmfTimer = setTimeout(flushDtmf, 1500);
   };
 
   // ── Tool execution — minimal but real ────────────────────────────────────
@@ -3024,8 +3142,11 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         result = `Transferring to ${args.to}`;
       } else if (name === "search_knowledge_base" && args.query) {
         const results = await fetchKnowledgeContext(assistantId, args.query);
+        // Sanitize chunk text before handing it back to the model — raw KB
+        // content carries quotes/brackets/symbols the native-audio model would
+        // otherwise speak aloud. Drop the [n] numbering too (read as "one").
         result = results.length
-          ? results.map((r, i) => `[${i + 1}] ${r.content}`).join("\n\n")
+          ? results.map((r) => sanitizeForSpeech(r.content)).filter(Boolean).join("\n\n")
           : "No relevant information found in the knowledge base.";
       } else {
         // Dispatch to a user-defined HTTP API tool (e.g. lookup_flight).
@@ -3094,12 +3215,44 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   // execute it and send the result back so Gemini can continue speaking with
   // the answer instead of narrating the call out loud.
   bridge.on("tool_call", async ({ name, args, callId }) => {
+    const cacheKey = `${name}:${JSON.stringify(args || {})}`;
+
+    if (_toolResultCache.has(cacheKey)) {
+      // Same name+args already in flight (Gemini sent a duplicate callId).
+      // Queue this callId so we can respond to it once the first call finishes.
+      const entry = _toolResultCache.get(cacheKey);
+      if (entry.done) {
+        // First call already finished — respond immediately with cached result.
+        bridge.addConversationItem({ tool_call_id: callId, name, content: entry.result });
+      } else {
+        entry.pendingCallIds.push(callId);
+      }
+      return;
+    }
+
+    const entry = { done: false, result: "", pendingCallIds: [] };
+    _toolResultCache.set(cacheKey, entry);
+    _activeToolCalls++;
+    // Reset the busy watchdog — tool calls can take >15s (OpenAI embed + Firestore
+    // scan). Without this reset the watchdog fires mid-flight, releases modelBusy,
+    // and lets the silence check-in interrupt before the tool result is delivered.
+    if (hybridSTT) armBusy();
+
     const result = await executeGeminiTool(name, args || {});
-    bridge.addConversationItem({
-      tool_call_id: callId,
-      name,
-      content: String(result || ""),
-    });
+    entry.result = String(result || "");
+    entry.done = true;
+
+    // Respond to the primary callId.
+    bridge.addConversationItem({ tool_call_id: callId, name, content: entry.result });
+    // Respond to any duplicate callIds that arrived while we were executing.
+    for (const dupId of entry.pendingCallIds) {
+      bridge.addConversationItem({ tool_call_id: dupId, name, content: entry.result });
+    }
+
+    _activeToolCalls = Math.max(0, _activeToolCalls - 1);
+    // Re-arm after delivering the result — Gemini now has the answer and will
+    // generate its spoken response; keep modelBusy locked until turnComplete.
+    if (hybridSTT && _activeToolCalls === 0) armBusy();
   });
 
   bridge.on("transcript", ({ role, text }) => {
@@ -3129,6 +3282,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
   bridge.on("response_done", () => {
     costs.outputTokens += 100; // approximate; Gemini doesn't give exact token counts per-turn
+    _toolResultCache.clear(); // reset per-turn dedup cache (new turn = fresh tool calls)
     // HYBRID: the model's turn truly ended (turnComplete). Release the busy
     // lock and flush any caller speech that was queued while it generated.
     // Sending the next turn now is safe — the model is idle, so no barge-in.
@@ -3160,7 +3314,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     if (!greetingTriggered) return;
     // HYBRID: never inject a check-in while the model is mid-turn — that
     // clientContent would be read as a barge-in and abort the turn (zero audio).
-    if (hybridSTT && modelBusy) return;
+    if (hybridSTT && (modelBusy || _activeToolCalls > 0)) return;
     const silentMs = Date.now() - lastUserActivityAt;
     if (silentMs < SILENCE_PROMPT_MS) return;
     silenceChecks++;
@@ -3389,7 +3543,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       encoding: "mulaw", sample_rate: 8000, channels: 1,
       ...((dgLang === "en" || dgLang === "he") ? { smart_format: true, punctuate: true } : {}),
       interim_results: true,
-      endpointing: 300,
+      endpointing: 250,   // ~50ms faster end-of-turn; smart coalescer below guards number splits
     };
     console.log(`[${callSessionId}] [HYBRID] Deepgram config: model=${dgModel} lang=${dgOpts.language}`);
     const dg = createClient(process.env.DEEPGRAM_API_KEY);
@@ -3400,11 +3554,32 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       console.log(`[${callSessionId}] [HYBRID] Deepgram ready (flushing ${dgBuffer.length})`);
       while (dgBuffer.length) { try { dgConn.send(dgBuffer.shift()); } catch (_) {} }
     });
+    const doBargeIn = (why) => {
+      bargedThisTurn = true;
+      console.log(`[${callSessionId}] [HYBRID] barge-in (${why}) — cutting bot playback`);
+      if (streamSid && ws.readyState === ws.OPEN) {
+        try { ws.send(JSON.stringify({ event: "clear", streamSid })); } catch (_) {}
+      }
+      bridge.suppressTurn();
+    };
     dgConn.on("Results", (evt) => {
       const t = evt.channel?.alternatives?.[0]?.transcript;
       const isFinal = evt.is_final || false;
       const conf = evt.channel?.alternatives?.[0]?.confidence || 0;
-      if (!t || !t.trim() || !isFinal) return;
+      if (!t || !t.trim()) return;
+      // ── FAST BARGE-IN on INTERIM ─────────────────────────────────────────
+      // Don't wait for the final (endpointing adds ~300ms-1.5s of the bot still
+      // talking over the caller). The moment the caller is clearly speaking
+      // while the bot is mid-turn, cut the bot. Gate on confidence + word count
+      // so line-echo of the bot's own audio doesn't false-trigger. Once per turn.
+      if (!isFinal) {
+        if (modelBusy && !bargedThisTurn && !callEnding) {
+          const wcI = t.trim().split(/\s+/).length;
+          const interimInterrupt = (conf >= 0.70 && wcI >= 2) || (conf >= 0.85 && /\d/.test(t));
+          if (interimInterrupt) doBargeIn("interim");
+        }
+        return;
+      }
       // Noise gate (same policy as the cascade): keep numeric / high-conf / multi-word.
       // EXCEPTION: yes/no/ack words are legitimate one-word answers to the
       // bot's questions — dropping "כן." left the bot waiting in silence until
@@ -3428,30 +3603,32 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         // Two tiers: full phrases/digits at conf>=0.75, OR short emphatic
         // interjections ("לא, לא") at very high confidence. 1-word stays
         // queue-only — that's the echo-safety line.
+        // Fallback barge-in if the interim path didn't already cut this turn.
         const strongInterrupt = (conf >= 0.75 && (wc >= 3 || /\d/.test(t)))
           || (conf >= 0.85 && wc >= 2);
-        if (strongInterrupt && !callEnding) {
-          console.log(`[${callSessionId}] [HYBRID] barge-in — cutting bot playback`);
-          // Drop audio already buffered on Twilio's side…
-          if (streamSid && ws.readyState === ws.OPEN) {
-            try { ws.send(JSON.stringify({event: "clear", streamSid})); } catch (_) {}
-          }
-          // …and everything queued/incoming for the rest of this turn locally.
-          bridge.suppressTurn();
-        }
+        if (strongInterrupt && !bargedThisTurn && !callEnding) doBargeIn("final");
         return;
       }
-      // Model idle — debounce to coalesce multi-part finals into ONE turn.
-      // 150ms was too short for natural mid-sentence pauses: "תחנה מספר" and
-      // "41 יש לך?" arrived as separate turns and the bot answered the first
-      // fragment before the number landed (call 2sNrZcMAyvkct9HpFGXO). 500ms
-      // costs half a second of latency but buys whole-sentence understanding.
+      // Model idle — SMART coalescing for minimal latency:
+      // a complete-looking utterance (4+ words, or ends with . ? !) is sent
+      // IMMEDIATELY (zero added delay — the common case). Only short fragments
+      // or ones trailing a digit (a number that might continue, e.g. "תחנה 4"…
+      // "1") wait a brief 250ms to coalesce. This removes the flat per-turn
+      // debounce that made every reply feel laggy, without re-splitting numbers.
       if (pendingTimer) clearTimeout(pendingTimer);
       pendingUserText += (pendingUserText ? " " : "") + t.trim();
-      pendingTimer = setTimeout(() => {
-        const combined = pendingUserText; pendingUserText = ""; pendingTimer = null;
-        sendToModel(combined);
-      }, 500);
+      const combinedNow = pendingUserText;
+      const looksComplete = combinedNow.split(/\s+/).length >= 4 || /[.?!]$/.test(combinedNow);
+      const trailingNumber = /\d[\s.,]*$/.test(combinedNow);
+      if (looksComplete && !trailingNumber) {
+        pendingUserText = ""; pendingTimer = null;
+        sendToModel(combinedNow);
+      } else {
+        pendingTimer = setTimeout(() => {
+          const combined = pendingUserText; pendingUserText = ""; pendingTimer = null;
+          sendToModel(combined);
+        }, 250);
+      }
     });
     dgConn.on("error", (e) => console.error(`[${callSessionId}] [HYBRID] Deepgram error: ${e?.message || e}`));
     dgConn.on("close", () => { dgReady = false; });
@@ -3487,6 +3664,11 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
           recorder.pushInbound(msg.media.payload);
           costs.inputTokens += 5; // rough estimate
         }
+        break;
+      case "dtmf":
+        // Twilio: {event:"dtmf", dtmf:{track, digit}}. Voximplant scenario
+        // forwards the same shape on CallEvents.ToneReceived.
+        if (msg.dtmf?.digit != null) onDtmfDigit(msg.dtmf.digit);
         break;
       case "stop":
         console.log(`[${callSessionId}] [GL] Stream stopped`);
@@ -3634,6 +3816,9 @@ app.ws("/voximplant/stream/:callSessionId", async (ws, req) => {
     db,
     sessionRef,
     messageBuffer: [],
+    // Mirror the Twilio path: a gemini-hybrid assistant needs Deepgram ears.
+    // Without this the Vox call ran pure-Gemini-audio mode and bridged nothing.
+    hybridSTT: assistant.voiceProvider === "gemini-hybrid",
     markSetupComplete: (handler) => adapter.on("message", handler),
   });
 });
@@ -3933,6 +4118,9 @@ app.ws("/stream/:callSessionId", async (ws, req) => {
   const assistantVoice = assistant.voice || null;
   const speechSpeed = assistant.speechSpeed || 1.0;
   const ttsAndSend = async (text, reason = "response", hangup = false) => {
+    // Strip markdown/symbols BEFORE synthesis — Standard mode (this path) was
+    // not sanitizing the model reply, so quotes/asterisks/brackets were spoken.
+    text = sanitizeForSpeech(text) || text;
     // Apply pronunciation fixes for Hebrew (from Firestore + hardcoded)
     const pronFixes = deepgramLang.startsWith("he") ? await loadPronunciationFixes() : [];
     const ttsText = deepgramLang.startsWith("he") ? applyPronunciationFixes(text, pronFixes) : text;
@@ -4389,7 +4577,7 @@ This applies to ALL languages. Never use digits in your response.`;
     } else if (name === "search_knowledge_base") {
       const results = await fetchKnowledgeContext(assistantId, args.query || "");
       if (!results.length) return "No relevant information found in the knowledge base.";
-      return results.map((r, i) => `[${i + 1}] ${r.content}`).join("\n\n");
+      return results.map((r) => sanitizeForSpeech(r.content)).filter(Boolean).join("\n\n");
     } else if (name === "save_lead") {
       await db.collection("leads").add({
         ...args, assistantId, callSessionId, source: "call", status: "new",

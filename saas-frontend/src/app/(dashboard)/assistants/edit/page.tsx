@@ -919,6 +919,9 @@ function AssistantEdit() {
   const [reportFor, setReportFor] = useState<string | null>(null);   // sourceRoot currently expanded
   const [reportData, setReportData] = useState<CrawlReport | null>(null);
   const [reportLoading, setReportLoading] = useState(false);
+  // Live crawl progress — polls the coverage report while a crawl is running so
+  // pages appear in real time (the backend writes each page as it's embedded).
+  const crawlPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   async function toggleCrawlReport(sourceRoot: string) {
     if (reportFor === sourceRoot) { setReportFor(null); setReportData(null); return; }
     setReportFor(sourceRoot); setReportData(null); setReportLoading(true);
@@ -926,6 +929,7 @@ function AssistantEdit() {
     catch { setReportData(null); }
     finally { setReportLoading(false); }
   }
+  useEffect(() => () => { if (crawlPollRef.current) clearInterval(crawlPollRef.current); }, []);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Settings sub-tab
@@ -1087,6 +1091,28 @@ function AssistantEdit() {
     if (!url || !id) return;
     try { new URL(url); } catch { setKbError("Invalid URL — include https://"); return; }
     setUrlAdding(true); setKbError(""); setKbUploadStatus("Crawling site & embedding pages — this can take ~1 minute...");
+    // Live progress: expand the coverage view for this URL and poll it while the
+    // crawl runs. Each poll reflects pages already written, so the table fills
+    // up live instead of staying empty until the whole crawl finishes.
+    setReportFor(url); setReportData(null);
+    if (crawlPollRef.current) clearInterval(crawlPollRef.current);
+    // Poll every 4s, but never overlap requests — if the previous report is
+    // still in flight, skip this tick. Overlapping polls were stacking up and
+    // overloading the function (the 503/500 storm in the network tab).
+    let inFlight = false;
+    crawlPollRef.current = setInterval(async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const live = await knowledgeCrawlReport(id, url);
+        setReportData(live);
+        if (live?.totalPages) {
+          setKbUploadStatus(`Crawling… ${live.totalPages} page${live.totalPages === 1 ? "" : "s"} indexed so far (${live.totalChunks} chunks)`);
+        }
+      } catch { /* report not ready yet — keep polling */ }
+      finally { inFlight = false; }
+    }, 4000);
+    const stopPoll = () => { if (crawlPollRef.current) { clearInterval(crawlPollRef.current); crawlPollRef.current = null; } };
     try {
       const result = await knowledgeProcessUrl({ assistantId: id, url }) as { chunksCreated: number; pagesCrawled?: number; pagesWritten?: number; partial?: boolean };
       const written = result.pagesWritten ?? result.pagesCrawled;
@@ -1095,17 +1121,23 @@ function AssistantEdit() {
         ? `Partial — indexed ${result.chunksCreated} chunks${pagesNote} (crawl hit the time limit; click "view coverage" to see what was captured, then Re-sync for the rest)`
         : `Done — ${result.chunksCreated} chunks indexed${pagesNote}`);
       setUrlInput("");
+      stopPoll();
+      // Final authoritative report once the crawl completes.
+      try { setReportData(await knowledgeCrawlReport(id, url)); } catch { /* keep last live snapshot */ }
       await loadKbFiles();
       setTimeout(() => setKbUploadStatus(""), result.partial ? 12000 : 4000);
     } catch (e: unknown) {
       // The crawl now writes pages incrementally, so even a timeout/dropped
       // connection usually leaves pages stored. Reload the list so the user
       // sees what was captured rather than assuming total failure.
+      stopPoll();
+      try { setReportData(await knowledgeCrawlReport(id, url)); } catch { /* keep last live snapshot */ }
       await loadKbFiles().catch(() => {});
       setKbError((e instanceof Error ? e.message : "Crawl interrupted") +
         " — some pages may still have been captured; check the list below and click \"view coverage\". Re-sync to finish.");
       setKbUploadStatus("");
     } finally {
+      stopPoll();
       setUrlAdding(false);
     }
   }
@@ -1160,15 +1192,36 @@ function AssistantEdit() {
   async function handleSyncUrl(url: string) {
     if (!id) return;
     setSyncingUrl(url); setKbError("");
+    // Live progress: open this URL's coverage panel and poll it (non-overlapping)
+    // so pages re-appear in real time as the re-crawl writes them.
+    setReportFor(url); setReportData(null);
+    if (crawlPollRef.current) clearInterval(crawlPollRef.current);
+    let inFlight = false;
+    crawlPollRef.current = setInterval(async () => {
+      if (inFlight) return;
+      inFlight = true;
+      try {
+        const live = await knowledgeCrawlReport(id, url);
+        setReportData(live);
+        if (live?.totalPages) setKbUploadStatus(`Re-syncing… ${live.totalPages} page${live.totalPages === 1 ? "" : "s"} (${live.totalChunks} chunks)`);
+      } catch { /* keep polling */ }
+      finally { inFlight = false; }
+    }, 4000);
+    const stopPoll = () => { if (crawlPollRef.current) { clearInterval(crawlPollRef.current); crawlPollRef.current = null; } };
     try {
       const result = await knowledgeSync({ assistantId: id, url });
       const pagesNote = result.pagesCrawled ? ` across ${result.pagesCrawled} pages` : "";
       setKbUploadStatus(`Synced — ${result.chunksCreated} chunks updated${pagesNote}`);
+      stopPoll();
+      try { setReportData(await knowledgeCrawlReport(id, url)); } catch { /* keep last snapshot */ }
       await loadKbFiles();
       setTimeout(() => setKbUploadStatus(""), 4000);
     } catch (e: unknown) {
+      stopPoll();
+      try { setReportData(await knowledgeCrawlReport(id, url)); } catch { /* keep last snapshot */ }
       setKbError(e instanceof Error ? e.message : "Sync failed");
     } finally {
+      stopPoll();
       setSyncingUrl(null);
     }
   }
@@ -1535,6 +1588,18 @@ function AssistantEdit() {
                           set("voiceProvider", p);
                           // Backwards-compatibility: keep realtimeEnabled in sync
                           set("realtimeEnabled", p === "openai-realtime");
+                          // Normalize the stored voice into the new provider's namespace so the
+                          // correct picker shows a VALID selection. Gemini providers use Gemini
+                          // voice names (Aoede/Charon…), OpenAI Realtime uses ash/alloy/etc.
+                          // Preserve gender across the switch (male OpenAI → Charon, else Aoede).
+                          const GEMINI_VOICES = ["Aoede","Kore","Puck","Charon","Fenrir","Orbit","Zephyr"];
+                          const MALE_OPENAI = ["ash","echo","verse","ballad","cedar"];
+                          const cur = (assistant as AssistantExtended).realtimeVoice || "";
+                          if ((p === "gemini-live" || p === "gemini-hybrid") && !GEMINI_VOICES.includes(cur)) {
+                            set("realtimeVoice", MALE_OPENAI.includes(cur.toLowerCase()) ? "Charon" : "Aoede");
+                          } else if (p === "openai-realtime" && GEMINI_VOICES.includes(cur)) {
+                            set("realtimeVoice", "ash");
+                          }
                         };
                         const dg  = rateCard?.deepgram?.costPerMinute ?? 0.0043;
                         const tts = rateCard?.openai?.costPerTtsChar1K ?? 0.015;
@@ -1766,15 +1831,22 @@ function AssistantEdit() {
                     );
                   })()}
 
-                  {/* Gemini Live: voice selector */}
-                  {(assistant as AssistantExtended).voiceProvider === "gemini-live" && (
+                  {/* Gemini Live / Hybrid: voice selector (both run Gemini models → Gemini voices) */}
+                  {((assistant as AssistantExtended).voiceProvider === "gemini-live" ||
+                    (assistant as AssistantExtended).voiceProvider === "gemini-hybrid") && (
                     <div className="space-y-3 p-4 bg-blue-50 rounded-xl border border-blue-200">
                       <label className="block text-xs font-semibold text-blue-700 uppercase tracking-wide">
-                        Gemini Live Voice
-                        <span className="ml-2 text-[10px] font-normal text-blue-500">~$0.03/min · native Hebrew · ~10x cheaper than OpenAI</span>
+                        Gemini Voice
+                        <span className="ml-2 text-[10px] font-normal text-blue-500">native Hebrew · pick a male or female Gemini voice</span>
                       </label>
                       <select
-                        value={(assistant as AssistantExtended).realtimeVoice || "Aoede"}
+                        value={(() => {
+                          const rv = (assistant as AssistantExtended).realtimeVoice || "Aoede";
+                          const GEMINI = ["Aoede","Kore","Puck","Charon","Fenrir","Orbit","Zephyr"];
+                          if (GEMINI.includes(rv)) return rv;
+                          // Stale OpenAI voice stored — show a gender-matched Gemini voice.
+                          return ["ash","echo","verse","ballad","cedar"].includes(rv.toLowerCase()) ? "Charon" : "Aoede";
+                        })()}
                         onChange={(e) => set("realtimeVoice", e.target.value)}
                         className="w-full border border-blue-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                       >
@@ -1793,34 +1865,39 @@ function AssistantEdit() {
                     </div>
                   )}
 
-                  {/* Voice-to-Voice: realtime voice selector + VAD */}
+                  {/* Realtime tuning. Voice selector here is OpenAI-only; Gemini providers
+                      use the Gemini voice picker above. VAD applies to all realtime paths. */}
                   {isRealtime && (
                     <div className="space-y-3 p-4 bg-violet-50 rounded-xl border border-violet-200">
-                      <label className="block text-xs font-semibold text-violet-700 uppercase tracking-wide">
-                        Realtime Voice
-                        <PriceLabel tone="warn">
-                          ${(rateCard?.openaiRealtime?.costPerMinuteInput ?? 0.06).toFixed(2)} in / ${(rateCard?.openaiRealtime?.costPerMinuteOutput ?? 0.24).toFixed(2)} out /min
-                        </PriceLabel>
-                      </label>
-                      <div className="flex gap-2">
-                        <select
-                          value={(assistant as AssistantExtended).realtimeVoice || "ash"}
-                          onChange={(e) => set("realtimeVoice", e.target.value)}
-                          className="flex-1 border border-violet-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
-                        >
-                          {REALTIME_VOICES.map((v) => (
-                            <option key={v.value} value={v.value}>{v.label}</option>
-                          ))}
-                        </select>
-                        <button type="button" onClick={playRealtimePreview}
-                          className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                            realtimePreviewPlaying ? "bg-neutral-800 text-white border-neutral-800" : "border-violet-300 text-violet-600 hover:bg-violet-100"
-                          }`}
-                        >
-                          {realtimePreviewPlaying ? <Square className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
-                          {realtimePreviewPlaying ? "Stop" : "Preview"}
-                        </button>
-                      </div>
+                      {(assistant as AssistantExtended).voiceProvider === "openai-realtime" && (
+                        <>
+                          <label className="block text-xs font-semibold text-violet-700 uppercase tracking-wide">
+                            Realtime Voice
+                            <PriceLabel tone="warn">
+                              ${(rateCard?.openaiRealtime?.costPerMinuteInput ?? 0.06).toFixed(2)} in / ${(rateCard?.openaiRealtime?.costPerMinuteOutput ?? 0.24).toFixed(2)} out /min
+                            </PriceLabel>
+                          </label>
+                          <div className="flex gap-2">
+                            <select
+                              value={(assistant as AssistantExtended).realtimeVoice || "ash"}
+                              onChange={(e) => set("realtimeVoice", e.target.value)}
+                              className="flex-1 border border-violet-200 rounded-lg px-3 py-2.5 text-sm focus:outline-none focus:border-violet-500 focus:ring-1 focus:ring-violet-500"
+                            >
+                              {REALTIME_VOICES.map((v) => (
+                                <option key={v.value} value={v.value}>{v.label}</option>
+                              ))}
+                            </select>
+                            <button type="button" onClick={playRealtimePreview}
+                              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${
+                                realtimePreviewPlaying ? "bg-neutral-800 text-white border-neutral-800" : "border-violet-300 text-violet-600 hover:bg-violet-100"
+                              }`}
+                            >
+                              {realtimePreviewPlaying ? <Square className="w-3.5 h-3.5" /> : <Volume2 className="w-3.5 h-3.5" />}
+                              {realtimePreviewPlaying ? "Stop" : "Preview"}
+                            </button>
+                          </div>
+                        </>
+                      )}
                       <div className="grid grid-cols-2 gap-2">
                         <div>
                           <label className="block text-[10px] font-semibold text-violet-600 mb-1 uppercase tracking-wide">Turn Detection</label>
@@ -2446,41 +2523,69 @@ function AssistantEdit() {
                           <div className="flex items-center gap-2 text-xs text-neutral-400 py-2"><Loader2 className="w-3.5 h-3.5 animate-spin" /> Building coverage report…</div>
                         ) : !reportData || reportData.pages.length === 0 ? (
                           <p className="text-xs text-neutral-400 py-2">No page data found for this source.</p>
-                        ) : (
+                        ) : (() => {
+                          const maxChars = Math.max(1, ...reportData.pages.map((p) => p.chars));
+                          const thinCount = reportData.pages.filter((p) => p.chars < 200).length;
+                          const live = (urlAdding || syncingUrl === file.sourceFile) && reportFor === file.sourceFile;
+                          return (
                           <>
-                            <div className="flex items-center justify-between mb-2 text-xs">
-                              <span className="font-semibold text-neutral-600">{reportData.totalPages} pages · {reportData.totalChunks} chunks · {reportData.totalChars.toLocaleString()} characters indexed</span>
+                            {/* Summary stat chips */}
+                            <div className="grid grid-cols-3 gap-2 mb-3">
+                              {[
+                                { label: "Pages read", value: reportData.totalPages.toLocaleString(), tone: "text-blue-600 bg-blue-50 border-blue-100" },
+                                { label: "Chunks", value: reportData.totalChunks.toLocaleString(), tone: "text-violet-600 bg-violet-50 border-violet-100" },
+                                { label: "Characters", value: reportData.totalChars.toLocaleString(), tone: "text-emerald-600 bg-emerald-50 border-emerald-100" },
+                              ].map((s) => (
+                                <div key={s.label} className={`border rounded-lg px-2.5 py-2 ${s.tone}`}>
+                                  <div className="text-base font-bold tabular-nums leading-none">{s.value}</div>
+                                  <div className="text-[10px] uppercase tracking-wide opacity-70 mt-1">{s.label}</div>
+                                </div>
+                              ))}
                             </div>
-                            <div className="max-h-64 overflow-y-auto rounded-md border border-neutral-200 bg-white">
-                              <table className="w-full text-xs">
-                                <thead className="sticky top-0 bg-neutral-50 text-neutral-400">
-                                  <tr>
-                                    <th className="text-left font-medium px-2 py-1.5">Page</th>
-                                    <th className="text-right font-medium px-2 py-1.5 w-20">Chars</th>
-                                    <th className="text-right font-medium px-2 py-1.5 w-16">Chunks</th>
-                                  </tr>
-                                </thead>
-                                <tbody className="divide-y divide-neutral-50">
-                                  {reportData.pages.map((p) => {
-                                    let short = p.url;
-                                    try { const u = new URL(p.url); short = (u.pathname === "/" ? u.hostname : u.pathname) + u.search; } catch {}
-                                    const thin = p.chars < 200;   // flag near-empty pages
-                                    return (
-                                      <tr key={p.url} className="hover:bg-neutral-50">
-                                        <td className="px-2 py-1.5 max-w-0">
-                                          <a href={p.url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline truncate block" title={p.url}>{short}</a>
-                                        </td>
-                                        <td className={`px-2 py-1.5 text-right tabular-nums ${thin ? "text-amber-600 font-medium" : "text-neutral-600"}`} title={thin ? "Very little text extracted from this page" : ""}>{p.chars.toLocaleString()}</td>
-                                        <td className="px-2 py-1.5 text-right tabular-nums text-neutral-400">{p.chunks}</td>
-                                      </tr>
-                                    );
-                                  })}
-                                </tbody>
-                              </table>
+                            {live && <div className="flex items-center gap-1.5 text-[11px] text-blue-500 mb-2"><Loader2 className="w-3 h-3 animate-spin" /> Crawling live — pages appear here as they are read…</div>}
+
+                            {/* Per-page drill-down: name, path, proportional text bar */}
+                            <div className="max-h-80 overflow-y-auto rounded-lg border border-neutral-200 bg-white divide-y divide-neutral-50">
+                              {reportData.pages.map((p, idx) => {
+                                let short = p.url;
+                                try { const u = new URL(p.url); short = decodeURIComponent((u.pathname === "/" ? u.hostname : u.pathname)); } catch {}
+                                const name = p.name || short;
+                                const thin = p.chars < 200;   // flag near-empty pages
+                                const pct = Math.round((p.chars / maxChars) * 100);
+                                return (
+                                  <div key={p.url} className="px-2.5 py-2 hover:bg-neutral-50/80 group/page">
+                                    <div className="flex items-center justify-between gap-2">
+                                      <div className="flex items-center gap-2 min-w-0">
+                                        <span className="text-[10px] tabular-nums text-neutral-300 w-5 text-right flex-shrink-0">{idx + 1}</span>
+                                        <div className="min-w-0">
+                                          <a href={p.url} target="_blank" rel="noopener noreferrer" dir="auto"
+                                            className="text-[13px] font-medium text-neutral-700 hover:text-blue-600 hover:underline truncate block" title={p.url}>
+                                            {name}{thin && <span className="ml-1.5 text-amber-500" title="Very little text extracted — page may be image-only or JS-rendered">⚠</span>}
+                                          </a>
+                                          <span className="text-[10px] text-neutral-400 truncate block" dir="auto" title={p.url}>{short}</span>
+                                        </div>
+                                      </div>
+                                      <div className="text-right flex-shrink-0">
+                                        <div className={`text-xs tabular-nums font-medium ${thin ? "text-amber-600" : "text-neutral-600"}`}>{p.chars.toLocaleString()} ch</div>
+                                        <div className="text-[10px] text-neutral-400 tabular-nums">{p.chunks} chunk{p.chunks !== 1 ? "s" : ""}</div>
+                                      </div>
+                                    </div>
+                                    {/* proportional text-volume bar */}
+                                    <div className="mt-1.5 ml-7 h-1 rounded-full bg-neutral-100 overflow-hidden">
+                                      <div className={`h-full rounded-full ${thin ? "bg-amber-300" : "bg-blue-400"}`} style={{ width: `${Math.max(2, pct)}%` }} />
+                                    </div>
+                                  </div>
+                                );
+                              })}
                             </div>
-                            <p className="text-[11px] text-neutral-400 mt-2">Amber = little text extracted (page may be image-only or JS-rendered). Re-sync after the site updates to refresh coverage.</p>
+                            <p className="text-[11px] text-neutral-400 mt-2">
+                              Every page the crawler read is listed above — bar length = how much text was extracted.
+                              {thinCount > 0 && <span className="text-amber-600"> {thinCount} page{thinCount !== 1 ? "s" : ""} yielded little text (⚠) — likely image-only or JS-rendered.</span>}
+                              {" "}Re-sync after the site updates to refresh coverage.
+                            </p>
                           </>
-                        )}
+                          );
+                        })()}
                       </div>
                     )}
                   </div>

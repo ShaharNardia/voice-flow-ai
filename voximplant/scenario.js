@@ -191,6 +191,8 @@ function openBridge() {
 
 function attachCallHandlers(call) {
   pstnCall = call;
+  // Enable in-band DTMF detection so CallEvents.ToneReceived fires.
+  try { call.handleTones(true); } catch (e) { Logger.write("[VFA] handleTones failed: " + e.message); }
 
   call.addEventListener(CallEvents.Connected, () => {
     answeredAt = Date.now();
@@ -205,6 +207,17 @@ function attachCallHandlers(call) {
     } else {
       emit("call.connected", { at: answeredAt });
       openBridge();
+    }
+  });
+
+  // Forward caller keypad presses (DTMF) to Cloud Run as a Twilio-shaped
+  // dtmf frame so the hybrid handler can feed them to the model.
+  call.addEventListener(CallEvents.ToneReceived, (e) => {
+    const digit = e.tone;
+    Logger.write("[VFA] DTMF tone: " + digit);
+    if (ws && digit != null) {
+      try { ws.send(JSON.stringify({ event: "dtmf", dtmf: { digit: String(digit) } })); }
+      catch (err) { Logger.write("[VFA] DTMF forward failed: " + err.message); }
     }
   });
 

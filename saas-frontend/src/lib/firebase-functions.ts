@@ -63,11 +63,20 @@ export const assistantsDuplicate = (data: { id: string; name?: string }) =>
   httpPost<{ id: string; name: string }>("/assistantsDuplicate", data);
 
 // ── Phone Numbers ─────────────────────────────────────────────────────
-export const searchPhoneNumbers = (data: { country: string; areaCode?: string }) =>
-  httpPost<PhoneNumber[]>("/searchPhoneNumbers", data);
+// Twilio returns a bare PhoneNumber[]; Voximplant returns { numbers, note }.
+// Normalize both to { numbers, note } so the buy page has one shape to render.
+export const searchPhoneNumbers = async (
+  data: { country: string; areaCode?: string; provider?: "twilio" | "voximplant"; companyId?: string; category?: string; regionId?: string },
+): Promise<{ numbers: PhoneNumber[]; note?: string | null }> => {
+  const res = await httpPost<PhoneNumber[] | { numbers: PhoneNumber[]; note?: string | null }>("/searchPhoneNumbers", data);
+  if (Array.isArray(res)) return { numbers: res };
+  return { numbers: Array.isArray(res?.numbers) ? res.numbers : [], note: res?.note ?? null };
+};
 
-export const purchasePhoneNumber = (data: { phoneNumber: string }) =>
-  httpPost<{ sid: string; phoneNumber: string }>("/purchasePhoneNumber", data);
+export const purchasePhoneNumber = (
+  data: { phoneNumber: string; provider?: "twilio" | "voximplant"; companyId?: string; assistantId?: string; phoneId?: string; regionId?: string; category?: string; friendlyName?: string },
+) =>
+  httpPost<{ sid?: string; phoneNumber: string; provider?: string; bound?: boolean; note?: string | null }>("/purchasePhoneNumber", data);
 
 export const releasePhoneNumber = (data: { phoneNumber: string; sid?: string }) =>
   httpPost<{ status: string }>("/releasePhoneNumber", data);
@@ -77,6 +86,30 @@ export const listPhoneNumbers = () =>
 
 export const configurePhoneNumber = (data: { phoneNumber: string; assistantId?: string }) =>
   httpPost<{ status: string }>("/configurePhoneNumber", data);
+
+// Provider-agnostic assignment — upserts Company.phoneNumberMap server-side
+// (Admin SDK), so inbound routing actually reflects the assignment.
+export const assignPhoneNumber = (data: { phoneNumber: string; assistantId?: string }) =>
+  httpPost<{ status: string; companiesUpdated: number; assistantName: string }>("/assignPhoneNumber", data);
+
+// Voximplant Management API credentials (stored on the company doc).
+export interface VoximplantConfig {
+  companyId: string;
+  configured: boolean;
+  voxAccountId: string;
+  voxRuleId: string;
+  voxAppName: string;
+  voxApplicationId: string;
+  voxCallerId: string;
+  apiKeySet: boolean;
+  apiKeyHint: string;
+}
+export const voximplantConfigGet = () =>
+  httpGet<VoximplantConfig>("/voximplantConfigGet");
+export const voximplantConfigSet = (data: {
+  voxAccountId?: string; voxApiKey?: string; voxRuleId?: string;
+  voxAppName?: string; voxApplicationId?: string; voxCallerId?: string;
+}) => httpPost<{ status: string; updated: string[] }>("/voximplantConfigSet", data);
 
 // ── SIP Trunks ────────────────────────────────────────────────────────
 export const sipTrunkCreate = (data: SipTrunkInput) =>
@@ -343,7 +376,7 @@ export const knowledgeDeleteFile = (data: { assistantId: string; sourceFile: str
 export const knowledgeProcessUrl = (data: { assistantId: string; url: string }) =>
   httpPost<{ chunksCreated: number; pagesCrawled?: number; url: string }>("/knowledgeProcessUrl", data);
 
-export interface CrawlPage { url: string; chunks: number; chars: number }
+export interface CrawlPage { url: string; name?: string; chunks: number; chars: number }
 export interface CrawlReport { sourceRoot: string; totalPages: number; totalChunks: number; totalChars: number; pages: CrawlPage[] }
 export const knowledgeCrawlReport = (assistantId: string, sourceRoot: string) =>
   httpGet<CrawlReport>(`/knowledgeCrawlReport?assistantId=${encodeURIComponent(assistantId)}&sourceRoot=${encodeURIComponent(sourceRoot)}`);
@@ -908,6 +941,12 @@ export interface PhoneNumber {
   region?: string;
   country?: string;
   monthlyPrice?: string;
+  // Voximplant-only fields, used to complete the purchase call.
+  phoneId?: string;
+  regionId?: string;
+  category?: string;
+  setupPrice?: string;
+  provider?: "twilio" | "voximplant";
 }
 
 // ── SIP Trunk types ────────────────────────────────────────────────────

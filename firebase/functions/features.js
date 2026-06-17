@@ -26,6 +26,11 @@ const FEATURES = [
   {id: "cap.scheduleReminders", label: "Lesson/appointment reminders", defaultOn: true, kind: "cap"},
   {id: "cap.pwaPush", label: "PWA install + push notifications", defaultOn: false, kind: "cap"},
   {id: "cap.sipTrunks", label: "SIP Trunk integration", defaultOn: true, kind: "cap"},
+  // Clalit / healthcare tender. Per-USER gate for the admin UI; the per-TENANT
+  // source of truth is Company.healthcareCompliance.enabled (see
+  // healthcare_config.js). Default OFF — behavior is unchanged unless a tenant
+  // explicitly opts in.
+  {id: "cap.healthcareCompliance", label: "Healthcare Compliance (Clalit mode)", defaultOn: false, kind: "cap"},
 ];
 
 const FEATURE_IDS = new Set(FEATURES.map((f) => f.id));

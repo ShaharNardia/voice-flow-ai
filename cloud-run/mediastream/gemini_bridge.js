@@ -103,6 +103,7 @@ function buildLanguageLock(language) {
       "All of your spoken responses are in natural, native Hebrew. No exceptions.",
       "Speak fluent, grammatically correct Hebrew in complete well-formed sentences, as an educated native speaker would on the phone.",
       "NUMBERS: pronounce numbers as natural Hebrew number words, the way a person says them aloud. 510 is \"חמש מאות ועשר\", 231 is \"מאתיים שלושים ואחת\", 8 דקות is \"שמונה דקות\". NEVER read a number digit-by-digit (\"חמש אחת אפס\") unless it is a phone number or a code the caller must write down.",
+      "SYMBOLS ARE NEVER SPOKEN: speak only natural words. NEVER vocalize any punctuation or symbol — no quotation marks, asterisks, brackets, parentheses, slashes, hashes, underscores, angle brackets, pipes, backticks, or stars. When text is inside quotes, say only the words, NOT the quote marks. Convert every symbol into the plain spoken word a person would actually say, or skip it. Under no circumstances pronounce the name of a punctuation character.",
       "",
       "",
     ].join("\n");
@@ -110,6 +111,7 @@ function buildLanguageLock(language) {
   return [
     `LANGUAGE LOCK, ${language} ONLY.`,
     `This entire call is conducted in ${language}. The caller is always speaking ${language}, even when audio is short or unclear. Never switch languages mid-call. Always transcribe and respond in ${language}.`,
+    "SYMBOLS ARE NEVER SPOKEN: speak only natural words. Never vocalize punctuation or symbols (quotation marks, asterisks, brackets, parentheses, slashes, hashes, underscores, angle brackets, pipes, backticks). When text is inside quotes, say only the words, not the quote marks.",
     "",
     "",
   ].join("\n");
@@ -270,6 +272,11 @@ class GeminiBridge extends EventEmitter {
     // the hint, Gemini auto-detects, which is unreliable on 8kHz phone Hebrew
     // (caller speaks Hebrew, transcript comes out as Italian/Portuguese/etc.)
     this._langHintFailed = false;
+    // Dedup: some model variants (e.g. 2.5 native-audio) send the same
+    // function call via BOTH the top-level toolCall message AND embedded
+    // inside serverContent.modelTurn.parts, causing two tool_call emissions
+    // for the same callId. Track emitted IDs per turn and skip duplicates.
+    this._emittedToolCallIds = new Set();
   }
 
   /** Lazily spawn ffmpeg once we know the input sample rate. */
@@ -653,11 +660,17 @@ class GeminiBridge extends EventEmitter {
     // kept for older model variants.
     if (msg.toolCall?.functionCalls?.length) {
       for (const fc of msg.toolCall.functionCalls) {
+        const id = fc.id || fc.name;
+        if (this._emittedToolCallIds.has(id)) {
+          this._log(`tool call ${id} already emitted — skipping duplicate (toolCall path)`);
+          continue;
+        }
+        this._emittedToolCallIds.add(id);
         this._log(`tool call: ${fc.name}(${JSON.stringify(fc.args || {}).slice(0, 120)}) id=${fc.id || "-"}`);
         this.emit("tool_call", {
           name: fc.name,
           args: fc.args || {},
-          callId: fc.id || fc.name,
+          callId: id,
         });
       }
       return;
@@ -758,14 +771,21 @@ class GeminiBridge extends EventEmitter {
       }
     }
 
-    // Tool call
+    // Tool call (legacy: some model variants embed functionCall in serverContent
+    // in addition to sending a top-level toolCall message — dedup by callId).
     if (sc.modelTurn?.parts) {
       for (const part of sc.modelTurn.parts) {
         if (part.functionCall) {
+          const id = part.functionCall.id || part.functionCall.name;
+          if (this._emittedToolCallIds.has(id)) {
+            this._log(`tool call ${id} already emitted — skipping duplicate (modelTurn path)`);
+            continue;
+          }
+          this._emittedToolCallIds.add(id);
           this.emit("tool_call", {
             name: part.functionCall.name,
             args: part.functionCall.args || {},
-            callId: part.functionCall.id || part.functionCall.name,
+            callId: id,
           });
         }
       }
@@ -784,6 +804,7 @@ class GeminiBridge extends EventEmitter {
       this._dropTurnAudio = false;  // barge-in cut ends with the turn
       this._turnHasMeta = false;
       this._turnText = "";
+      this._emittedToolCallIds.clear();  // reset dedup set for next turn
       // Diagnostic: did this turn actually produce audio? A turnComplete with
       // turnAudioBytes=0 means Gemini ended the turn WITHOUT speaking — the
       // root signature of the hybrid "no response" symptom.

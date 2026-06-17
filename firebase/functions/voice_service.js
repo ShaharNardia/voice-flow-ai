@@ -735,6 +735,48 @@ exports.searchPhoneNumbers = onRequest(corsOptions, async (req, res) => {
     return;
   }
 
+  // ── Voximplant branch ──────────────────────────────────────────────────
+  // When the request asks for Voximplant, search its inventory via the
+  // Management API instead of Twilio. Done before requireTwilio so a missing
+  // Twilio config doesn't block Voximplant.
+  {
+    const peek = getJsonBody(req);
+    if ((peek.provider || "").toLowerCase() === "voximplant") {
+      try {
+        const resolved = await voximplantService.resolveVoxConfig(peek.companyId);
+        if (!resolved) {
+          res.status(400).json({ status: "error", message: "Voximplant is not configured (missing voxAccountId/voxApiKey on the Company doc)." });
+          return;
+        }
+        const { numbers, category, note } = await voximplantService.searchVoxNumbers(resolved.config, {
+          country: peek.country || "US",
+          category: peek.category,
+          regionId: peek.regionId,
+          count: typeof peek.limit === "number" ? Math.min(peek.limit, 30) : 20,
+        });
+        const formatted = numbers.map((n) => ({
+          friendlyName: n.phoneNumber,
+          phoneNumber: n.phoneNumber,
+          phoneId: n.phoneId,
+          locality: n.region,
+          region: n.region,
+          regionId: n.regionId,
+          category: n.category,
+          isoCountry: n.country,
+          monthlyPrice: n.monthlyPrice ? `$${n.monthlyPrice}` : undefined,
+          setupPrice: n.setupPrice,
+          provider: "voximplant",
+        }));
+        res.status(200).json({ numbers: formatted, category: category || null, note: note || null });
+        return;
+      } catch (e) {
+        logger.error("Failed to search Voximplant numbers", { message: e.message });
+        res.status(500).json({ status: "error", message: e.message || "Failed to search Voximplant numbers" });
+        return;
+      }
+    }
+  }
+
   if (!requireTwilio(res)) {
     return;
   }
@@ -819,6 +861,86 @@ exports.purchasePhoneNumber = onRequest(corsOptions, async (req, res) => {
       message: "Method not allowed. Expected POST.",
     });
     return;
+  }
+
+  // ── Voximplant branch ──────────────────────────────────────────────────
+  {
+    const peek = getJsonBody(req);
+    if ((peek.provider || "").toLowerCase() === "voximplant") {
+      try {
+        const resolved = await voximplantService.resolveVoxConfig(peek.companyId);
+        if (!resolved) {
+          res.status(400).json({ status: "error", message: "Voximplant is not configured (missing voxAccountId/voxApiKey on the Company doc)." });
+          return;
+        }
+        const bought = await voximplantService.buyVoxNumber(resolved.config, {
+          phoneNumber: peek.phoneNumber || peek.number,
+          phoneId: peek.phoneId,
+          country: peek.country,
+          category: peek.category,
+          regionId: peek.regionId,
+        });
+        const companyId = peek.companyId || resolved.companyId;
+        const assistantId = peek.assistantId || null;
+        const friendlyName = peek.friendlyName || "VoiceFlow AI (Voximplant)";
+
+        // Map into the company's phoneNumberMap so inbound DID→assistant routing
+        // works (resolveByDid reads this), mirroring the Twilio purchase path.
+        if (companyId) {
+          const db = getFirestore();
+          const companyRef = db.collection("Company").doc(String(companyId));
+          try {
+            await db.runTransaction(async (trx) => {
+              const snapshot = await trx.get(companyRef);
+              const data = snapshot.exists ? snapshot.data() : {};
+              const currentNumbers = collectPhoneNumbers(data?.companyPhoneNumbers);
+              currentNumbers.add(bought.phoneNumber);
+              const phoneEntry = {
+                id: bought.phoneId || bought.phoneNumber,
+                label: "inbound_outbound",
+                phoneNumber: bought.phoneNumber,
+                provider: "voximplant",
+                friendlyName,
+              };
+              if (assistantId) phoneEntry.assistantId = assistantId;
+              const nextEntries = upsertPhoneEntry(data?.phoneNumberMap, phoneEntry);
+              trx.set(companyRef, { companyPhoneNumbers: Array.from(currentNumbers), phoneNumberMap: nextEntries }, { merge: true });
+            });
+          } catch (updateError) {
+            logger.error(`Failed to update company phoneNumberMap (Voximplant) for ${companyId}`, updateError);
+          }
+        }
+
+        // Also write the phone_numbers Firestore doc the Numbers page reads.
+        try {
+          const db = getFirestore();
+          await db.collection("phone_numbers").doc(bought.phoneNumber).set({
+            phoneNumber: bought.phoneNumber,
+            friendlyName,
+            provider: "voximplant",
+            voxPhoneId: bought.phoneId || null,
+            assistantId: assistantId || null,
+            bound: bought.bound,
+            sid: null,
+          }, { merge: true });
+        } catch (e) { logger.warn(`phone_numbers doc write failed: ${e.message}`); }
+
+        res.status(201).json({
+          status: "success",
+          provider: "voximplant",
+          phoneNumber: bought.phoneNumber,
+          phoneId: bought.phoneId || null,
+          bound: bought.bound,
+          note: bought.note || null,
+        });
+        logActivity({ userId: null, action: "phone.purchase", category: "phone", resourceType: "phone_number", details: { phoneNumber: bought.phoneNumber, provider: "voximplant" } }).catch(() => {});
+        return;
+      } catch (e) {
+        logger.error("Failed to purchase Voximplant number", { message: e.message });
+        res.status(500).json({ status: "error", message: e.message || "Failed to purchase Voximplant number" });
+        return;
+      }
+    }
   }
 
   if (!requireTwilio(res)) {
@@ -916,6 +1038,84 @@ exports.purchasePhoneNumber = onRequest(corsOptions, async (req, res) => {
       status: "error",
       message: "Failed to purchase phone number",
     });
+  }
+});
+
+// ── Voximplant credentials config (admin) ───────────────────────────────────
+// Stores the Voximplant Management API credentials on the caller's Company doc
+// so the buy/search flow (and outbound routing) can use them. Without this
+// there is no UI to enter voxAccountId/voxApiKey/voxRuleId, so the buy path
+// would always report "not configured".
+
+async function resolveCompanyIdForUid(uid) {
+  if (!uid) return null;
+  try {
+    const db = getFirestore();
+    const uSnap = await db.collection("users").doc(uid).get();
+    if (uSnap.exists) {
+      const ud = uSnap.data();
+      return ud.companyId || ud.uid || uid;
+    }
+  } catch { /* fall through */ }
+  return uid;
+}
+
+const VOX_CFG_FIELDS = ["voxAccountId", "voxApiKey", "voxRuleId", "voxAppName", "voxApplicationId", "voxCallerId"];
+
+exports.voximplantConfigGet = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  const uid = await extractUidFromRequest(req);
+  if (!uid) { res.status(401).json({ status: "error", message: "Unauthorized" }); return; }
+  try {
+    const companyId = await resolveCompanyIdForUid(uid);
+    const db = getFirestore();
+    const snap = await db.collection("Company").doc(String(companyId)).get();
+    const d = snap.exists ? snap.data() : {};
+    // Never return the raw API key — only whether it's set + a short suffix.
+    res.status(200).json({
+      companyId,
+      configured: !!(d.voxAccountId && d.voxApiKey && d.voxRuleId),
+      voxAccountId: d.voxAccountId || "",
+      voxRuleId: d.voxRuleId || "",
+      voxAppName: d.voxAppName || "",
+      voxApplicationId: d.voxApplicationId || "",
+      voxCallerId: d.voxCallerId || "",
+      apiKeySet: !!d.voxApiKey,
+      apiKeyHint: d.voxApiKey ? `••••${String(d.voxApiKey).slice(-4)}` : "",
+    });
+  } catch (e) {
+    logger.error("voximplantConfigGet failed", e);
+    res.status(500).json({ status: "error", message: e.message || "Failed to read config" });
+  }
+});
+
+exports.voximplantConfigSet = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ status: "error", message: "Method not allowed" }); return; }
+  const uid = await extractUidFromRequest(req);
+  if (!uid) { res.status(401).json({ status: "error", message: "Unauthorized" }); return; }
+  try {
+    const payload = getJsonBody(req);
+    const companyId = payload.companyId || await resolveCompanyIdForUid(uid);
+    const update = {};
+    for (const f of VOX_CFG_FIELDS) {
+      // Only write fields that were sent. Empty apiKey is ignored so a save
+      // that leaves the masked field blank doesn't wipe an existing key.
+      if (payload[f] !== undefined && payload[f] !== null && String(payload[f]).trim() !== "") {
+        update[f] = String(payload[f]).trim();
+      }
+    }
+    if (Object.keys(update).length === 0) {
+      res.status(400).json({ status: "error", message: "No config fields provided." });
+      return;
+    }
+    const db = getFirestore();
+    await db.collection("Company").doc(String(companyId)).set(update, { merge: true });
+    logActivity({ userId: uid, action: "voximplant.config", category: "settings", resourceType: "company", resourceId: String(companyId), details: { fields: Object.keys(update) } }).catch(() => {});
+    res.status(200).json({ status: "success", companyId, updated: Object.keys(update) });
+  } catch (e) {
+    logger.error("voximplantConfigSet failed", e);
+    res.status(500).json({ status: "error", message: e.message || "Failed to save config" });
   }
 });
 
@@ -1751,6 +1951,95 @@ exports.configurePhoneNumber = onRequest(corsOptions, async (req, res) => {
       status: "error",
       message: "Failed to configure phone number",
     });
+  }
+});
+
+// ── Assign a number to an assistant (provider-agnostic, server-side) ─────────
+// Replaces the old browser-side Firestore writes, which silently failed:
+//   • Firestore rules block cross-company/non-admin Company writes (caught as
+//     "sync skipped"), so routing never updated.
+//   • The client loop only PATCHED existing phoneNumberMap entries — a number
+//     with no entry yet could never be assigned.
+// This endpoint uses the Admin SDK (bypasses rules) and UPSERTS the entry into
+// the right Company doc (suffix-match across companies; falls back to the
+// caller's company), so inbound routing (which reads Company.phoneNumberMap)
+// always reflects the assignment — for Twilio, Voximplant, and SIP alike.
+exports.assignPhoneNumber = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ status: "error", message: "Method not allowed" }); return; }
+  const uid = await extractUidFromRequest(req);
+  if (!uid) { res.status(401).json({ status: "error", message: "Unauthorized" }); return; }
+  try {
+    const payload = getJsonBody(req);
+    const phoneNumber = String(payload.phoneNumber || payload.number || "").trim();
+    const assistantId = payload.assistantId ? String(payload.assistantId) : "";
+    if (!phoneNumber) { res.status(400).json({ status: "error", message: "phoneNumber is required" }); return; }
+
+    const db = getFirestore();
+
+    // Resolve assistant display name (best-effort).
+    let assistantName = "";
+    if (assistantId) {
+      try {
+        const aSnap = await db.collection("assistants").doc(assistantId).get();
+        if (aSnap.exists) { const d = aSnap.data(); assistantName = d.name || d.assistantName || ""; }
+      } catch (_) { /* name is cosmetic */ }
+    }
+
+    // Suffix-match on digits (UI may carry +country code while the routing map
+    // stores the bare DID, or vice-versa). Min 7 digits avoids false matches.
+    const cfgDigits = phoneNumber.replace(/\D/g, "");
+    const digitsMatch = (a) => {
+      const da = String(a || "").replace(/\D/g, "");
+      if (!da || !cfgDigits) return false;
+      if (da === cfgDigits) return true;
+      const short = da.length <= cfgDigits.length ? da : cfgDigits;
+      const long  = da.length <= cfgDigits.length ? cfgDigits : da;
+      return short.length >= 7 && long.endsWith(short);
+    };
+
+    // Update every Company doc that already maps this number.
+    let matched = 0;
+    const companiesSnap = await db.collection("Company").get();
+    for (const companyDoc of companiesSnap.docs) {
+      const data = companyDoc.data() || {};
+      const map = Array.isArray(data.phoneNumberMap) ? data.phoneNumberMap : [];
+      const idx = map.findIndex((e) => e && e.phoneNumber && digitsMatch(e.phoneNumber));
+      if (idx >= 0) {
+        const updated = [...map];
+        updated[idx] = { ...updated[idx], assistantId, assistantName };
+        await companyDoc.ref.set({ phoneNumberMap: updated }, { merge: true });
+        matched++;
+      }
+    }
+
+    // No existing entry anywhere → create one in the caller's company so inbound
+    // routing has something to resolve.
+    if (matched === 0) {
+      const companyId = await resolveCompanyIdForUid(uid);
+      const companyRef = db.collection("Company").doc(String(companyId));
+      await db.runTransaction(async (trx) => {
+        const snap = await trx.get(companyRef);
+        const data = snap.exists ? snap.data() : {};
+        const map = Array.isArray(data.phoneNumberMap) ? data.phoneNumberMap : [];
+        map.push({ id: phoneNumber, label: "inbound_outbound", phoneNumber, assistantId, assistantName });
+        const nums = collectPhoneNumbers(data?.companyPhoneNumbers || []);
+        nums.add(phoneNumber);
+        trx.set(companyRef, { phoneNumberMap: map, companyPhoneNumbers: Array.from(nums) }, { merge: true });
+      });
+      matched = 1;
+    }
+
+    // Mirror onto the phone_numbers doc the Numbers page reads.
+    try {
+      await db.collection("phone_numbers").doc(phoneNumber).set({ assistantId, assistantName }, { merge: true });
+    } catch (e) { logger.warn(`assignPhoneNumber: phone_numbers doc update failed: ${e.message}`); }
+
+    logActivity({ userId: uid, action: "phone.assign", category: "phone", resourceType: "phone_number", resourceId: phoneNumber, details: { assistantId } }).catch(() => {});
+    res.status(200).json({ status: "success", phoneNumber, assistantId, assistantName, companiesUpdated: matched });
+  } catch (error) {
+    logger.error("assignPhoneNumber failed", error);
+    res.status(500).json({ status: "error", message: error.message || "Failed to assign number" });
   }
 });
 

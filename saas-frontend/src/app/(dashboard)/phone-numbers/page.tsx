@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { collection, query, onSnapshot, doc, setDoc, deleteDoc, getDocs } from "firebase/firestore";
+import { collection, query, onSnapshot, doc, setDoc, deleteDoc } from "firebase/firestore";
 import { db } from "@/lib/firebase";
-import { releasePhoneNumber, listPhoneNumbers, configurePhoneNumber, assistantsList, getSystemPolicies, type Assistant } from "@/lib/firebase-functions";
+import { releasePhoneNumber, listPhoneNumbers, configurePhoneNumber, assignPhoneNumber, assistantsList, getSystemPolicies, type Assistant } from "@/lib/firebase-functions";
 import { useAuth } from "@/hooks/useAuth";
 import Link from "next/link";
 import { Phone, Plus, Trash2, RefreshCw, Loader2, Settings, X, Check, Server, PencilLine } from "lucide-react";
@@ -197,58 +197,20 @@ export default function PhoneNumbersPage() {
     setSaving(true);
     setSaveError("");
     try {
-      // Configure Twilio webhooks (best-effort — may fail if per-company creds not available)
-      try {
-        await configurePhoneNumber({ phoneNumber: configuring.phoneNumber, assistantId: configAssistantId });
-      } catch (twilioErr) {
-        // Twilio webhook config is only needed on first setup; if it fails,
-        // the number likely already has correct webhooks from purchase/sync.
-        console.warn("Twilio webhook config skipped:", twilioErr);
-      }
-      // Save assistant assignment to phone_numbers collection (used by outbound/UI)
-      const assistant = assistants.find((a) => a.id === configAssistantId);
-      await setDoc(doc(db, "phone_numbers", configuring.phoneNumber), {
+      // Single server-side call: upserts Company.phoneNumberMap (Admin SDK,
+      // provider-agnostic) AND the phone_numbers doc, so inbound routing
+      // actually reflects the assignment. Replaces the old browser-side
+      // Firestore writes that Firestore rules silently blocked.
+      const res = await assignPhoneNumber({
+        phoneNumber: configuring.phoneNumber,
         assistantId: configAssistantId || "",
-        assistantName: configAssistantId
-          ? (assistant?.name || assistant?.assistantName || "")
-          : "",
-      }, { merge: true });
+      });
+      if (res?.status !== "success") throw new Error("Assignment did not complete");
 
-      // Also update ALL Company phoneNumberMap entries for this number (used by inbound calls)
-      // This ensures inbound calls route to the correct assistant.
-      // MATCH BY SUFFIX: the UI number may carry a country code (+972747054945)
-      // while the routing map stores the bare inbound DID (747054945) — a full
-      // digits-equality check missed that and left routing unmapped even though
-      // the UI showed the assignment. Compare on the shorter number's digits as
-      // a suffix (min 7 digits to avoid false matches).
-      try {
-        const cfgDigits = configuring.phoneNumber.replace(/\D/g, "");
-        const digitsMatch = (a: string, b: string) => {
-          const da = a.replace(/\D/g, ""), db2 = b.replace(/\D/g, "");
-          if (!da || !db2) return false;
-          if (da === db2) return true;
-          const short = da.length <= db2.length ? da : db2;
-          const long = da.length <= db2.length ? db2 : da;
-          return short.length >= 7 && long.endsWith(short);
-        };
-        const companiesSnap = await getDocs(query(collection(db, "Company")));
-        for (const companyDoc of companiesSnap.docs) {
-          const data = companyDoc.data();
-          const phoneMap: Array<{ phoneNumber?: string; assistantId?: string; [key: string]: unknown }> = data.phoneNumberMap || [];
-          const idx = phoneMap.findIndex((e: { phoneNumber?: string }) =>
-            e.phoneNumber && digitsMatch(e.phoneNumber, cfgDigits)
-          );
-          if (idx >= 0) {
-            // Update the assistantId + name in the matching entry
-            const updated = [...phoneMap];
-            updated[idx] = { ...updated[idx], assistantId: configAssistantId || "", assistantName: (assistant?.name || assistant?.assistantName || "") };
-            await setDoc(doc(db, "Company", companyDoc.id), { phoneNumberMap: updated }, { merge: true });
-          }
-        }
-      } catch (companyErr) {
-        console.warn("Company phoneNumberMap sync skipped:", companyErr);
-        // Non-critical — don't fail the whole operation
-      }
+      // Best-effort: also refresh the Twilio inbound webhook (no-op for SIP/Vox
+      // or when per-company Twilio creds aren't present).
+      configurePhoneNumber({ phoneNumber: configuring.phoneNumber, assistantId: configAssistantId })
+        .catch((twilioErr) => console.warn("Twilio webhook refresh skipped:", twilioErr));
 
       setConfiguring(null);
     } catch (e: unknown) {

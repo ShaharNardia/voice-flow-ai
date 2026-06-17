@@ -245,7 +245,7 @@ exports.knowledgeProcessFile = onRequest({...corsOptions, secrets: [OPENAI_API_K
 
 // â"€â"€ List files for an assistant â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
-exports.knowledgeListFiles = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
+exports.knowledgeListFiles = onRequest({...corsOptions, memory: "512MiB", secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "GET") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
 
@@ -257,9 +257,14 @@ exports.knowledgeListFiles = onRequest({...corsOptions, secrets: [OPENAI_API_KEY
     if (!assistantId) { res.status(400).json({status: "error", message: "assistantId required"}); return; }
 
     const db = getFirestore();
+    // Project to metadata only — never pull `content`/`embedding` (the 1536-float
+    // array is ~14KB/doc and was OOM-ing this endpoint to a 500, which left the
+    // whole Knowledge Sources list — and the coverage UI rendered inside it —
+    // blank).
     const snap = await db.collection("knowledge_chunks")
       .where("assistantId", "==", assistantId)
       .where("ownerId", "==", uid)
+      .select("sourceFile", "sourceRoot", "storagePath", "sourceType", "syncedAt")
       .get();
 
     // Group by sourceFile (for files/text) or sourceRoot (for URL crawls).
@@ -304,7 +309,26 @@ exports.knowledgeListFiles = onRequest({...corsOptions, secrets: [OPENAI_API_KEY
 // from the stored chunks (each carries sourceFile=pageUrl, sourceRoot=site),
 // so it works for already-crawled sites too. Filters sourceRoot in memory to
 // reuse the existing (assistantId, ownerId) index — no new composite index.
-exports.knowledgeCrawlReport = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
+// Turn a crawled page URL into a human-readable name. Pegasus (and most Hebrew
+// sites) percent-encode the path, so the raw URL is unreadable; decode it and
+// surface the last meaningful path segment as the page "name".
+function prettyPageName(url, sourceRoot) {
+  try {
+    const u = new URL(url);
+    let path = decodeURIComponent(u.pathname).replace(/\/+$/, ""); // drop trailing slash
+    // Home page of the crawled root.
+    if (!path || (sourceRoot && url.replace(/\/+$/, "") === String(sourceRoot).replace(/\/+$/, ""))) {
+      return "🏠 Home";
+    }
+    const segments = path.split("/").filter(Boolean);
+    const last = segments[segments.length - 1] || "Home";
+    return last.replace(/[_+]/g, " ").trim() || "Home";
+  } catch {
+    return url;
+  }
+}
+
+exports.knowledgeCrawlReport = onRequest({...corsOptions, memory: "512MiB", secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "GET") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
   const uid = await extractUidFromRequest(req);
@@ -316,19 +340,26 @@ exports.knowledgeCrawlReport = onRequest({...corsOptions, secrets: [OPENAI_API_K
       return;
     }
     const db = getFirestore();
+    // CRITICAL: project to the tiny metadata fields only. Each chunk doc also
+    // holds a 1536-float `embedding` (~14KB) and the `content` text; pulling
+    // those for every chunk (×1000s) was OOM-ing/timing-out this endpoint
+    // (500s) — especially under the 3s live-progress poll during a crawl.
+    // `.select()` makes Firestore return only these fields, so the report is
+    // cheap no matter how big the corpus is.
     const snap = await db.collection("knowledge_chunks")
       .where("assistantId", "==", assistantId)
       .where("ownerId", "==", uid)
+      .select("sourceFile", "sourceRoot", "sourceType", "charCount")
       .get();
 
-    const pages = {};      // pageUrl → { url, chunks, chars }
+    const pages = {};      // pageUrl → { url, name, chunks, chars }
     let totalChunks = 0, totalChars = 0;
     snap.forEach((doc) => {
       const d = doc.data();
       if (d.sourceType !== "url" || d.sourceRoot !== sourceRoot) return;
       const url = d.sourceFile || "(unknown)";
-      if (!pages[url]) pages[url] = { url, chunks: 0, chars: 0 };
-      const chars = (d.content || "").length;
+      if (!pages[url]) pages[url] = { url, name: prettyPageName(url, sourceRoot), chunks: 0, chars: 0 };
+      const chars = typeof d.charCount === "number" ? d.charCount : 0;
       pages[url].chunks += 1;
       pages[url].chars  += chars;
       totalChunks += 1;
@@ -455,7 +486,7 @@ exports.knowledgeSearch = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]},
 // â"€â"€ URL Text Extraction â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 // Crawl configuration â€" safe defaults to avoid hammering target sites.
-const CRAWL_MAX_PAGES = 60;
+const CRAWL_MAX_PAGES = 200;   // raised from 60 — incremental writes + 480s budget make larger crawls safe; overruns finish "Partial" and resume on Re-sync
 const CRAWL_MAX_DEPTH = 3;
 const CRAWL_PAGE_TIMEOUT_MS = 12000;
 const CRAWL_PAGE_MAX_BYTES = 1.5 * 1024 * 1024;   // 1.5 MB per page
@@ -1016,6 +1047,42 @@ async function fetchUrlText(url) {
   return pages.map((p) => `## ${p.url}\n${p.text}`).join("\n\n---\n\n");
 }
 
+// â"€â"€ Internal helper: adaptive batch commit (self-heals "Transaction too big") â"€â"€
+/**
+ * Commit `items` to Firestore in batches, applying `apply(batch, item, index)`
+ * to each. Starts at `startSize` and, whenever a commit fails with
+ * "Transaction too big" / "INVALID_ARGUMENT", halves the batch size and retries
+ * the failed slice — down to a single op per commit if necessary. This makes
+ * the operation robust regardless of how many secondary-index entries each doc
+ * carries (e.g. an unexempted 1536-dim `embedding` array contributes ~1536
+ * index entries per write *and* per delete), or whether an index exemption has
+ * finished propagating. Returns the total number of items committed.
+ */
+async function commitAdaptive(db, items, apply, startSize = 100) {
+  let i = 0;
+  let size = Math.max(1, startSize);
+  while (i < items.length) {
+    const slice = items.slice(i, i + size);
+    const batch = db.batch();
+    slice.forEach((item, k) => apply(batch, item, i + k));
+    try {
+      await batch.commit();
+      i += slice.length;
+      // Gently grow back toward the start size after a successful small commit.
+      if (size < startSize) size = Math.min(startSize, size * 2);
+    } catch (e) {
+      const tooBig = /too big|INVALID_ARGUMENT/i.test(e.message || "");
+      if (tooBig && size > 1) {
+        size = Math.max(1, Math.floor(size / 2));
+        logger.warn(`[KB] batch too big — shrinking to ${size} and retrying`);
+        continue; // retry the same slice start with a smaller window
+      }
+      throw e;
+    }
+  }
+  return items.length;
+}
+
 // â"€â"€ Internal helper: scrape URL â†' chunk â†' embed â†' store â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 async function _processUrl(uid, assistantId, url) {
@@ -1036,11 +1103,10 @@ async function _processUrl(uid, assistantId, url) {
   [existingByRoot, existingLegacy].forEach((snap) => snap.forEach((doc) => {
     if (!seenIds.has(doc.id)) { seenIds.add(doc.id); toDelete.push(doc.ref); }
   }));
-  for (let i = 0; i < toDelete.length; i += 400) {
-    const batch = db.batch();
-    toDelete.slice(i, i + 400).forEach((ref) => batch.delete(ref));
-    await batch.commit();
-  }
+  // Deleting docs whose 1536-dim embedding is still indexed removes ~1536 index
+  // entries per doc, so a fixed large batch trips "Transaction too big". Use the
+  // adaptive committer, which shrinks the batch on demand and self-heals.
+  await commitAdaptive(db, toDelete, (batch, ref) => batch.delete(ref), 100);
 
   // 3. Per-page: chunk -> embed -> WRITE IMMEDIATELY, each page isolated.
   //    This makes the crawl resilient instead of all-or-nothing: one page's
@@ -1066,21 +1132,17 @@ async function _processUrl(uid, assistantId, url) {
         embeddings.push(...await embedTexts(pageChunks.slice(i, i + 50)));
       }
       const now = FieldValue.serverTimestamp();
-      // 10 docs/commit: even before the embedding index-exemption fully
-      // propagates, a 10-doc commit stays well under Firestore's transaction
-      // size limit ("Transaction too big" on the 1536-dim embedding arrays).
-      for (let i = 0; i < pageChunks.length; i += 10) {
-        const batch = db.batch();
-        pageChunks.slice(i, i + 10).forEach((content, j) => {
-          batch.set(db.collection("knowledge_chunks").doc(), {
-            assistantId, ownerId: uid, content, embedding: embeddings[i + j],
-            sourceFile: page.url, sourceRoot: url, sourceType: "url",
-            storagePath: null, chunkIndex: globalIdx++, chunkIndexOnPage: i + j,
-            syncedAt: now, createdAt: now,
-          });
+      // Writes carry the same 1536-dim embedding index cost as deletes, so the
+      // same adaptive committer protects the write phase too.
+      await commitAdaptive(db, pageChunks, (batch, content, gi) => {
+        batch.set(db.collection("knowledge_chunks").doc(), {
+          assistantId, ownerId: uid, content, embedding: embeddings[gi],
+          sourceFile: page.url, sourceRoot: url, sourceType: "url",
+          storagePath: null, chunkIndex: globalIdx++, chunkIndexOnPage: gi,
+          charCount: (content || "").length,   // lets the coverage report skip pulling content/embedding
+          syncedAt: now, createdAt: now,
         });
-        await batch.commit();
-      }
+      }, 50);
       chunksCreated += pageChunks.length;
       pagesWritten++;
     } catch (e) {

@@ -1,5 +1,7 @@
 {
   "projects": {
-    "default": "voiceflow-ai-202509231639"
+    "default": "voiceflow-ai-202509231639",
+    "production": "voiceflow-ai-202509231639",
+    "staging": "voiceflow-staging"
   }
 }

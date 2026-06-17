@@ -57,6 +57,11 @@ function createAdapter(voxWs, callSessionId, opts = {}) {
   // in order.
   const pendingToHandler = [];
   let handlerAttached = false;
+  // Frame counters — log the FIRST inbound (caller→us) and outbound (us→caller)
+  // audio frame so a silent call can be diagnosed: which direction is dead.
+  let inAudioFrames = 0;
+  let outAudioFrames = 0;
+  const _seenEventKeys = new Set();
 
   function deliver(json) {
     if (handlerAttached) adapter.emit("message", json);
@@ -93,30 +98,46 @@ function createAdapter(voxWs, callSessionId, opts = {}) {
     },
   }));
 
-  // ── Inbound: voxWs binary frames → synthesize Twilio "media" events ─
+  // ── Inbound: Voximplant JSON "media" frames → Twilio-shaped "media" events ─
+  // CONFIRMED wire format (diagnostic 2026-06-15): Voximplant sends ALL audio as
+  // JSON TEXT frames, NOT raw binary:
+  //   {"event":"media","sequenceNumber":N,"media":{"timestamp":T,"payload":"<b64>"}}
+  // The payload is base64 PCM16LE @ 8 kHz (encoding PCM8 — Voximplant's default).
+  // Our Gemini handler expects Twilio-style media events carrying µ-law base64, so
+  // we transcode PCM16→µ-law here. (Earlier the adapter treated these JSON frames
+  // as "text/hello" and discarded every one → caller audio never reached the bot.)
   voxWs.on("message", (raw, isBinary) => {
-    // ws@8 delivers TEXT frames as Buffers too (isBinary=false), so
-    // Buffer.isBuffer alone misclassifies the JSON hello frame as audio.
-    // Trust isBinary when present; otherwise sniff for a leading "{".
-    const treatAsAudio = (isBinary === true) ||
-      (isBinary === undefined && Buffer.isBuffer(raw) && raw.length > 0 && raw[0] !== 0x7B);
-    if (treatAsAudio) {
-      // Raw PCM16LE @ 8 kHz from VoxEngine. Encode to µ-law and feed the
-      // handler as if it came from Twilio.
-      const payload = pcm16ToMulawBase64(Buffer.isBuffer(raw) ? raw : Buffer.from(raw));
+    let obj;
+    try { obj = JSON.parse(Buffer.isBuffer(raw) ? raw.toString("utf8") : String(raw)); }
+    catch (_) { return; }   // Voximplant audio is always JSON text; ignore anything else
+
+    if (obj.event === "media" && obj.media && obj.media.payload) {
+      // base64 PCM16LE 8 kHz → µ-law base64 (both 8 kHz, no resample needed).
+      const pcm16 = Buffer.from(obj.media.payload, "base64");
+      const mulawB64 = pcm16ToMulawBase64(pcm16);
+      if (++inAudioFrames === 1) {
+        console.log(`[VOX-WS] first INBOUND audio frame: ${pcm16.length}B PCM16 → µ-law (session ${callSessionId})`);
+      }
       deliver(JSON.stringify({
         event: "media",
         streamSid: callSessionId,
-        media: { payload, track: "inbound" },
+        media: { payload: mulawB64, track: "inbound" },
       }));
+    } else if (obj.event === "dtmf" && obj.dtmf) {
+      // Scenario forwards caller key presses (CallEvents.ToneReceived) as a
+      // Twilio-shaped dtmf frame — pass straight through to the handler.
+      deliver(JSON.stringify({ event: "dtmf", streamSid: callSessionId, dtmf: { digit: obj.dtmf.digit } }));
+    } else if (obj.type === "voximplant.hello") {
+      console.log(`[VOX-WS] hello from session ${obj.callSessionId || callSessionId}: from=${obj.from} to=${obj.to}`);
     } else {
-      // Text frame — scenario hello / ack / control. Parse for telemetry.
-      try {
-        const obj = JSON.parse(raw.toString());
-        if (obj.type === "voximplant.hello") {
-          console.log(`[VOX-WS] hello from session ${obj.callSessionId}: from=${obj.from} to=${obj.to}`);
-        }
-      } catch (_) { /* ignore non-JSON text frames */ }
+      // Log the FIRST occurrence of every other event/structure Voximplant sends
+      // — this surfaces any error/ack it returns about our OUTBOUND playback
+      // frames (which would explain why the caller hears nothing).
+      const key = obj.event || obj.type || Object.keys(obj).join(",");
+      if (!_seenEventKeys.has(key)) {
+        _seenEventKeys.add(key);
+        console.log(`[VOX-WS] non-media frame key="${key}": ${JSON.stringify(obj).slice(0, 200)}`);
+      }
     }
   });
 
@@ -130,26 +151,39 @@ function createAdapter(voxWs, callSessionId, opts = {}) {
     adapter.emit("error", err);
   });
 
-  // ── Outbound: handler.send(twilioJson) → binary PCM16 to voxWs ──────
+  // ── Outbound: handler "media" (µ-law b64) → Voximplant JSON "media" (PCM16 b64) ─
+  // Voximplant plays audio sent back as JSON in the SAME shape it sends, with a
+  // base64 PCM16LE @ 8 kHz payload. The handler hands us µ-law base64 (Twilio
+  // shape), so decode µ-law → PCM16 → base64 and wrap in a JSON media frame.
+  // (Earlier we sent raw BINARY PCM, which Voximplant's JSON socket ignored →
+  // caller heard silence.)
+  let _outSeq = 0;
+  let _outTs = 0;        // sample clock — Voximplant inbound frames carry media.timestamp
   adapter.send = (data) => {
-    if (typeof data !== "string") {
-      // Handler shouldn't be sending binary in this direction, but if it
-      // does, forward unchanged.
-      try { voxWs.send(data); } catch (e) { console.warn(`[VOX-WS] forward binary failed: ${e.message}`); }
-      return;
-    }
+    if (typeof data !== "string") return;   // handler only sends JSON envelopes
     let msg;
-    try { msg = JSON.parse(data); } catch (_) { return; }    // unknown payload — drop
+    try { msg = JSON.parse(data); } catch (_) { return; }
 
     if (msg.event === "media" && msg.media && msg.media.payload) {
-      // The handler is shipping TTS audio. Decode µ-law to PCM16 and send
-      // as binary on the Vox ws.
-      const pcmBuf = mulawBase64ToPcm16(msg.media.payload);
-      try { voxWs.send(pcmBuf, { binary: true }); }
-      catch (e) { console.warn(`[VOX-WS] send pcm to voxWs failed: ${e.message}`); }
+      const pcmBuf = mulawBase64ToPcm16(msg.media.payload);   // µ-law b64 → PCM16 buffer
+      const pcmB64 = pcmBuf.toString("base64");
+      const samples = pcmBuf.length >> 1;   // 2 bytes/sample @ 8kHz
+      if (++outAudioFrames === 1) {
+        console.log(`[VOX-WS] first OUTBOUND audio frame → JSON media, ${pcmBuf.length}B PCM16 (session ${callSessionId})`);
+      }
+      try {
+        // Mirror Voximplant's OWN inbound frame shape exactly, including
+        // media.timestamp (a running sample count). The earlier omission of
+        // timestamp is the most likely reason playback was silently dropped.
+        voxWs.send(JSON.stringify({
+          event: "media",
+          sequenceNumber: ++_outSeq,
+          media: { timestamp: _outTs, payload: pcmB64 },
+        }));
+        _outTs += samples;
+      } catch (e) { console.warn(`[VOX-WS] send media to voxWs failed: ${e.message}`); }
     }
-    // Other events (mark, clear) are Twilio-specific control messages.
-    // VoxEngine has no equivalent — silently ignore.
+    // mark/clear control events — Voximplant has no equivalent; ignore.
   };
 
   adapter.close = (code, reason) => {

@@ -115,3 +115,10 @@ gleaming-idiom-*.json
 .next/
 /CTemp*.json
 /CUsers*.json
+
+# Per-project Firebase Functions secret env files (keep .env.example tracked)
+firebase/functions/.env.*
+!firebase/functions/.env.example
+
+# CI deploy keys staged for manual upload to GitHub secrets — never commit
+ci-secrets/

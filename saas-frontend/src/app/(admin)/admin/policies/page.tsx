@@ -12,9 +12,9 @@
 import { useEffect, useState } from "react";
 import {
   Loader2, Save, RotateCcw, AlertTriangle, Check, ChevronDown, ChevronUp,
-  Mic2, MessageSquare, Clock, BookOpen, Wrench, Eye, Network,
+  Mic2, MessageSquare, Clock, BookOpen, Wrench, Eye, Network, KeyRound,
 } from "lucide-react";
-import { getSystemPolicies, updateSystemPolicies, type SystemPolicy } from "@/lib/firebase-functions";
+import { getSystemPolicies, updateSystemPolicies, voximplantConfigGet, voximplantConfigSet, type SystemPolicy, type VoximplantConfig } from "@/lib/firebase-functions";
 
 export default function SystemPoliciesPage() {
   const [policy,   setPolicy]   = useState<SystemPolicy | null>(null);
@@ -139,6 +139,102 @@ export default function SystemPoliciesPage() {
       >
         <TelephonyOverrideEditor policy={policy} defaults={defaults} onSave={save} saving={saving} />
       </Section>
+
+      <Section
+        id="voxcreds" icon={<KeyRound className="w-4 h-4" />} title="Voximplant Credentials"
+        description="Management API keys for buying/routing Voximplant numbers. Required before the ‘Buy a number → Voximplant’ flow works."
+        expanded={expanded} setExpanded={setExpanded}
+      >
+        <VoximplantCredentialsEditor />
+      </Section>
+    </div>
+  );
+}
+
+// ── Voximplant Management API credentials ────────────────────────────────────
+
+function VoximplantCredentialsEditor() {
+  const [cfg, setCfg] = useState<VoximplantConfig | null>(null);
+  const [form, setForm] = useState({ voxAccountId: "", voxApiKey: "", voxRuleId: "", voxAppName: "", voxApplicationId: "", voxCallerId: "" });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [err, setErr] = useState("");
+
+  useEffect(() => {
+    voximplantConfigGet()
+      .then((c) => {
+        setCfg(c);
+        setForm((f) => ({ ...f, voxAccountId: c.voxAccountId, voxRuleId: c.voxRuleId, voxAppName: c.voxAppName, voxApplicationId: c.voxApplicationId, voxCallerId: c.voxCallerId }));
+      })
+      .catch((e) => setErr(e instanceof Error ? e.message : "Failed to load"))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const save = async () => {
+    setSaving(true); setErr(""); setSaved(false);
+    try {
+      // Send apiKey only if the admin typed a new one (blank keeps the existing key).
+      const payload: Record<string, string> = {
+        voxAccountId: form.voxAccountId, voxRuleId: form.voxRuleId,
+        voxAppName: form.voxAppName, voxApplicationId: form.voxApplicationId, voxCallerId: form.voxCallerId,
+      };
+      if (form.voxApiKey.trim()) payload.voxApiKey = form.voxApiKey.trim();
+      await voximplantConfigSet(payload);
+      setSaved(true);
+      const fresh = await voximplantConfigGet();
+      setCfg(fresh);
+      setForm((f) => ({ ...f, voxApiKey: "" }));
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <div className="flex items-center gap-2 text-sm text-neutral-400 py-2"><Loader2 className="w-4 h-4 animate-spin" /> Loading…</div>;
+
+  const fields: { key: keyof typeof form; label: string; hint: string; placeholder?: string }[] = [
+    { key: "voxAccountId", label: "Account ID", hint: "Voximplant account ID (numeric).", placeholder: "9553670" },
+    { key: "voxApiKey", label: "API Key", hint: cfg?.apiKeySet ? `Currently set (${cfg.apiKeyHint}). Leave blank to keep it.` : "Management API key.", placeholder: cfg?.apiKeySet ? "•••• keep existing" : "xxxxxxxx-xxxx-…" },
+    { key: "voxRuleId", label: "Rule ID", hint: "Routing rule ID inside your Voximplant application.", placeholder: "1516111" },
+    { key: "voxAppName", label: "Application Name (FQDN)", hint: "Full app name e.g. voiceflow.youraccount.voximplant.com — used to auto-bind purchased numbers.", placeholder: "voiceflow.acc.voximplant.com" },
+    { key: "voxApplicationId", label: "Application ID (optional)", hint: "Numeric app ID; if set, used for binding instead of the FQDN.", placeholder: "e.g. 1234567" },
+    { key: "voxCallerId", label: "Outbound Caller ID (optional)", hint: "E.164 number shown on outbound calls.", placeholder: "+972…" },
+  ];
+
+  return (
+    <div className="space-y-3">
+      {cfg && (
+        <div className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium ${cfg.configured ? "bg-green-50 text-green-700" : "bg-amber-50 text-amber-700"}`}>
+          {cfg.configured ? <Check className="w-3.5 h-3.5" /> : <AlertTriangle className="w-3.5 h-3.5" />}
+          {cfg.configured ? "Configured" : "Not configured — buying Voximplant numbers will fail until set"}
+        </div>
+      )}
+      {fields.map((fld) => (
+        <Field key={fld.key} label={fld.label} hint={fld.hint}>
+          <input
+            type={fld.key === "voxApiKey" ? "password" : "text"}
+            value={form[fld.key]}
+            onChange={(e) => setForm((f) => ({ ...f, [fld.key]: e.target.value }))}
+            placeholder={fld.placeholder}
+            autoComplete="off"
+            className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm font-mono"
+          />
+        </Field>
+      ))}
+      {err && <div className="p-2.5 bg-red-50 border border-red-200 rounded-lg text-red-600 text-xs">{err}</div>}
+      <div className="flex items-center gap-2 pt-1">
+        <button
+          onClick={save}
+          disabled={saving}
+          className="flex items-center gap-1.5 px-4 py-2 bg-orange-600 hover:bg-orange-700 text-white text-sm font-semibold rounded-lg disabled:opacity-40"
+        >
+          {saving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
+          Save credentials
+        </button>
+        {saved && <span className="flex items-center gap-1 text-xs text-green-600"><Check className="w-3.5 h-3.5" /> Saved</span>}
+      </div>
     </div>
   );
 }
