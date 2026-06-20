@@ -31,6 +31,7 @@ jobs:
   functions:
     name: Firebase Functions (lint + unit tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # fail fast if a test leaks a handle and hangs
     defaults:
       run:
         working-directory: firebase/functions
@@ -47,6 +48,7 @@ jobs:
   mediastream:
     name: Cloud Run mediastream (unit tests)
     runs-on: ubuntu-latest
+    timeout-minutes: 10   # fail fast if a test leaks a handle and hangs
     defaults:
       run:
         working-directory: cloud-run/mediastream

@@ -16,6 +16,7 @@
 "use strict";
 
 const test = require("node:test");
+const { after } = require("node:test");
 const assert = require("node:assert/strict");
 const { EventEmitter } = require("events");
 const path = require("path");
@@ -60,8 +61,13 @@ require.cache[wsResolved] = {
 // Now safe to load the unit under test.
 const { GeminiBridge } = require("./gemini_bridge.js");
 
+// Track every bridge so we can close() it at the end — connect()/__open() arms
+// a keepalive ping setInterval (and the audio drain interval) that would
+// otherwise keep the event loop alive and hang the test runner. close() clears
+// them, exactly as the ws "close" handler does in production.
+const _bridges = [];
 function makeBridge(overrides = {}) {
-  return new GeminiBridge({
+  const b = new GeminiBridge({
     apiKey: "fake-key",
     instructions: "be brief",
     voice: "Aoede",
@@ -70,7 +76,11 @@ function makeBridge(overrides = {}) {
     tools: [],
     ...overrides,
   });
+  _bridges.push(b);
+  return b;
 }
+
+after(() => { for (const b of _bridges) { try { b.close(); } catch (_) {} } });
 
 function resetInstances() { instances = []; }
 

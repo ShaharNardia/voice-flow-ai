@@ -50,10 +50,12 @@ test("early caller audio is queued and delivered after the handler attaches, in 
   const voxWs = new FakeVoxWs();
   const adapter = createAdapter(voxWs, "sess-2", {});
 
-  // Two binary PCM frames arrive BEFORE the handler attaches.
-  const pcm = Buffer.alloc(320);             // 20ms of silence
-  voxWs.emit("message", pcm, true);
-  voxWs.emit("message", pcm, true);
+  // Voximplant sends audio as JSON "media" text frames (base64 PCM16 8k), NOT
+  // raw binary. Two arrive BEFORE the handler attaches → must be queued.
+  const pcmB64 = Buffer.alloc(320).toString("base64");   // 20ms PCM16 silence
+  const mediaFrame = Buffer.from(JSON.stringify({ event: "media", media: { payload: pcmB64 } }));
+  voxWs.emit("message", mediaFrame, false);
+  voxWs.emit("message", mediaFrame, false);
 
   const received = [];
   adapter.on("message", (json) => received.push(JSON.parse(json)));
@@ -62,7 +64,7 @@ test("early caller audio is queued and delivered after the handler attaches, in 
   assert.equal(received.length, 4, "connected, start, then 2 media frames");
   assert.equal(received[2].event, "media");
   assert.equal(received[3].event, "media");
-  assert.ok(received[2].media.payload.length > 0, "media carries mulaw payload");
+  assert.ok(received[2].media.payload.length > 0, "media carries transcoded µ-law payload");
 });
 
 test("JSON hello text frame is NOT transcoded as audio", async () => {
@@ -81,32 +83,38 @@ test("JSON hello text frame is NOT transcoded as audio", async () => {
   assert.equal(mediaEvents.length, 0, "hello frame must not become a media event");
 });
 
-test("binary frame with isBinary undefined is sniffed as audio unless it starts with '{'", async () => {
+test("non-JSON binary frame is ignored (Voximplant audio is always JSON text)", async () => {
   const voxWs = new FakeVoxWs();
   const adapter = createAdapter(voxWs, "sess-4", {});
   const received = [];
   adapter.on("message", (json) => received.push(JSON.parse(json)));
   await tick();
 
-  const pcm = Buffer.alloc(320, 0x55);       // non-'{' first byte
+  const pcm = Buffer.alloc(320, 0x55);       // raw bytes, not JSON
   voxWs.emit("message", pcm, undefined);
   await tick();
 
-  assert.equal(received.filter((m) => m.event === "media").length, 1);
+  assert.equal(received.filter((m) => m.event === "media").length, 0,
+    "raw binary is not parseable JSON → no media event");
 });
 
-test("outbound Twilio media envelope is decoded to binary PCM16 on the vox ws", () => {
+test("outbound Twilio media envelope → Voximplant JSON media frame (PCM16 b64)", () => {
   const voxWs = new FakeVoxWs();
   const adapter = createAdapter(voxWs, "sess-5", {});
 
   // Build a µ-law payload from 10ms of PCM silence, ship it back through.
-  const mulawB64 = pcm16ToMulawBase64(Buffer.alloc(160));
+  const mulawB64 = pcm16ToMulawBase64(Buffer.alloc(160));   // 160B PCM16 → 80 µ-law bytes
   adapter.send(JSON.stringify({ event: "media", streamSid: "x", media: { payload: mulawB64 } }));
 
-  assert.equal(voxWs.sent.length, 1, "one binary frame sent to vox ws");
+  assert.equal(voxWs.sent.length, 1, "one JSON frame sent to vox ws");
   const out = voxWs.sent[0];
-  assert.ok(Buffer.isBuffer(out), "payload is a Buffer");
-  assert.equal(out.length, 160, "80 mulaw bytes → 160 PCM bytes");
+  assert.equal(typeof out, "string", "Voximplant frames are JSON text, not raw binary");
+  const frame = JSON.parse(out);
+  assert.equal(frame.event, "media");
+  assert.equal(typeof frame.sequenceNumber, "number");
+  assert.ok(frame.media && typeof frame.media.timestamp === "number", "carries sample-clock timestamp");
+  const pcm = Buffer.from(frame.media.payload, "base64");
+  assert.equal(pcm.length, 160, "80 µ-law bytes → 160 PCM16 bytes");
 });
 
 test("clear/mark events are ignored, close propagates both ways", () => {
