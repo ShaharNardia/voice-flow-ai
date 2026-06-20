@@ -103,3 +103,42 @@ Two assumptions only a live call confirms: VoxEngine WS media format (raw PCM16
 - Third-party status: Twilio status.twilio.com · Deepgram status.deepgram.com ·
   OpenAI status.openai.com · ElevenLabs status.elevenlabs.io · Google Cloud
   status.cloud.google.com
+
+---
+
+## Production hardening operations (added 2026-06)
+
+These close the top prod-readiness gaps. Code/scripts are in the repo; the steps
+below need GCP/GitHub access to execute.
+
+### 1. Error reporting (Sentry) — Gate 3
+Wired in all three services, **no-op until a DSN is set**.
+1. Create a Sentry project, copy the DSN.
+2. Voice service (Cloud Run) + functions: set `SENTRY_DSN` (and `SENTRY_ENV=production|staging`).
+   - Cloud Run: add env var on the service; Functions: add to the deployment env / secret.
+3. Frontend: set `NEXT_PUBLIC_SENTRY_DSN` (+ `NEXT_PUBLIC_SENTRY_ENV`) in `saas-frontend/.env.<env>` and rebuild.
+4. Add an alert rule in Sentry (e.g. error rate spike → email/Slack) — this is the missing "one alert".
+
+### 2. Firestore backups + restore drill — Gate 6
+```
+scripts/firestore-backup.sh schedule     <prod-project>     # daily, 7-day retention
+scripts/firestore-backup.sh list         <prod-project>
+scripts/firestore-backup.sh restore-test <prod-project> <backup-name>   # restores into a TEMP db
+```
+Run the restore-test once so the backup is *proven*. Spot-check docs in the temp
+DB, then delete it. Repeat the drill quarterly.
+
+### 3. Activate the prod CI/CD gate — Gate 7
+The workflows exist (`.github/workflows/deploy-production.yml`). To arm them:
+1. Create a GitHub **Environment** named `production` (Settings → Environments) with
+   required reviewers = you (manual approval gate).
+2. Add the repo/environment **secrets** the deploy workflow reads (service-account
+   key / WIF config, project ids — see the workflow's `env:`/`secrets:` block).
+3. Merge to `main` → workflow waits for your approval → deploys.
+
+### 4. Rollback drill — Gate 7
+```
+scripts/rollback.sh list <service> <region> <project>   # see revisions
+scripts/rollback.sh run  <service> <region> <project>   # 100% traffic → previous revision (seconds)
+```
+Do one drill on staging so the procedure is proven before you need it in anger.
