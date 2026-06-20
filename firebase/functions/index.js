@@ -1,6 +1,9 @@
 const {initializeApp} = require("firebase-admin/app");
 initializeApp();
 
+// Optional Sentry error reporting — no-op unless SENTRY_DSN is set.
+require("./observability.js").initSentry();
+
 const createAgent = require("./create_agent.js");
 exports.createAgent = createAgent.createAgent;
 const stripeCustomerSubscription = require("./stripe_customer_subscription.js");

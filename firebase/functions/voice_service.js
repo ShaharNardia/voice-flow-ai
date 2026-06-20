@@ -27,6 +27,7 @@ const {
 const axios = require("axios");
 const {logActivity} = require("./audit_service");
 const {logAnomaly} = require("./anomaly_service");
+const {captureError} = require("./observability.js");   // no-op unless SENTRY_DSN set
 const {checkPlanLimit} = require("./subscription_service");
 const asteriskService    = require("./asterisk_service");
 const voximplantService  = require("./voximplant_service");
@@ -840,6 +841,7 @@ exports.searchPhoneNumbers = onRequest(corsOptions, async (req, res) => {
       status: error.status,
       moreInfo: error.moreInfo,
     });
+    captureError(error, {fn: "searchPhoneNumbers"});
     res.status(500).json({
       status: "error",
       message: error.message || "Failed to search phone numbers",
@@ -1034,6 +1036,7 @@ exports.purchasePhoneNumber = onRequest(corsOptions, async (req, res) => {
     logActivity({ userId: null, action: "phone.purchase", category: "phone", resourceType: "phone_number", details: {phoneNumber: purchased.phoneNumber} }).catch(() => {});
   } catch (error) {
     logger.error("Failed to purchase Twilio number", error);
+    captureError(error, {fn: "purchasePhoneNumber"});
     res.status(500).json({
       status: "error",
       message: "Failed to purchase phone number",

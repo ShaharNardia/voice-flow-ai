@@ -34,15 +34,21 @@ const {CallTelemetry} = require("./call_telemetry");
 if (!getApps().length) initializeApp();
 if (process.env.SENDGRID_API_KEY) sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
+// Optional Sentry error reporting — no-op unless SENTRY_DSN is set.
+const obs = require("./observability");
+obs.initSentry();
+
 // ── Process-level stability guards ───────────────────────────────────────
 // An unhandled rejection in any async path (TTS, LLM, Firestore write, etc.)
 // must NOT crash the process and drop all in-flight calls.  Log it and continue.
 process.on("unhandledRejection", (reason, _promise) => {
   console.error("[PROCESS] Unhandled promise rejection (call NOT dropped):", reason?.message || reason);
+  obs.captureException(reason instanceof Error ? reason : new Error(String(reason)), { kind: "unhandledRejection" });
 });
 process.on("uncaughtException", (err) => {
   // Log but keep running — Cloud Run health checks will restart if truly broken.
   console.error("[PROCESS] Uncaught exception (attempting to stay alive):", err?.message, err?.stack?.slice(0, 600));
+  obs.captureException(err, { kind: "uncaughtException" });
 });
 
 const app = express();
@@ -5523,6 +5529,13 @@ app.post("/copilot-inject", express.json(), async (req, res) => {
     console.error(`[COPILOT] Inject failed for ${sessionId}:`, e.message);
     res.status(500).json({status: "error", message: e.message});
   }
+});
+
+// ── Express error reporting (Sentry) — report then respond ───────────────
+app.use((err, req, res, _next) => {
+  obs.captureException(err, { path: req.path, method: req.method });
+  console.error(`[HTTP] ${req.method} ${req.path} failed:`, err && err.message);
+  if (!res.headersSent) res.status(500).json({ error: "internal error" });
 });
 
 // ── Start server ──────────────────────────────────────────────────────

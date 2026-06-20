@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
 import { Providers } from "./providers";
+import SentryInit from "@/components/SentryInit";
 
 const inter = Inter({
   subsets: ["latin"],
@@ -48,6 +49,7 @@ export default function RootLayout({
         />
       </head>
       <body className="font-sans antialiased bg-neutral-50 text-neutral-900">
+        <SentryInit />
         <Providers>{children}</Providers>
       </body>
     </html>
