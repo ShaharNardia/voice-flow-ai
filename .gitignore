@@ -122,3 +122,8 @@ firebase/functions/.env.*
 
 # CI deploy keys staged for manual upload to GitHub secrets — never commit
 ci-secrets/
+
+# Accidental Windows absolute-path temp dumps (never commit)
+C*Temp*
+*AppDataLocalTemp*
+oai_k.txt
