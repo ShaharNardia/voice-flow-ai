@@ -66,6 +66,9 @@ exports.toolLibraryUpdate = toolLibrary.toolLibraryUpdate;
 exports.toolLibraryDelete = toolLibrary.toolLibraryDelete;
 exports.toolLibraryTest   = toolLibrary.toolLibraryTest;
 
+const toolPresets = require("./tool_presets.js");
+exports.toolPresetsList   = toolPresets.toolPresetsList;
+
 // ElevenLabs voice cloning — customer-uploadable cloned voices for cascade-mode TTS.
 const elevenClone = require("./elevenlabs_voice_clone_service.js");
 exports.elevenlabsCloneVoice    = elevenClone.elevenlabsCloneVoice;

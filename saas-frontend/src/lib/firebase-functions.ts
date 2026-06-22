@@ -810,6 +810,26 @@ export const toolLibraryTest = (data: { id?: string; tool?: Partial<LibraryTool>
     code?: string;
   }>("/toolLibraryTest", data);
 
+// ── Global tool preset packs (code-defined, available to every assistant) ──
+export interface ToolPresetTool {
+  name: string;
+  displayName?: string;
+  description: string;
+  method: string;
+  url: string;
+  headers?: Record<string, string>;
+  parameters?: Array<{ name: string; type?: string; description?: string; required?: boolean }>;
+}
+export interface ToolPresetPack {
+  id: string;
+  title: string;
+  description: string;
+  systemPrompt?: string;
+  tools: ToolPresetTool[];
+}
+export const toolPresetsList = () =>
+  httpGet<{ packs: ToolPresetPack[] }>("/toolPresetsList");
+
 // ── ElevenLabs voice cloning ──────────────────────────────────────────
 export interface CustomVoice {
   voiceId: string;

@@ -10,7 +10,9 @@ import {
   knowledgeListFiles, knowledgeProcessFile, knowledgeDeleteFile,
   knowledgeProcessUrl, knowledgeSync, knowledgeProcessText, knowledgeCrawlReport,
   getCostConfig, scenariosList, scenariosCreate, scenarioWizardChat, scenarioWizardGenerate,
+  toolPresetsList,
   type Assistant, type KnowledgeFile, type RateCard, type ScenarioDoc, type WizardMessage, type CrawlReport,
+  type ToolPresetPack,
 } from "@/lib/firebase-functions";
 import { storage, auth } from "@/lib/firebase";
 import { ref, uploadBytes } from "firebase/storage";
@@ -649,6 +651,43 @@ function NLPearlConfig({ pearlId, onChange }: { pearlId: string; onChange: (id: 
 function CustomApiToolsEditor({ tools, onChange }: { tools: CustomTool[]; onChange: (t: CustomTool[]) => void }) {
   const activeTypes = new Set(tools.map((t) => t.type).filter(Boolean));
 
+  // ── Global preset packs (code-defined, available to every assistant) ──
+  const [presetPacks, setPresetPacks] = useState<ToolPresetPack[]>([]);
+  const [openPackPrompt, setOpenPackPrompt] = useState<string | null>(null);
+  useEffect(() => {
+    toolPresetsList()
+      .then((r) => setPresetPacks(r.packs || []))
+      .catch(() => setPresetPacks([]));
+  }, []);
+
+  // Add every tool in a pack to this assistant's customTools (dedup by name).
+  const addPack = (pack: ToolPresetPack) => {
+    const existing = new Set(tools.map((t) => t.name));
+    const mapType = (t?: string): "string" | "number" | "boolean" =>
+      t === "boolean" ? "boolean" : (t === "number" || t === "integer") ? "number" : "string";
+    const toAdd: CustomTool[] = (pack.tools || [])
+      .filter((pt) => !existing.has(pt.name))
+      .map((pt) => ({
+        id: `preset_${pack.id}_${pt.name}`,
+        name: pt.name,
+        type: "api_call" as const,
+        description: pt.description,
+        method: (pt.method || "GET").toUpperCase() === "POST" ? "POST" : "GET",
+        url: pt.url,
+        headers: pt.headers || {},
+        parameters: (pt.parameters || []).map((p) => ({
+          name: p.name,
+          type: mapType(p.type),
+          description: p.description || "",
+          required: !!p.required,
+        })),
+      }));
+    if (toAdd.length === 0) return;            // already added
+    onChange([...toAdd, ...tools]);
+  };
+  const packAdded = (pack: ToolPresetPack) =>
+    (pack.tools || []).every((pt) => tools.some((t) => t.name === pt.name));
+
   const toggleBuiltin = (def: typeof BUILTIN_TOOLS[0]) => {
     if (activeTypes.has(def.type)) {
       onChange(tools.filter((t) => t.type !== def.type));
@@ -742,6 +781,63 @@ function CustomApiToolsEditor({ tools, onChange }: { tools: CustomTool[]; onChan
           })}
         </div>
       </div>
+
+      {/* ── Preset tool packs (global library) ── */}
+      {presetPacks.length > 0 && (
+        <div className="border border-neutral-200 rounded-lg p-3 bg-white">
+          <div className="text-xs font-semibold text-neutral-600 uppercase tracking-wide mb-2">Tool Packs</div>
+          <p className="text-[11px] text-neutral-400 mb-2">Ready-made tool bundles. One click adds them to this assistant.</p>
+          <div className="space-y-2">
+            {presetPacks.map((pack) => {
+              const added = packAdded(pack);
+              return (
+                <div key={pack.id} className="border border-neutral-200 rounded-lg p-2.5 bg-neutral-50">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="text-xs font-semibold text-neutral-700" dir="auto">{pack.title}</div>
+                      <div className="text-[11px] text-neutral-500 mt-0.5 leading-tight" dir="auto">{pack.description}</div>
+                      <div className="text-[10px] text-neutral-400 mt-1">{pack.tools?.length || 0} tools</div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => addPack(pack)}
+                      disabled={added}
+                      className={`text-xs font-medium px-2.5 py-1 rounded-lg flex-shrink-0 ${
+                        added ? "bg-emerald-100 text-emerald-700 cursor-default" : "bg-[#F22F46] text-white hover:opacity-90"
+                      }`}
+                    >
+                      {added ? "✓ Added" : "+ Add pack"}
+                    </button>
+                  </div>
+                  {pack.systemPrompt && (
+                    <div className="mt-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setOpenPackPrompt(openPackPrompt === pack.id ? null : pack.id)}
+                        className="text-[11px] text-sky-600 hover:underline"
+                      >
+                        {openPackPrompt === pack.id ? "Hide" : "View"} recommended prompt
+                      </button>
+                      {openPackPrompt === pack.id && (
+                        <div className="mt-1">
+                          <textarea
+                            readOnly
+                            dir="auto"
+                            value={pack.systemPrompt}
+                            onFocus={(e) => e.currentTarget.select()}
+                            className="w-full h-28 border border-neutral-200 rounded-lg p-2 text-[11px] font-mono bg-white"
+                          />
+                          <p className="text-[10px] text-neutral-400 mt-0.5">Copy this into the assistant&apos;s instructions for best results.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ── Custom API tools ── */}
       <div className="border border-neutral-200 rounded-lg p-3 bg-white">
