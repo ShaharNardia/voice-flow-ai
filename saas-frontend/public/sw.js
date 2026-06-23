@@ -1,12 +1,15 @@
-/* VoiceFlow AI — app-shell service worker v4.
+/* VoiceFlow AI — app-shell service worker v5.
+ * v5 changes:
+ *   - Root cause of the perpetual "new version available" banner: the FCM SW
+ *     was registered at the same root scope as this one (see pwa.ts), so the
+ *     two flip-flopped active/waiting every load. FCM SW now registers at its
+ *     own scope. This bump forces one clean activation on existing clients.
  * v4 changes:
  *   - Removed broken UPDATE_AVAILABLE broadcast from install event
- *     (waiting SW has no clients; detection moved to page via updatefound)
- *   - hardReload in Topbar now waits for controllerchange before reloading
- *     (fixes banner re-appearing after clicking "Reload now")
+ *   - hardReload waits for controllerchange (now with a 3s timeout fallback)
  */
 
-const CACHE = "voiceflow-shell-v4";
+const CACHE = "voiceflow-shell-v5";
 const APP_SHELL = [
   "/",
   "/dashboard",

@@ -427,6 +427,7 @@ interface AssistantExtended extends Assistant {
 interface ChatMessage {
   role: "user" | "assistant";
   content: string;
+  toolCalls?: import("@/lib/firebase-functions").TestChatToolCall[];
 }
 
 // ── Constants ─────────────────────────────────────────────────────────
@@ -1494,9 +1495,11 @@ function AssistantEdit() {
           callerGender: (assistant as AssistantExtended).callerGender,
           language: assistant.language,
           voiceAccent: (assistant as AssistantExtended).voiceAccent,
+          // Send the editor's current (possibly unsaved) tools so the sandbox fires them.
+          customTools: (assistant as AssistantExtended).customTools || [],
         },
       });
-      setChatMessages([...newHistory, { role: "assistant", content: result.reply }]);
+      setChatMessages([...newHistory, { role: "assistant", content: result.reply, toolCalls: result.toolCalls }]);
     } catch (e: unknown) {
       setChatError(e instanceof Error ? e.message : "Failed to get reply");
     } finally {
@@ -2769,6 +2772,11 @@ function AssistantEdit() {
               <p className="text-xs text-neutral-400 mt-0.5">
                 Simulates the prompt &amp; knowledge base — no Twilio, no phone charges.
               </p>
+              {((assistant as AssistantExtended).customTools || []).some((t) => t.url) && (
+                <p className="text-[11px] text-amber-600 mt-0.5">
+                  ⚠️ API tools fire for real here — they call their live endpoints (e.g. SMS/bookings actually send).
+                </p>
+              )}
             </div>
             <button
               type="button"
@@ -2812,14 +2820,29 @@ function AssistantEdit() {
               </div>
             )}
             {chatMessages.map((msg, i) => (
-              <div key={i} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
-                  msg.role === "user"
-                    ? "bg-[#F22F46] text-white rounded-br-sm"
-                    : "bg-neutral-100 text-neutral-800 rounded-bl-sm"
-                }`}>
-                  {msg.content}
-                </div>
+              <div key={i} className={`flex flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}>
+                {/* Tool-call pills (sandbox): show each tool the assistant fired, its args + real result */}
+                {msg.role === "assistant" && msg.toolCalls && msg.toolCalls.length > 0 && (
+                  <div className="max-w-[85%] mb-1.5 space-y-1">
+                    {msg.toolCalls.map((tc, j) => (
+                      <details key={j} className={`text-[11px] rounded-lg border px-2 py-1 ${tc.ok ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"}`}>
+                        <summary className="cursor-pointer font-mono text-neutral-700 truncate">
+                          🔧 {tc.name}({Object.entries(tc.args || {}).map(([k, v]) => `${k}=${String(v)}`).join(", ")}) {tc.ok ? "✓" : "✗"} {tc.status || ""} · {tc.ms}ms
+                        </summary>
+                        <pre className="mt-1 whitespace-pre-wrap break-all text-[10px] text-neutral-600 max-h-48 overflow-auto">{tc.url ? tc.url + "\n\n" : ""}{tc.result}</pre>
+                      </details>
+                    ))}
+                  </div>
+                )}
+                {msg.content && (
+                  <div className={`max-w-[85%] px-4 py-2.5 rounded-2xl text-sm leading-relaxed ${
+                    msg.role === "user"
+                      ? "bg-[#F22F46] text-white rounded-br-sm"
+                      : "bg-neutral-100 text-neutral-800 rounded-bl-sm"
+                  }`}>
+                    {msg.content}
+                  </div>
+                )}
               </div>
             ))}
             {chatLoading && (

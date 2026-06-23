@@ -28,6 +28,7 @@ const axios = require("axios");
 const {logActivity} = require("./audit_service");
 const {logAnomaly} = require("./anomaly_service");
 const {captureError} = require("./observability.js");   // no-op unless SENTRY_DSN set
+const toolExec = require("./tool_executor.js");          // sandbox: execute custom API tools
 const {checkPlanLimit} = require("./subscription_service");
 const asteriskService    = require("./asterisk_service");
 const voximplantService  = require("./voximplant_service");
@@ -1484,18 +1485,51 @@ exports.assistantTestChat = onRequest(corsOptions, async (req, res) => {
       .slice(-20)
       .map((m) => ({ role: m.role, content: String(m.content || "") }));
 
-    const llmResult = await llmService.getLLMResponse(
-      systemPrompt,
-      userMessage,
-      llmHistory,
-      {
-        model: assistant.llmModel || "gpt-4o-mini",
-        maxTokens: Math.min(assistant.maxTokens || 200, 400),
-        temperature: assistant.temperature ?? 0.7,
-      },
-    );
+    // ── Tool sandbox ──────────────────────────────────────────────────
+    // If the assistant has custom API tools (saved, or unsaved ones passed from
+    // the editor via override.customTools), expose them to the model and run a
+    // bounded function-calling loop so the chat actually FIRES the tools — this
+    // is how you verify a tool works end-to-end before trusting it on a call.
+    // NOTE: tools hit their REAL endpoints (side effects happen). The UI warns.
+    const customTools = Array.isArray(override.customTools) ? override.customTools
+      : (Array.isArray(assistant.customTools) ? assistant.customTools : []);
+    const openAiTools = customTools.map(toolExec.toOpenAiTool).filter(Boolean);
 
-    res.status(200).json({ reply: llmResult.text });
+    const llmOpts = {
+      model: assistant.llmModel || "gpt-4o-mini",
+      maxTokens: Math.min(assistant.maxTokens || 200, 500),
+      temperature: assistant.temperature ?? 0.7,
+      timeout: 20000,
+      ...(openAiTools.length ? { tools: openAiTools } : {}),
+    };
+
+    let llmResult = await llmService.getLLMResponse(systemPrompt, userMessage, llmHistory, llmOpts);
+
+    const toolCallLog = [];
+    if (openAiTools.length) {
+      const convo = [...llmHistory, { role: "user", content: userMessage }];
+      let rounds = 0;
+      const MAX_ROUNDS = 3;
+      while (llmResult.toolCalls && llmResult.toolCalls.length && rounds < MAX_ROUNDS) {
+        rounds++;
+        convo.push({ role: "assistant", content: llmResult.text || null, tool_calls: llmResult.toolCalls });
+        for (const tc of llmResult.toolCalls) {
+          const fnName = tc.function?.name;
+          let args = {};
+          try { args = JSON.parse(tc.function?.arguments || "{}"); } catch { /* leave {} */ }
+          const tool = customTools.find((t) => toolExec.toolFnName(t.name) === fnName && t.url);
+          const exec = tool
+            ? await toolExec.executeCustomApiTool(tool, args)
+            : { ok: false, status: 0, ms: 0, result: `(no such tool: ${fnName})` };
+          toolCallLog.push({ name: fnName, args, ok: exec.ok, status: exec.status, ms: exec.ms, result: exec.result, url: exec.url });
+          convo.push({ role: "tool", tool_call_id: tc.id, content: String(exec.result ?? "") });
+        }
+        // Continuation pass (empty userMessage → not re-added; falsy-safe).
+        llmResult = await llmService.getLLMResponse(systemPrompt, "", convo, llmOpts);
+      }
+    }
+
+    res.status(200).json({ reply: llmResult.text || "", toolCalls: toolCallLog });
   } catch (error) {
     logger.error("assistantTestChat failed", error);
     res.status(500).json({ status: "error", message: "Failed to generate reply" });

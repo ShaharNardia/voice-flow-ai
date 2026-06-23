@@ -13,7 +13,7 @@ import { useEffect, useState } from "react";
 import {
   Activity, Loader2, AlertTriangle, AlertCircle, CheckCircle2, Info,
   ChevronDown, ChevronUp, RefreshCw, Zap, Phone, Mic, Headphones,
-  Brain, Wrench, Clock, DollarSign, X,
+  Brain, Wrench, Clock, DollarSign, X, Clipboard, Check,
 } from "lucide-react";
 import { getCallDiagnostics, type DiagnosticEvent } from "@/lib/firebase-functions";
 
@@ -72,6 +72,25 @@ export default function CallDiagnostics({ callSessionId }: { callSessionId: stri
   const [summary, setSummary] = useState<{ totalEvents: number; errors: number; warnings: number; toolCalls: number; modelFallbacks: number; langHintRejected: boolean } | null>(null);
   const [error,   setError]   = useState("");
   const [showDebug, setShowDebug] = useState(false);
+  const [copied, setCopied] = useState(false);
+
+  // Build a plain-text dump of the WHOLE log (incl. debug + raw lines) plus the
+  // session id — for pasting into a ticket/chat when reporting a call.
+  function copyLogs() {
+    const head = summary
+      ? `Call: ${callSessionId}  (${summary.totalEvents} events · ${summary.errors} errors · ${summary.warnings} warnings · ${summary.toolCalls} tool calls)`
+      : `Call: ${callSessionId}`;
+    const lines = events.map((e) => {
+      const t = (() => { try { return new Date(e.ts).toLocaleTimeString(); } catch { return e.ts; } })();
+      const body = e.raw || [e.label, e.detail].filter(Boolean).join(" — ");
+      return `${t}  [${e.severity}] ${body}`;
+    });
+    const text = `${head}\n${"─".repeat(60)}\n${lines.join("\n")}`;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2500);
+    }).catch(() => {});
+  }
 
   async function load() {
     setLoading(true); setError("");
@@ -138,6 +157,15 @@ export default function CallDiagnostics({ callSessionId }: { callSessionId: stri
                 />
                 Show debug events
               </label>
+              <button
+                onClick={copyLogs}
+                disabled={events.length === 0}
+                title="Copy the full log + call ID for investigation"
+                className="flex items-center gap-1 px-2.5 py-1.5 bg-white border border-neutral-200 hover:bg-neutral-50 text-xs rounded transition-colors disabled:opacity-50"
+              >
+                {copied ? <Check className="w-3 h-3 text-emerald-600" /> : <Clipboard className="w-3 h-3" />}
+                {copied ? "Copied!" : "Copy logs"}
+              </button>
               <button
                 onClick={load}
                 disabled={loading}

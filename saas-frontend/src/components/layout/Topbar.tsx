@@ -46,6 +46,14 @@ export default function Topbar({ onMenuClick }: TopbarProps = {}) {
     // AND watch for new updates arriving while the page is open.
     // Note: a *waiting* SW has no clients so it cannot postMessage us —
     // we must detect the update here in the page via updatefound/statechange.
+    // One-shot guard: if we already reloaded for an update this browser
+    // session, don't immediately re-arm the banner from a lingering waiting
+    // worker — that's the loop that made it "always show even after reload".
+    if (sessionStorage.getItem("vf_sw_reloaded") === "1") {
+      sessionStorage.removeItem("vf_sw_reloaded");
+      return;
+    }
+
     navigator.serviceWorker.getRegistration().then((reg) => {
       if (!reg) return;
       if (reg.waiting) setUpdateReady(true);
@@ -71,6 +79,8 @@ export default function Topbar({ onMenuClick }: TopbarProps = {}) {
    */
   async function hardReload() {
     setReloading(true);
+    setUpdateReady(false);                          // hide immediately on click
+    sessionStorage.setItem("vf_sw_reloaded", "1");  // suppress re-arm after reload
     try {
       // 1. Delete every cache entry
       if ("caches" in window) {
@@ -84,12 +94,13 @@ export default function Topbar({ onMenuClick }: TopbarProps = {}) {
       if ("serviceWorker" in navigator) {
         const reg = await navigator.serviceWorker.getRegistration();
         if (reg?.waiting) {
+          // Wait for the new SW to take control — but never hang forever if
+          // controllerchange doesn't fire (stalled activation). Reload anyway
+          // after 3s so the button can't get stuck on "Reloading…".
           await new Promise<void>((resolve) => {
-            navigator.serviceWorker.addEventListener(
-              "controllerchange",
-              () => resolve(),
-              { once: true },
-            );
+            const done = () => resolve();
+            navigator.serviceWorker.addEventListener("controllerchange", done, { once: true });
+            setTimeout(done, 3000);
             reg.waiting!.postMessage({ type: "SKIP_WAITING" });
           });
         }

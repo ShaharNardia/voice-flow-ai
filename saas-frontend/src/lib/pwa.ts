@@ -56,10 +56,14 @@ export function registerServiceWorker() {
     navigator.serviceWorker.register("/sw.js").catch((err) => {
       console.warn("SW registration failed", err);
     });
-    // Also register the FCM SW so background push works. It registers itself
-    // when the browser fetches it, but we explicitly register here to ensure
-    // the scope is right.
-    navigator.serviceWorker.register("/firebase-messaging-sw.js").catch(() => null);
+    // Register the FCM SW at its OWN scope. Registering it at the default root
+    // scope ("/") clobbers the app-shell sw.js registration — the two then
+    // flip-flop active/waiting on every load, leaving a permanent `reg.waiting`
+    // and a "new version available" banner that never clears. The dedicated
+    // scope is the one Firebase Messaging uses by convention.
+    navigator.serviceWorker
+      .register("/firebase-messaging-sw.js", { scope: "/firebase-cloud-messaging-push-scope" })
+      .catch(() => null);
   });
 }
 

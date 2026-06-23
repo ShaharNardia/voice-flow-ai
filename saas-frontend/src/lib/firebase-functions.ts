@@ -49,12 +49,25 @@ export const assistantsGet = (id: string) =>
 export const assistantsUpdate = (data: Partial<Assistant> & { id: string }) =>
   httpPost<Assistant>("/assistantsUpdate", data);
 
+export interface TestChatToolCall {
+  name: string;
+  args: Record<string, unknown>;
+  ok: boolean;
+  status: number;
+  ms: number;
+  result: string;
+  url?: string;
+}
 export const assistantTestChat = (data: {
   assistantId: string;
   message: string;
   history: { role: "user" | "assistant"; content: string }[];
-  override?: { systemPrompt?: string; assistantVibe?: string; callerGender?: string; language?: string; voiceAccent?: string };
-}) => httpPost<{ reply: string }>("/assistantTestChat", data);
+  override?: {
+    systemPrompt?: string; assistantVibe?: string; callerGender?: string; language?: string; voiceAccent?: string;
+    // Pass the editor's (possibly unsaved) custom tools so the sandbox can fire them.
+    customTools?: unknown[];
+  };
+}) => httpPost<{ reply: string; toolCalls?: TestChatToolCall[] }>("/assistantTestChat", data);
 
 export const assistantsDelete = (data: { id: string }) =>
   httpPost<{ status: string }>("/assistantsDelete", data);
