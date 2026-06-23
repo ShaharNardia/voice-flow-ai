@@ -24,6 +24,28 @@ function toolFnName(name) {
   return String(name || "").replace(/[^a-zA-Z0-9_]/g, "_").slice(0, 64);
 }
 
+// SSRF guard: tool URLs are user-defined and fetched server-side, so block
+// requests to loopback / private / link-local ranges and the cloud metadata
+// host. Returns a reason string if blocked, or null if allowed.
+function blockedReason(rawUrl) {
+  let u;
+  try { u = new URL(rawUrl); } catch { return "invalid URL"; }
+  if (u.protocol !== "http:" && u.protocol !== "https:") return `blocked protocol ${u.protocol}`;
+  const host = u.hostname.toLowerCase();
+  if (
+    host === "localhost" || host === "0.0.0.0" || host === "::1" ||
+    host === "metadata.google.internal" || host.endsWith(".internal") ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^169\.254\./.test(host) ||                                   // link-local incl. 169.254.169.254
+    /^172\.(1[6-9]|2[0-9]|3[01])\./.test(host)                    // 172.16.0.0/12
+  ) {
+    return `blocked internal host ${host}`;
+  }
+  return null;
+}
+
 /**
  * Execute one tool. Returns { ok, status, ms, result, url } — result is the
  * response body as a string, truncated. Never throws.
@@ -32,6 +54,8 @@ async function executeCustomApiTool(tool, args, opts = {}) {
   const t0 = Date.now();
   try {
     const url = substitutePlaceholders(tool.url, args);
+    const blocked = blockedReason(url);
+    if (blocked) return { ok: false, status: 0, ms: Date.now() - t0, result: `Blocked: ${blocked}`, url };
     const method = (tool.method || "GET").toUpperCase();
     const headers = {};
     for (const [k, v] of Object.entries(tool.headers || {})) headers[k] = substitutePlaceholders(v, args);
@@ -68,4 +92,4 @@ function toOpenAiTool(ct) {
   };
 }
 
-module.exports = { substitutePlaceholders, executeCustomApiTool, toolFnName, toOpenAiTool };
+module.exports = { substitutePlaceholders, executeCustomApiTool, toolFnName, toOpenAiTool, blockedReason };

@@ -37,6 +37,15 @@ export default function Topbar({ onMenuClick }: TopbarProps = {}) {
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
 
+    // One-shot guard: if we already reloaded for an update this browser session,
+    // don't re-arm the banner from a lingering waiting worker — that's the loop
+    // that made it "always show even after reload". Checked first so we don't
+    // register a listener we then skip cleaning up.
+    if (sessionStorage.getItem("vf_sw_reloaded") === "1") {
+      sessionStorage.removeItem("vf_sw_reloaded");
+      return;
+    }
+
     const onMessage = (e: MessageEvent) => {
       if (e.data?.type === "UPDATE_AVAILABLE") setUpdateReady(true);
     };
@@ -46,14 +55,6 @@ export default function Topbar({ onMenuClick }: TopbarProps = {}) {
     // AND watch for new updates arriving while the page is open.
     // Note: a *waiting* SW has no clients so it cannot postMessage us —
     // we must detect the update here in the page via updatefound/statechange.
-    // One-shot guard: if we already reloaded for an update this browser
-    // session, don't immediately re-arm the banner from a lingering waiting
-    // worker — that's the loop that made it "always show even after reload".
-    if (sessionStorage.getItem("vf_sw_reloaded") === "1") {
-      sessionStorage.removeItem("vf_sw_reloaded");
-      return;
-    }
-
     navigator.serviceWorker.getRegistration().then((reg) => {
       if (!reg) return;
       if (reg.waiting) setUpdateReady(true);
