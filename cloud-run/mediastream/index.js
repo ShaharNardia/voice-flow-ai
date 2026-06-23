@@ -3003,6 +3003,10 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   let busyWatchdog = null;
   let lastBotAudioAt = 0;   // updated on every outbound audio chunk (hybrid)
   let bargedThisTurn = false; // fired a barge-in for the current bot turn already?
+  // True when the bot's current/last turn ended with a question — the caller's
+  // reply is then expected to be SHORT (often one content word like "חדש"/"new"),
+  // so the 1-word noise gate must accept it at lower confidence.
+  let lastBotAskedQuestion = false;
   let _activeToolCalls = 0; // count of tool calls currently awaiting a result
   // Dedup by name+args: Gemini-2.5-flash-native-audio assigns DIFFERENT callIds
   // to what is logically the same tool invocation and sends it twice. Deduping
@@ -3014,6 +3018,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   const armBusy = () => {
     modelBusy = true;
     bargedThisTurn = false;   // new bot turn — allow one fast barge-in
+    lastBotAskedQuestion = false;  // recomputed from this turn's transcript below
     if (busyWatchdog) clearTimeout(busyWatchdog);
     // Safety: if turnComplete never arrives (model error / dropped frame),
     // don't wedge the call forever. BUT never force-idle while bot audio is
@@ -3290,6 +3295,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       // If we were accumulating user text, flush it first.
       if (_accumUser.trim()) flushTranscript("user");
       _accumAsst += text;
+      // A question this turn → the caller's reply may be a single content word.
+      if (/[?؟]/.test(text)) lastBotAskedQuestion = true;
 
       // End-call detection is now done at TURN END (in response_done), not on
       // every chunk. Per-chunk testing was unreliable: \b doesn't recognize
@@ -3374,8 +3381,10 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     bridge.promptModel(`The caller has been silent. Say exactly: "${checkIn}"`);
     if (hybridSTT) armBusy();
   }, 2000);
-  // Make sure the timer dies when the call ends.
-  bridge.on("close", () => { clearInterval(silenceWatchdog); });
+  // Make sure the timers die when the call ends — otherwise the busy watchdog's
+  // pending 15s setTimeout fires AFTER the call closed ("busy watchdog fired —
+  // forcing model idle" on a dead session, seen on calls s8HUmdlU…/3i5xQLQs…).
+  bridge.on("close", () => { clearInterval(silenceWatchdog); clearBusy(); });
 
   bridge.on("ready", () => {
     const elapsed = Date.now() - callStartTime;
@@ -3609,7 +3618,11 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       const wc = t.trim().split(/\s+/).length;
       const isAckWord = /^(כן|לא|נכון|בסדר|אוקיי|אוקי|טוב|בטח|סבבה|yes|no|yeah|yep|nope|ok|okay|sure|right)[.!?]?$/i.test(t.trim());
       if (conf < 0.50 && !isAckWord) { console.log(`[${callSessionId}] [HYBRID] drop low-conf "${t}"`); return; }
-      if (wc < 2 && conf < 0.85 && !/\d/.test(t) && !isAckWord) { console.log(`[${callSessionId}] [HYBRID] drop 1-word "${t}"`); return; }
+      // 1-word finals are normally echo/noise, so we require high confidence — UNLESS
+      // the bot just asked a question, where a single content word ("חדש"/"new",
+      // "ישן"/"old") is the expected answer and must not be swallowed.
+      const oneWordFloor = lastBotAskedQuestion ? 0.55 : 0.85;
+      if (wc < 2 && conf < oneWordFloor && !/\d/.test(t) && !isAckWord) { console.log(`[${callSessionId}] [HYBRID] drop 1-word "${t}" (floor ${oneWordFloor})`); return; }
       console.log(`[${callSessionId}] [HYBRID] DG final: "${t}" conf=${conf.toFixed(2)} modelBusy=${modelBusy}`);
       if (modelBusy) {
         // Model is generating its turn. Queue this — sending clientContent now
