@@ -2652,7 +2652,7 @@ function AssistantEdit() {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center gap-1 ml-3 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <div className="flex items-center gap-1 ml-3 opacity-60 group-hover:opacity-100 transition-opacity">
                         {isUrl && (
                           <button onClick={() => handleSyncUrl(file.sourceFile)} disabled={syncingUrl === file.sourceFile}
                             className="p-1.5 text-neutral-400 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-60" title="Re-sync URL"
