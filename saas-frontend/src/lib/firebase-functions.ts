@@ -387,6 +387,16 @@ export const knowledgeSync = (data: { assistantId: string; url: string }) =>
 export const knowledgeProcessText = (data: { assistantId: string; text: string; title?: string }) =>
   httpPost<{ chunksCreated: number; title: string }>("/knowledgeProcessText", data);
 
+// Clear the entire knowledge base for an assistant (all sources + chunks).
+export const knowledgeClearAll = (data: { assistantId: string }) =>
+  httpPost<{ deleted: number }>("/knowledgeClearAll", data);
+
+// Load a source's full text back (for in-place editing of text/sheet entries).
+export const knowledgeGetSource = (assistantId: string, sourceFile: string) =>
+  httpGet<{ status: string; sourceFile: string; sourceType: string; content: string }>(
+    `/knowledgeGetSource?assistantId=${encodeURIComponent(assistantId)}&sourceFile=${encodeURIComponent(sourceFile)}`,
+  );
+
 // ── Language Tutor (browser-based English lessons) ───────────────────
 
 export interface TutorSession {

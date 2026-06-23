@@ -190,6 +190,8 @@ exports.knowledgeDeleteFile  = knowledgeService.knowledgeDeleteFile;
 exports.knowledgeProcessText = knowledgeService.knowledgeProcessText;
 exports.knowledgeProcessUrl  = knowledgeService.knowledgeProcessUrl;
 exports.knowledgeSync        = knowledgeService.knowledgeSync;
+exports.knowledgeClearAll    = knowledgeService.knowledgeClearAll;
+exports.knowledgeGetSource   = knowledgeService.knowledgeGetSource;
 
 // Language Tutor Service has moved to the coach-app repo (coach codebase).
 // These endpoints are now served at coach.lancelotech.com.

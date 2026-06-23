@@ -9,6 +9,7 @@ import {
   assistantsGet, assistantsUpdate, assistantTestChat,
   knowledgeListFiles, knowledgeProcessFile, knowledgeDeleteFile,
   knowledgeProcessUrl, knowledgeSync, knowledgeProcessText, knowledgeCrawlReport,
+  knowledgeClearAll, knowledgeGetSource,
   getCostConfig, scenariosList, scenariosCreate, scenarioWizardChat, scenarioWizardGenerate,
   toolPresetsList,
   type Assistant, type KnowledgeFile, type RateCard, type ScenarioDoc, type WizardMessage, type CrawlReport,
@@ -20,7 +21,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import {
   ArrowLeft, BookOpen, ChevronDown, FileText, Link2, Loader2,
-  MessageSquare, Mic, Mic2, Play, Plus, RefreshCw, Save, Send, Settings,
+  MessageSquare, Mic, Mic2, Pencil, Play, Plus, RefreshCw, Save, Send, Settings,
   Sparkles, Square, Trash2, Type, Upload, Volume2, X, Zap,
 } from "lucide-react";
 
@@ -1011,6 +1012,8 @@ function AssistantEdit() {
   const [kbUploadStatus, setKbUploadStatus] = useState("");
   const [kbError, setKbError] = useState("");
   const [deletingFile, setDeletingFile] = useState<string | null>(null);
+  const [kbClearing, setKbClearing] = useState(false);
+  const [editingSource, setEditingSource] = useState<string | null>(null);
   // Crawl coverage report — per-page breakdown so the user can verify nothing was missed.
   const [reportFor, setReportFor] = useState<string | null>(null);   // sourceRoot currently expanded
   const [reportData, setReportData] = useState<CrawlReport | null>(null);
@@ -1319,6 +1322,40 @@ function AssistantEdit() {
     } finally {
       stopPoll();
       setSyncingUrl(null);
+    }
+  }
+
+  async function handleClearAllKb() {
+    if (!id || kbFiles.length === 0) return;
+    if (!confirm(`Delete the ENTIRE knowledge base (${kbFiles.length} source${kbFiles.length === 1 ? "" : "s"})? This cannot be undone.`)) return;
+    setKbClearing(true); setKbError("");
+    try {
+      const r = await knowledgeClearAll({ assistantId: id });
+      setKbFiles([]);
+      setKbUploadStatus(`Knowledge base cleared — ${r.deleted} chunks removed`);
+      setTimeout(() => setKbUploadStatus(""), 4000);
+    } catch (e: unknown) {
+      setKbError(e instanceof Error ? e.message : "Failed to clear knowledge base");
+    } finally {
+      setKbClearing(false);
+    }
+  }
+
+  // Load an existing text entry back into the Add-Text form for editing. Saving
+  // re-uses the same title, so knowledgeProcessText replaces the old chunks.
+  async function handleEditText(sourceFile: string) {
+    if (!id) return;
+    setEditingSource(sourceFile); setKbError("");
+    try {
+      const r = await knowledgeGetSource(id, sourceFile);
+      setTextTitle(sourceFile);
+      setTextContent(r.content || "");
+      setShowTextForm(true);
+      setShowSheetForm(false);
+    } catch (e: unknown) {
+      setKbError(e instanceof Error ? e.message : "Failed to load entry");
+    } finally {
+      setEditingSource(null);
     }
   }
 
@@ -2393,14 +2430,27 @@ function AssistantEdit() {
               <h3 className="text-sm font-semibold text-neutral-800">Knowledge Sources</h3>
               <p className="text-xs text-neutral-400 mt-0.5">Files and URLs embedded and used during calls.</p>
             </div>
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              disabled={kbUploading}
-              className="flex items-center gap-1.5 bg-[#F22F46] hover:bg-[#d9243b] disabled:opacity-60 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
-            >
-              {kbUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
-              Upload File
-            </button>
+            <div className="flex items-center gap-2">
+              {kbFiles.length > 0 && (
+                <button
+                  onClick={handleClearAllKb}
+                  disabled={kbClearing}
+                  className="flex items-center gap-1.5 border border-red-200 text-red-600 hover:bg-red-50 disabled:opacity-60 text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+                  title="Delete the entire knowledge base"
+                >
+                  {kbClearing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                  Clear all
+                </button>
+              )}
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                disabled={kbUploading}
+                className="flex items-center gap-1.5 bg-[#F22F46] hover:bg-[#d9243b] disabled:opacity-60 text-white text-xs font-medium px-3 py-2 rounded-lg transition-colors"
+              >
+                {kbUploading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Upload className="w-3.5 h-3.5" />}
+                Upload File
+              </button>
+            </div>
             <input ref={fileInputRef} type="file" accept=".txt,.md,.pdf,.docx" className="hidden" onChange={handleFileUpload} />
           </div>
           <div className="flex gap-2 mb-3">
@@ -2608,6 +2658,13 @@ function AssistantEdit() {
                             className="p-1.5 text-neutral-400 hover:text-blue-500 hover:bg-blue-50 rounded-md transition-colors disabled:opacity-60" title="Re-sync URL"
                           >
                             {syncingUrl === file.sourceFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+                          </button>
+                        )}
+                        {!isUrl && !file.storagePath && (
+                          <button onClick={() => handleEditText(file.sourceFile)} disabled={editingSource === file.sourceFile}
+                            className="p-1.5 text-neutral-400 hover:text-amber-600 hover:bg-amber-50 rounded-md transition-colors disabled:opacity-60" title="Edit text"
+                          >
+                            {editingSource === file.sourceFile ? <Loader2 className="w-4 h-4 animate-spin" /> : <Pencil className="w-4 h-4" />}
                           </button>
                         )}
                         <button onClick={() => handleDeleteFile(file.sourceFile)} disabled={deletingFile === file.sourceFile}

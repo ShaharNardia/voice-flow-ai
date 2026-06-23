@@ -457,6 +457,94 @@ exports.knowledgeDeleteFile = onRequest({...corsOptions, secrets: [OPENAI_API_KE
   }
 });
 
+// ── Clear ALL knowledge for an assistant ──────────────────────────────────
+// Deletes every chunk (and any backing Storage files) for the assistant in one
+// call. Uses commitAdaptive because the 1536-dim embedding field is indexed and
+// big fixed-size delete batches blow Firestore's "Transaction too big" limit.
+exports.knowledgeClearAll = onRequest({...corsOptions, memory: "512MiB", secrets: [OPENAI_API_KEY]}, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
+
+  const uid = await extractUidFromRequest(req);
+  if (!uid) { res.status(401).json({status: "error", message: "Unauthorized"}); return; }
+
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
+    const {assistantId} = body || {};
+    if (!assistantId) { res.status(400).json({status: "error", message: "assistantId required"}); return; }
+
+    const db = getFirestore();
+    // Projection (storagePath only) — never pull the embedding field, or large
+    // KBs OOM the function.
+    const snap = await db.collection("knowledge_chunks")
+      .where("assistantId", "==", assistantId)
+      .where("ownerId", "==", uid)
+      .select("storagePath")
+      .get();
+
+    if (snap.empty) { res.status(200).json({deleted: 0}); return; }
+
+    const refs = snap.docs.map((d) => d.ref);
+    const storagePaths = new Set();
+    snap.docs.forEach((d) => { const p = d.get("storagePath"); if (p) storagePaths.add(p); });
+
+    await commitAdaptive(db, refs, (batch, ref) => batch.delete(ref), 100);
+
+    // Best-effort Storage cleanup for uploaded files.
+    for (const p of storagePaths) {
+      try { await admin.storage().bucket().file(p).delete(); }
+      catch (e) { logger.warn(`Storage delete failed for ${p} (non-fatal): ${e.message}`); }
+    }
+
+    logger.info(`knowledgeClearAll: deleted ${refs.length} chunks for assistantId="${assistantId}"`);
+    res.status(200).json({deleted: refs.length});
+  } catch (error) {
+    logger.error("knowledgeClearAll failed", error);
+    res.status(500).json({status: "error", message: "Failed to clear knowledge base"});
+  }
+});
+
+// ── Get a source's raw content (for in-place editing of text/sheet entries) ──
+// Returns the chunks re-joined in order so the UI can load an existing text
+// entry into the editor, change it, and re-save (knowledgeProcessText with the
+// same title replaces it). Projection excludes the embedding to avoid OOM.
+exports.knowledgeGetSource = onRequest({...corsOptions, memory: "512MiB", secrets: [OPENAI_API_KEY]}, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+
+  const uid = await extractUidFromRequest(req);
+  if (!uid) { res.status(401).json({status: "error", message: "Unauthorized"}); return; }
+
+  try {
+    const assistantId = req.query.assistantId;
+    const sourceFile = req.query.sourceFile;
+    if (!assistantId || !sourceFile) {
+      res.status(400).json({status: "error", message: "assistantId and sourceFile required"});
+      return;
+    }
+
+    const db = getFirestore();
+    const snap = await db.collection("knowledge_chunks")
+      .where("assistantId", "==", assistantId)
+      .where("ownerId", "==", uid)
+      .where("sourceFile", "==", sourceFile)
+      .select("content", "chunkIndex", "sourceType")
+      .get();
+
+    if (snap.empty) { res.status(404).json({status: "error", message: "Source not found"}); return; }
+
+    const ordered = snap.docs
+      .map((d) => ({ i: typeof d.get("chunkIndex") === "number" ? d.get("chunkIndex") : 0, c: d.get("content") || "" }))
+      .sort((a, b) => a.i - b.i);
+    const content = ordered.map((x) => x.c).join("\n\n");
+    const sourceType = snap.docs[0].get("sourceType") || "text";
+
+    res.status(200).json({status: "ok", sourceFile, sourceType, content});
+  } catch (error) {
+    logger.error("knowledgeGetSource failed", error);
+    res.status(500).json({status: "error", message: "Failed to load source"});
+  }
+});
+
 // â"€â"€ Semantic search â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€â"€
 
 exports.knowledgeSearch = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
