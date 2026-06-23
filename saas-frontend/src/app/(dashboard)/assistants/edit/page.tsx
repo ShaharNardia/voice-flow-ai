@@ -1345,7 +1345,14 @@ function AssistantEdit() {
     if (!assistant) return;
     setSaving(true); setError("");
     try {
-      await assistantsUpdate({ ...assistant, id });
+      // Drop incomplete custom API tools (e.g. a "+ Add Tool" row left empty) so
+      // junk like an unfilled `new_tool` never reaches the assistant's tool list.
+      const ax = assistant as AssistantExtended;
+      const cleanedTools = (ax.customTools || []).filter(
+        (t) => t.type || (t.name?.trim() && t.url?.trim()),
+      );
+      const payload = { ...assistant, customTools: cleanedTools } as typeof assistant;
+      await assistantsUpdate({ ...payload, id });
       setSaved(true); setHasUnsavedChanges(false);
       setTimeout(() => setSaved(false), 2000);
     } catch (e: unknown) {

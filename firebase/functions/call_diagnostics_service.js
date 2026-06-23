@@ -75,6 +75,10 @@ const PATTERNS = [
   { re: /Tool (\w+) failed: (.+)$/i,
     handle: (m) => ({ type: "tool_error", severity: "error", label: `Tool failed: ${m[1]}`, detail: m[2] }) },
 
+  // Request side — shows WHICH endpoint a custom tool actually hit (method + URL).
+  { re: /Custom API: (GET|POST|PUT|PATCH|DELETE) (https?:\/\/\S+)/i,
+    handle: (m) => ({ type: "custom_api_request", severity: "info", label: `API → ${m[1]}`, detail: m[2] }) },
+
   { re: /Custom API (\S+) → (\d+) \((\d+) chars summary\)/i,
     handle: (m) => ({ type: "custom_api_response", severity: "info", label: `Custom API: ${m[1]}`, detail: `HTTP ${m[2]} · ${m[3]} chars` }) },
 

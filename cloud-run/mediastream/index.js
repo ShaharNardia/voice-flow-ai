@@ -1871,10 +1871,17 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
         });
         return "Email sent";
       } else if (name === "send_sms" && args.to && args.message && twilioClient) {
-        const fromNum = process.env.TWILIO_DEFAULT_FROM;
+        // Prefer the company's own dialed DID over the env default (see GL path note).
+        const fromNum = data.assistantPhone || process.env.TWILIO_DEFAULT_FROM;
         if (fromNum) {
-          await twilioClient.messages.create({body: args.message, from: fromNum, to: args.to});
-          return "SMS sent";
+          try {
+            await twilioClient.messages.create({body: args.message, from: fromNum, to: args.to});
+            return "SMS sent";
+          } catch (smsErr) {
+            console.error(`[${callSessionId}] [RT] send_sms failed: from=${fromNum} to=${args.to} — ${smsErr.message}`);
+            obs.captureException(smsErr, { tool: "send_sms", from: fromNum, to: args.to });
+            return `Could not send SMS (carrier rejected sender ${fromNum}).`;
+          }
         }
       } else if (name === "create_appointment") {
         await db.collection("appointments").add({
@@ -3106,10 +3113,19 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         result = "Call will end in a moment. Say goodbye now.";
       } else if (name === "send_sms" && args.message) {
         const to = data.callerNumber || data.leadNumber;
-        const fromNum = process.env.TWILIO_DEFAULT_FROM;
+        // Prefer the company's OWN dialed DID (guaranteed Twilio-owned + same
+        // country as the caller) over the global env default, which is often a
+        // US number that Twilio rejects for non-US recipients (country mismatch).
+        const fromNum = data.assistantPhone || process.env.TWILIO_DEFAULT_FROM;
         if (to && twilioClient && fromNum) {
-          await twilioClient.messages.create({ body: args.message, from: fromNum, to });
-          result = `SMS sent to ${to}`;
+          try {
+            await twilioClient.messages.create({ body: args.message, from: fromNum, to });
+            result = `SMS sent to ${to}`;
+          } catch (smsErr) {
+            console.error(`[${callSessionId}] [GL] send_sms failed: from=${fromNum} to=${to} — ${smsErr.message}`);
+            obs.captureException(smsErr, { tool: "send_sms", from: fromNum, to });
+            result = `Could not send SMS (carrier rejected sender ${fromNum}). Tell the caller you'll follow up another way.`;
+          }
         } else {
           result = "Could not send SMS — phone number or Twilio not configured";
         }
