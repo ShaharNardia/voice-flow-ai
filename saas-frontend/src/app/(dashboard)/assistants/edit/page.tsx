@@ -662,30 +662,32 @@ function CustomApiToolsEditor({ tools, onChange }: { tools: CustomTool[]; onChan
       .catch(() => setPresetPacks([]));
   }, []);
 
-  // Add every tool in a pack to this assistant's customTools (dedup by name).
+  // Add (or refresh) a pack's tools. Tools are matched by name: any existing
+  // tool with the same name as a pack tool is REPLACED with the latest preset
+  // definition — so clicking again pulls fixes (e.g. a corrected endpoint URL)
+  // into an assistant that added the pack earlier. Unrelated custom tools are
+  // left untouched.
   const addPack = (pack: ToolPresetPack) => {
-    const existing = new Set(tools.map((t) => t.name));
     const mapType = (t?: string): "string" | "number" | "boolean" =>
       t === "boolean" ? "boolean" : (t === "number" || t === "integer") ? "number" : "string";
-    const toAdd: CustomTool[] = (pack.tools || [])
-      .filter((pt) => !existing.has(pt.name))
-      .map((pt) => ({
-        id: `preset_${pack.id}_${pt.name}`,
-        name: pt.name,
-        type: "api_call" as const,
-        description: pt.description,
-        method: (pt.method || "GET").toUpperCase() === "POST" ? "POST" : "GET",
-        url: pt.url,
-        headers: pt.headers || {},
-        parameters: (pt.parameters || []).map((p) => ({
-          name: p.name,
-          type: mapType(p.type),
-          description: p.description || "",
-          required: !!p.required,
-        })),
-      }));
-    if (toAdd.length === 0) return;            // already added
-    onChange([...toAdd, ...tools]);
+    const packNames = new Set((pack.tools || []).map((pt) => pt.name));
+    const fresh: CustomTool[] = (pack.tools || []).map((pt) => ({
+      id: `preset_${pack.id}_${pt.name}`,
+      name: pt.name,
+      type: "api_call" as const,
+      description: pt.description,
+      method: (pt.method || "GET").toUpperCase() === "POST" ? "POST" : "GET",
+      url: pt.url,
+      headers: pt.headers || {},
+      parameters: (pt.parameters || []).map((p) => ({
+        name: p.name,
+        type: mapType(p.type),
+        description: p.description || "",
+        required: !!p.required,
+      })),
+    }));
+    const others = tools.filter((t) => !packNames.has(t.name));   // keep non-pack tools
+    onChange([...fresh, ...others]);
   };
   const packAdded = (pack: ToolPresetPack) =>
     (pack.tools || []).every((pt) => tools.some((t) => t.name === pt.name));
@@ -803,12 +805,12 @@ function CustomApiToolsEditor({ tools, onChange }: { tools: CustomTool[]; onChan
                     <button
                       type="button"
                       onClick={() => addPack(pack)}
-                      disabled={added}
+                      title={added ? "Refresh these tools to the latest definitions" : "Add these tools to this assistant"}
                       className={`text-xs font-medium px-2.5 py-1 rounded-lg flex-shrink-0 ${
-                        added ? "bg-emerald-100 text-emerald-700 cursor-default" : "bg-[#F22F46] text-white hover:opacity-90"
+                        added ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100" : "bg-[#F22F46] text-white hover:opacity-90"
                       }`}
                     >
-                      {added ? "✓ Added" : "+ Add pack"}
+                      {added ? "↻ Update pack" : "+ Add pack"}
                     </button>
                   </div>
                   {pack.systemPrompt && (

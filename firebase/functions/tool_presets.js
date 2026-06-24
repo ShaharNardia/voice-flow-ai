@@ -47,7 +47,7 @@ const MORAN_PACK = {
   systemPrompt: [
     "אתה נציג קולי של מוקד מידע תחבורה ציבורית בישראל. אתה עונה על שאלות נוסעים בזמן אמת על אוטובוסים, תחנות, קווים, עיכובים ושיבושים.",
     "כל המידע בזמן אמת מגיע מ-APIs של מורן (פרוטוקול SIRI 2.8). לפני שאתה עונה על זמני הגעה, עיכובים, מיקום אוטובוס, מצב קו או שיבושים — חובה לקרוא ל-tool המתאים. אל תמציא זמנים, מספרי קווים או מיקומים.",
-    "ברירת מחדל לשאלת 'מתי מגיע האוטובוס': get_stop_arrivals_voice עם phoneCallId+userId+station (הם כבר ב-context). עיכובים: get_stop_delays. סינון לפי חברה: get_stop_by_operator. מיקום רכב: get_vehicle_location. מצב קו: get_line_status. שיבושים: get_general_messages + get_situation_exchange.",
+    "ברירת מחדל לשאלת 'מתי מגיע האוטובוס': get_stop_arrivals_voice עם station (ומספר קו אם נמסר) — קרא את שדה ה-voiceText שחוזר. עיכובים: get_stop_delays. סינון לפי חברה: get_stop_by_operator. מיקום רכב: get_vehicle_location. מצב קו: get_line_status. שיבושים: get_general_messages + get_situation_exchange.",
     "ענה בעברית, קצר וברור (2–3 משפטים לקו). זמנים: 'בעוד X דקות'. מיין קווים לפי minutesToArrival מהקרוב לרחוק. אם אין נתונים: 'כרגע אין מידע על מעבר קווים בתחנה, מומלץ לבדוק קווים חלופיים'. אל תקרא GPS/כיוון/מהירות אלא אם נשאלת במפורש.",
   ].join("\n"),
   tools: [
@@ -55,13 +55,15 @@ const MORAN_PACK = {
       name: "get_stop_arrivals_voice",
       displayName: "זמני הגעה לתחנה (קולי)",
       description:
-        "ברירת מחדל לשיחה קולית. מחזיר טקסט מוכן ל-TTS על זמני הגעת אוטובוסים לתחנה. קרא כשהנוסע שואל 'מתי מגיע האוטובוס', 'מה הזמנים בתחנה', או כל שאלה כללית על הגעות לתחנה.",
+        "ברירת מחדל לשיחה קולית. מחזיר זמני הגעת אוטובוסים לתחנה כולל שדה voiceText מוכן ל-TTS. קרא כשהנוסע שואל 'מתי מגיע האוטובוס', 'מה הזמנים בתחנה', או כל שאלה כללית על הגעות לתחנה. קרא את שדה ה-voiceText לנוסע.",
       method: "GET",
-      url: `${MORAN_BASE}/Moran/stop-monitoring/voice?phoneCallId={{phoneCallId}}&userId={{userId}}&station={{station}}&line={{line}}&operatorRef={{operatorRef}}`,
+      // Use /stop-monitoring (NOT /stop-monitoring/voice): the /voice endpoint
+      // rejected valid requests ("station field is required") and required
+      // phoneCallId/userId; /stop-monitoring works with station+line alone and
+      // already returns a ready `voiceText` field.
+      url: `${MORAN_BASE}/Moran/stop-monitoring?station={{station}}&line={{line}}&operatorRef={{operatorRef}}`,
       headers: {},
       parameters: [
-        p("phoneCallId", "integer", "מזהה השיחה מ-StartCall (מה-context)", true),
-        p("userId", "integer", "מזהה המשתמש מ-StartCall (מה-context)", true),
         p("station", "string", "מספר תחנה (MonitoringRef), ספרות בלבד. דוגמה: 32902", true),
         p("line", "string", "מספר קו לסינון (אופציונלי). דוגמה: 5"),
         p("operatorRef", "string", "קוד חברת אוטובוס לסינון (אופציונלי). דוגמה: 3 לאגד"),
