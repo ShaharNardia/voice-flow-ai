@@ -52,15 +52,30 @@ export function registerServiceWorker() {
   if (typeof window === "undefined") return;
   if (!("serviceWorker" in navigator)) return;
   // Wait until after the page loads — don't contend with hydration.
-  window.addEventListener("load", () => {
+  window.addEventListener("load", async () => {
+    // ONE-TIME CLEANUP (root cause of the perpetual "new version available"
+    // banner): older builds registered firebase-messaging-sw.js at the ROOT
+    // scope "/", where it clobbered the app-shell sw.js — the two then
+    // flip-flopped active/waiting on every load, leaving a permanent
+    // reg.waiting. Existing browsers still carry that bad registration, so the
+    // scope fix alone doesn't help them. Tear down every root-scope
+    // registration once (guarded), then register cleanly below.
+    try {
+      if (!localStorage.getItem("vf_sw_cleanup_v5")) {
+        const regs = await navigator.serviceWorker.getRegistrations().catch(() => [] as ServiceWorkerRegistration[]);
+        await Promise.all(
+          regs.filter((r) => r.scope === location.origin + "/").map((r) => r.unregister().catch(() => false)),
+        );
+        localStorage.setItem("vf_sw_cleanup_v5", "1");
+      }
+    } catch { /* non-fatal */ }
+
     navigator.serviceWorker.register("/sw.js").catch((err) => {
       console.warn("SW registration failed", err);
     });
-    // Register the FCM SW at its OWN scope. Registering it at the default root
-    // scope ("/") clobbers the app-shell sw.js registration — the two then
-    // flip-flop active/waiting on every load, leaving a permanent `reg.waiting`
-    // and a "new version available" banner that never clears. The dedicated
-    // scope is the one Firebase Messaging uses by convention.
+    // Register the FCM SW at its OWN scope (NOT root) so it can never again
+    // collide with the app-shell worker. This is Firebase Messaging's
+    // conventional scope.
     navigator.serviceWorker
       .register("/firebase-messaging-sw.js", { scope: "/firebase-cloud-messaging-push-scope" })
       .catch(() => null);

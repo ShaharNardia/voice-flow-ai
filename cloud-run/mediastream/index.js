@@ -1338,6 +1338,13 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
     _parts.push("[PRIMARY ROLE]\nYou are a helpful phone assistant. Answer questions clearly and concisely.");
   }
 
+  // Conversation flow / playbook — a per-use-case script that tells the bot
+  // what flow to steer toward (e.g. "Membership renewal: 1) verify ID 2) confirm
+  // details 3) offer to renew or register new"). Guidance, not spoken verbatim.
+  if (assistant.conversationFlow && String(assistant.conversationFlow).trim()) {
+    _parts.push(`[CONVERSATION FLOW — the playbook to steer the call by use case. Follow the matching flow; adapt naturally, never read it aloud]\n${String(assistant.conversationFlow).trim()}`);
+  }
+
   // ③ TRANSLATION MODE (overrides role when set)
   if (translationMode && outputLanguage) {
     const outLangName = LANG_NAMES[outputLanguage] || outputLanguage;

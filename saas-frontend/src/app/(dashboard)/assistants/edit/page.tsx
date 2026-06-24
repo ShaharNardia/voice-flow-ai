@@ -9,7 +9,7 @@ import {
   assistantsGet, assistantsUpdate, assistantTestChat,
   knowledgeListFiles, knowledgeProcessFile, knowledgeDeleteFile,
   knowledgeProcessUrl, knowledgeSync, knowledgeProcessText, knowledgeCrawlReport,
-  knowledgeClearAll, knowledgeGetSource,
+  knowledgeClearAll, knowledgeGetSource, customToolTest,
   getCostConfig, scenariosList, scenariosCreate, scenarioWizardChat, scenarioWizardGenerate,
   toolPresetsList,
   type Assistant, type KnowledgeFile, type RateCard, type ScenarioDoc, type WizardMessage, type CrawlReport,
@@ -22,7 +22,7 @@ import dynamic from "next/dynamic";
 import {
   ArrowLeft, BookOpen, ChevronDown, FileText, Link2, Loader2,
   MessageSquare, Mic, Mic2, Pencil, Play, Plus, RefreshCw, Save, Send, Settings,
-  Sparkles, Square, Trash2, Type, Upload, Volume2, X, Zap,
+  Sparkles, Square, Trash2, Type, Upload, Volume2, Wrench, X, Zap,
 } from "lucide-react";
 
 const ScenarioPhoneSimulator = dynamic(
@@ -422,6 +422,7 @@ interface AssistantExtended extends Assistant {
   callerGender?: "neutral" | "ask" | "male" | "female";
   voiceAccent?: "native-il" | "neutral" | "default" | "msa" | "levantine" | "gulf" | "egyptian";
   customTools?: CustomTool[];
+  conversationFlow?: string;
 }
 
 interface ChatMessage {
@@ -453,7 +454,7 @@ const REALTIME_VOICES = [
 
 const CLOUD_RUN = "https://voiceflow-mediastream-900818829902.me-west1.run.app";
 
-type Tab = "settings" | "knowledge" | "test";
+type Tab = "settings" | "tools" | "knowledge" | "test";
 
 // ── Helpers ───────────────────────────────────────────────────────────
 function PriceLabel({ children, tone = "neutral" }: { children: React.ReactNode; tone?: "neutral" | "warn" | "ok" }) {
@@ -656,6 +657,39 @@ function CustomApiToolsEditor({ tools, onChange }: { tools: CustomTool[]; onChan
   // ── Global preset packs (code-defined, available to every assistant) ──
   const [presetPacks, setPresetPacks] = useState<ToolPresetPack[]>([]);
   const [openPackPrompt, setOpenPackPrompt] = useState<string | null>(null);
+
+  // Per-tool API test ("check the API of a tool"): open panel, enter sample
+  // args, fire the real request, show status + response.
+  const [testToolId, setTestToolId] = useState<string | null>(null);
+  const [testArgs, setTestArgs] = useState<Record<string, string>>({});
+  const [testRunning, setTestRunning] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; status: number; ms: number; result: string; url?: string } | null>(null);
+
+  const openTest = (tool: CustomTool) => {
+    if (testToolId === tool.id) { setTestToolId(null); return; }
+    setTestToolId(tool.id);
+    setTestResult(null);
+    const seed: Record<string, string> = {};
+    (tool.parameters || []).forEach((p) => { seed[p.name] = ""; });
+    setTestArgs(seed);
+  };
+  const runToolTest = async (tool: CustomTool) => {
+    setTestRunning(true); setTestResult(null);
+    try {
+      // Coerce numeric-looking values so number params send as numbers.
+      const args: Record<string, unknown> = {};
+      Object.entries(testArgs).forEach(([k, v]) => {
+        if (v === "") return;
+        args[k] = /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : v;
+      });
+      const r = await customToolTest({ tool, sampleArgs: args });
+      setTestResult(r);
+    } catch (e: unknown) {
+      setTestResult({ ok: false, status: 0, ms: 0, result: e instanceof Error ? e.message : "Test failed" });
+    } finally {
+      setTestRunning(false);
+    }
+  };
   useEffect(() => {
     toolPresetsList()
       .then((r) => setPresetPacks(r.packs || []))
@@ -985,6 +1019,53 @@ function CustomApiToolsEditor({ tools, onChange }: { tools: CustomTool[]; onChan
                   className="w-full text-xs font-mono border border-neutral-200 rounded px-2 py-1 mt-1"
                 />
               </details>
+
+              {/* ── Test this tool's API ── */}
+              <div className="mt-2 pt-2 border-t border-neutral-100">
+                <button
+                  type="button"
+                  onClick={() => openTest(tool)}
+                  disabled={!tool.url}
+                  className="text-xs font-medium text-[#0066CC] hover:underline disabled:text-neutral-300"
+                >
+                  {testToolId === tool.id ? "▾ Hide test" : "▸ Test this API"}
+                </button>
+                {testToolId === tool.id && (
+                  <div className="mt-2 bg-neutral-50 border border-neutral-200 rounded-lg p-2.5 space-y-2">
+                    {(tool.parameters || []).length > 0 ? (
+                      (tool.parameters || []).map((p, pi) => (
+                        <div key={pi} className="flex items-center gap-2">
+                          <label className="text-[11px] text-neutral-500 w-28 truncate" title={p.name}>{p.name}{p.required ? " *" : ""}</label>
+                          <input
+                            value={testArgs[p.name] ?? ""}
+                            onChange={(e) => setTestArgs((a) => ({ ...a, [p.name]: e.target.value }))}
+                            placeholder={p.description || p.type}
+                            className="flex-1 text-xs border border-neutral-200 rounded px-2 py-1"
+                          />
+                        </div>
+                      ))
+                    ) : (
+                      <p className="text-[11px] text-neutral-400">No parameters — runs as-is.</p>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => runToolTest(tool)}
+                      disabled={testRunning}
+                      className="text-xs font-medium bg-[#0066CC] text-white px-3 py-1.5 rounded-lg hover:opacity-90 disabled:opacity-60 flex items-center gap-1.5"
+                    >
+                      {testRunning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Play className="w-3 h-3" />}
+                      Run request
+                    </button>
+                    {testResult && (
+                      <div className={`text-[11px] rounded-lg border p-2 ${testResult.ok ? "bg-emerald-50 border-emerald-200" : "bg-red-50 border-red-200"}`}>
+                        <div className="font-mono text-neutral-700">{testResult.ok ? "✓" : "✗"} HTTP {testResult.status || "—"} · {testResult.ms}ms</div>
+                        {testResult.url && <div className="font-mono text-[10px] text-neutral-400 break-all mt-0.5">{testResult.url}</div>}
+                        <pre className="mt-1 whitespace-pre-wrap break-all text-[10px] text-neutral-600 max-h-48 overflow-auto">{testResult.result}</pre>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           );
         })}
@@ -1497,6 +1578,7 @@ function AssistantEdit() {
           callerGender: (assistant as AssistantExtended).callerGender,
           language: assistant.language,
           voiceAccent: (assistant as AssistantExtended).voiceAccent,
+          conversationFlow: (assistant as AssistantExtended).conversationFlow,
           // Send the editor's current (possibly unsaved) tools so the sandbox fires them.
           customTools: (assistant as AssistantExtended).customTools || [],
         },
@@ -1609,6 +1691,7 @@ function AssistantEdit() {
       <div className="flex gap-1 mb-4 bg-neutral-100 rounded-lg p-1">
         {([
           { key: "settings",  icon: Settings,      label: "Settings",        badge: null as number | null },
+          { key: "tools",     icon: Wrench,         label: "Tools",           badge: ((assistant as AssistantExtended).customTools || []).length || null },
           { key: "knowledge", icon: BookOpen,       label: "Knowledge Base",  badge: kbFiles.length > 0 ? kbFiles.length : null },
           { key: "test",      icon: MessageSquare,  label: "Test Chat",       badge: null as number | null },
         ] as const).map(({ key, icon: Icon, label, badge }) => (
@@ -2298,11 +2381,7 @@ function AssistantEdit() {
               {settingsTab === "advanced" && (
                 <div className="space-y-5">
 
-                  {/* Custom API Tools */}
-                  <CustomApiToolsEditor
-                    tools={(assistant as AssistantExtended).customTools || []}
-                    onChange={(tools) => set("customTools", tools)}
-                  />
+                  {/* Tools moved to their own top-level "Tools" tab. */}
 
                   {/* LLM Model */}
                   <div>
@@ -2425,6 +2504,35 @@ function AssistantEdit() {
             </div>{/* ── end sub-tab content ── */}
           </div>{/* ── end settings card ── */}
         </>
+      )}
+
+      {/* ── Tools Tab ─────────────────────────────────────────────────── */}
+      {tab === "tools" && (
+        <div className="space-y-5">
+          {/* Conversation flow / scenario — steers the bot per use case */}
+          <div className="bg-white border border-neutral-200 rounded-xl p-4">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-base">🗺️</span>
+              <h3 className="text-sm font-semibold text-neutral-800">Conversation Flow</h3>
+            </div>
+            <p className="text-xs text-neutral-400 mb-2">
+              Give the bot a playbook of the flow to aim for in different use cases (it adapts naturally; never reads it aloud). Works on all voice providers, including Gemini Live.
+            </p>
+            <textarea
+              value={(assistant as AssistantExtended).conversationFlow || ""}
+              onChange={(e) => set("conversationFlow", e.target.value)}
+              dir="auto"
+              rows={8}
+              placeholder={"Example:\nMembership renewal:\n1. Verify the caller's ID number.\n2. Confirm their details.\n3. Ask: renew existing membership or register as new?\n4. If a clinical question comes up → offer to transfer to a human.\n\nAppointment booking:\n1. Ask specialty + preferred time …"}
+              className="w-full text-sm border border-neutral-200 rounded-lg px-3 py-2 font-mono leading-relaxed focus:outline-none focus:border-sky-400 focus:ring-1 focus:ring-sky-400"
+            />
+          </div>
+
+          <CustomApiToolsEditor
+            tools={(assistant as AssistantExtended).customTools || []}
+            onChange={(tools) => set("customTools", tools)}
+          />
+        </div>
       )}
 
       {/* ── Knowledge Base Tab ────────────────────────────────────────── */}

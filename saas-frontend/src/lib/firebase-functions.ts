@@ -64,6 +64,7 @@ export const assistantTestChat = (data: {
   history: { role: "user" | "assistant"; content: string }[];
   override?: {
     systemPrompt?: string; assistantVibe?: string; callerGender?: string; language?: string; voiceAccent?: string;
+    conversationFlow?: string;
     // Pass the editor's (possibly unsaved) custom tools so the sandbox can fire them.
     customTools?: unknown[];
   };
@@ -820,6 +821,10 @@ export const toolLibraryUpdate = (data: Partial<LibraryTool> & { id: string }) =
 
 export const toolLibraryDelete = (data: { id: string }) =>
   httpPost<{ ok: boolean }>("/toolLibraryDelete", data);
+
+// Owner-accessible single-tool test (assistant editor per-tool "Test" button).
+export const customToolTest = (data: { tool: unknown; sampleArgs?: Record<string, unknown> }) =>
+  httpPost<{ ok: boolean; status: number; ms: number; result: string; url?: string }>("/customToolTest", data);
 
 export const toolLibraryTest = (data: { id?: string; tool?: Partial<LibraryTool>; sampleArgs?: Record<string, unknown> }) =>
   httpPost<{

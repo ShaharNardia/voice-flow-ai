@@ -21,6 +21,7 @@ const { logger } = require("firebase-functions");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const axios = require("axios");
 const { extractUidFromRequest, setCorsHeadersSafe } = require("./security_utils");
+const toolExec = require("./tool_executor.js");
 
 const REGION = "us-central1";
 const corsOptions = {
@@ -234,6 +235,30 @@ exports.toolLibraryTest = onRequest({ region: REGION, timeoutSeconds: 30, ...cor
       error: e.message,
       code: e.code,
     });
+  }
+});
+
+// ── Owner tool test ────────────────────────────────────────────────────────
+// Any authenticated user can fire a single tool definition with sample args to
+// verify its API works (the assistant editor's per-tool "Test" button). Uses
+// the SSRF-guarded executor. (toolLibraryTest above stays admin-only for the
+// shared library; this tests an inline definition the caller already owns.)
+exports.customToolTest = onRequest({ region: REGION, timeoutSeconds: 30, ...corsOptions }, async (req, res) => {
+  setCorsHeadersSafe(req, res);
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({ error: "POST only" }); return; }
+  const uid = await extractUidFromRequest(req).catch(() => null);
+  if (!uid) { res.status(401).json({ error: "Unauthorized" }); return; }
+
+  const tool = req.body?.tool;
+  const sampleArgs = req.body?.sampleArgs || {};
+  if (!tool || !tool.url) { res.status(400).json({ error: "tool.url required" }); return; }
+
+  try {
+    const r = await toolExec.executeCustomApiTool(tool, sampleArgs, { timeout: 20000 });
+    res.json(r);   // { ok, status, ms, result, url }
+  } catch (e) {
+    res.json({ ok: false, status: 0, ms: 0, result: `Error: ${e.message}`, url: tool.url });
   }
 });
 

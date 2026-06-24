@@ -65,6 +65,7 @@ exports.toolLibraryCreate = toolLibrary.toolLibraryCreate;
 exports.toolLibraryUpdate = toolLibrary.toolLibraryUpdate;
 exports.toolLibraryDelete = toolLibrary.toolLibraryDelete;
 exports.toolLibraryTest   = toolLibrary.toolLibraryTest;
+exports.customToolTest    = toolLibrary.customToolTest;
 
 const toolPresets = require("./tool_presets.js");
 exports.toolPresetsList   = toolPresets.toolPresetsList;

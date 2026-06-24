@@ -1323,6 +1323,7 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
     if (payload.assistantVibe !== undefined) updates.assistantVibe = payload.assistantVibe;
     if (payload.callerGender !== undefined) updates.callerGender = payload.callerGender;
     if (payload.customTools !== undefined) updates.customTools = payload.customTools;
+    if (payload.conversationFlow !== undefined) updates.conversationFlow = payload.conversationFlow;
     if (newDefinition) updates.definition = newDefinition;
 
     await docRef.set(updates, {merge: true});
@@ -1424,6 +1425,7 @@ exports.assistantTestChat = onRequest(corsOptions, async (req, res) => {
       ...(override.callerGender   !== undefined ? { callerGender:  override.callerGender }  : {}),
       ...(override.language       !== undefined ? { language:      override.language }       : {}),
       ...(override.voiceAccent    !== undefined ? { voiceAccent:   override.voiceAccent }    : {}),
+      ...(override.conversationFlow !== undefined ? { conversationFlow: override.conversationFlow } : {}),
     };
 
     const language = assistant.language || "en-US";
@@ -1455,6 +1457,11 @@ exports.assistantTestChat = onRequest(corsOptions, async (req, res) => {
     } else {
       systemPrompt = llmService.buildSystemPrompt(assistant, {}, language) +
         "\n\n## Context\nYou are being tested via a text chat simulation. Behave exactly as you would on a real phone call, but respond in text.";
+    }
+
+    // Conversation flow / playbook (same as live calls).
+    if (assistant.conversationFlow && String(assistant.conversationFlow).trim()) {
+      systemPrompt += "\n\n## Conversation flow (playbook)\nFollow the matching flow for the caller's use case; adapt naturally, never read it aloud:\n" + String(assistant.conversationFlow).trim();
     }
 
     // Inject KB context if available
@@ -1843,6 +1850,7 @@ exports.assistantsGet = onRequest(corsOptions, async (req, res) => {
       callerGender: data.callerGender || null,
       realtimeScenarioId: data.realtimeScenarioId || null,
       customTools: data.customTools || [],
+      conversationFlow: data.conversationFlow || "",
       metadata: {
         ownerId: data.ownerId || null,
         companyId: data.companyId || null,
