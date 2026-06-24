@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import { PromptCoach } from "@/components/PromptCoach";
 import CallDiagnostics from "@/components/CallDiagnostics";
+import CallReplay from "@/components/CallReplay";
 import { doc, onSnapshot, collection, query, where, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase";
 import { formatDate, formatPhone } from "@/lib/utils";
@@ -1142,6 +1143,12 @@ function CallDetail() {
       {call?.id && (
         <div className="mt-4">
           <CallDiagnostics callSessionId={call.id} />
+        </div>
+      )}
+
+      {call?.id && call.assistantId && (call.conversationHistory || []).some((m) => m.role === "user") && (
+        <div className="mt-4">
+          <CallReplay assistantId={call.assistantId} history={call.conversationHistory || []} />
         </div>
       )}
 
