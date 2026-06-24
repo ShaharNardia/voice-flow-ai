@@ -46,8 +46,11 @@ export const assistantsCreate = (data: Partial<Assistant>) =>
 export const assistantsGet = (id: string) =>
   httpGet<Assistant>(`/assistantsGet?id=${encodeURIComponent(id)}`);
 
-export const assistantsUpdate = (data: Partial<Assistant> & { id: string }) =>
-  httpPost<Assistant>("/assistantsUpdate", data);
+export const assistantsUpdate = (
+  // customTools/conversationFlow aren't on the base Assistant type but are
+  // valid whitelisted update fields (see voice_service.assistantsUpdate).
+  data: Partial<Assistant> & { id: string; customTools?: unknown[]; conversationFlow?: string },
+) => httpPost<Assistant>("/assistantsUpdate", data);
 
 export interface TestChatToolCall {
   name: string;

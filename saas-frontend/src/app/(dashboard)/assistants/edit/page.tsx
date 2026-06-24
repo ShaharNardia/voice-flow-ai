@@ -651,8 +651,9 @@ function NLPearlConfig({ pearlId, onChange }: { pearlId: string; onChange: (id: 
 }
 
 // ── Custom API Tools editor ───────────────────────────────────────────
-function CustomApiToolsEditor({ tools, onChange }: { tools: CustomTool[]; onChange: (t: CustomTool[]) => void }) {
+function CustomApiToolsEditor({ tools, onChange, onApplyPack }: { tools: CustomTool[]; onChange: (t: CustomTool[]) => void; onApplyPack?: (t: CustomTool[]) => Promise<void> }) {
   const activeTypes = new Set(tools.map((t) => t.type).filter(Boolean));
+  const [packSaving, setPackSaving] = useState<string | null>(null);
 
   // ── Global preset packs (code-defined, available to every assistant) ──
   const [presetPacks, setPresetPacks] = useState<ToolPresetPack[]>([]);
@@ -721,7 +722,14 @@ function CustomApiToolsEditor({ tools, onChange }: { tools: CustomTool[]; onChan
       })),
     }));
     const others = tools.filter((t) => !packNames.has(t.name));   // keep non-pack tools
-    onChange([...fresh, ...others]);
+    const next = [...fresh, ...others];
+    if (onApplyPack) {
+      // Apply AND persist in one click (parent updates state + saves the assistant).
+      setPackSaving(pack.id);
+      onApplyPack(next).finally(() => setPackSaving(null));
+    } else {
+      onChange(next);
+    }
   };
   const packAdded = (pack: ToolPresetPack) =>
     (pack.tools || []).every((pt) => tools.some((t) => t.name === pt.name));
@@ -839,12 +847,13 @@ function CustomApiToolsEditor({ tools, onChange }: { tools: CustomTool[]; onChan
                     <button
                       type="button"
                       onClick={() => addPack(pack)}
-                      title={added ? "Refresh these tools to the latest definitions" : "Add these tools to this assistant"}
-                      className={`text-xs font-medium px-2.5 py-1 rounded-lg flex-shrink-0 ${
+                      disabled={packSaving === pack.id}
+                      title={added ? "Refresh these tools to the latest definitions (saves immediately)" : "Add these tools to this assistant (saves immediately)"}
+                      className={`text-xs font-medium px-2.5 py-1 rounded-lg flex-shrink-0 disabled:opacity-60 ${
                         added ? "bg-emerald-50 text-emerald-700 border border-emerald-300 hover:bg-emerald-100" : "bg-[#F22F46] text-white hover:opacity-90"
                       }`}
                     >
-                      {added ? "↻ Update pack" : "+ Add pack"}
+                      {packSaving === pack.id ? "Saving…" : added ? "↻ Update pack" : "+ Add pack"}
                     </button>
                   </div>
                   {pack.systemPrompt && (
@@ -1461,6 +1470,25 @@ function AssistantEdit() {
       setScenarioCreating(false);
     }
   }
+
+  // Apply a tool pack AND persist immediately (one-click "Update pack").
+  // Saves only customTools (partial update) with the exact new array — avoids the
+  // stale-state race of relying on a separate Save click.
+  const applyPackAndSave = async (nextTools: CustomTool[]) => {
+    set("customTools", nextTools);
+    if (!id) return;
+    setSaving(true); setError("");
+    try {
+      const cleaned = nextTools.filter((t) => t.type || (t.name?.trim() && t.url?.trim()));
+      await assistantsUpdate({ id, customTools: cleaned });
+      setSaved(true); setHasUnsavedChanges(false);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to save tools");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const handleSave = async () => {
     if (!assistant) return;
@@ -2531,6 +2559,7 @@ function AssistantEdit() {
           <CustomApiToolsEditor
             tools={(assistant as AssistantExtended).customTools || []}
             onChange={(tools) => set("customTools", tools)}
+            onApplyPack={applyPackAndSave}
           />
         </div>
       )}
