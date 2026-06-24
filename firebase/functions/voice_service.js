@@ -2,6 +2,9 @@
 const {onSchedule} = require("firebase-functions/v2/scheduler");
 const {defineSecret} = require("firebase-functions/params");
 const _NLPEARL_TOKEN_SECRET = defineSecret("NLPEARL_API_TOKEN");
+// assistantTestChat calls the OpenAI LLM (llm_service.getLLMResponse reads
+// process.env.OPENAI_API_KEY) — bind the secret or it 500s "OPENAI_API_KEY not configured".
+const _OPENAI_API_KEY_SECRET = defineSecret("OPENAI_API_KEY");
 const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const twilio = require("twilio");
@@ -1378,7 +1381,7 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
  * The `override` fields let the frontend test unsaved draft settings.
  * KB chunks are always fetched live from Firestore for the saved assistantId.
  */
-exports.assistantTestChat = onRequest(corsOptions, async (req, res) => {
+exports.assistantTestChat = onRequest({...corsOptions, secrets: [_OPENAI_API_KEY_SECRET]}, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") {
     res.set("Allow", "POST");
