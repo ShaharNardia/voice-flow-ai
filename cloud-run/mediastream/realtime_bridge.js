@@ -18,6 +18,7 @@ const WebSocket = require("ws");
 
 const REALTIME_MODEL = "gpt-realtime";
 const REALTIME_URL = `wss://api.openai.com/v1/realtime?model=${REALTIME_MODEL}`;
+const MAX_RT_RECONNECT = 3;   // mid-call WS reconnect attempts before giving up
 
 /**
  * Build the `turn_detection` config for session.update based on user
@@ -131,72 +132,57 @@ class RealtimeBridge extends EventEmitter {
       }
     }, 20000);
 
-    // Open WebSocket to OpenAI Realtime (GA API - no OpenAI-Beta header required)
-    this._ws = new WebSocket(REALTIME_URL, {
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-      },
-    });
+    // Connection config — captured so _connect() can re-establish the WS with
+    // the SAME voice/instructions/tools on a mid-call reconnect (no voice change,
+    // no provider switch).
+    this._cfg = { apiKey, instructions, voice, tools, vadMode, vadSensitivity, inputLanguage, maxResponseTokens };
+    this._reconnects = 0;
+    this._everReady = false;
+    this._connect();
+  }
+
+  // (Re)open the OpenAI Realtime WS and wire its handlers. On an UNEXPECTED
+  // mid-call close, reconnect up to MAX with backoff and re-apply the SAME
+  // session config (same voice) — so the bot never just "disappears". Note:
+  // OpenAI sessions don't carry conversation state across sockets, so the live
+  // turn history is lost on reconnect, but the persona/voice/tools continue.
+  _connect() {
+    const c = this._cfg;
+    this._ws = new WebSocket(REALTIME_URL, { headers: { "Authorization": `Bearer ${c.apiKey}` } });
 
     this._ws.on("open", () => {
       this._log("connected to OpenAI Realtime");
-      // Configure session — GA Realtime API shape.
-      // Twilio Media Streams use g711 mulaw at 8kHz → audio/pcmu in GA.
-      // Required: session.type = "realtime"; audio fields moved under audio.{input,output}.
       this._send("session.update", {
         session: {
           type: "realtime",
           model: REALTIME_MODEL,
           output_modalities: ["audio"],
-          instructions,
+          instructions: c.instructions,
           audio: {
             input: {
               format: { type: "audio/pcmu" },
-              // Phone-optimised noise filtering.  "near_field" is for callers
-              // holding their phone to their ear (typical case) - it filters
-              // distant background voices, TV, traffic, etc. so VAD doesn't
-              // mis-trigger on noise.  Use "far_field" if customers are on
-              // speakerphone in a room.
               noise_reduction: { type: "near_field" },
-              transcription: {
-                model: "whisper-1",
-                ...(inputLanguage ? { language: inputLanguage } : {}),
-              },
-              turn_detection: buildTurnDetection(vadMode, vadSensitivity),
+              transcription: { model: "whisper-1", ...(c.inputLanguage ? { language: c.inputLanguage } : {}) },
+              turn_detection: buildTurnDetection(c.vadMode, c.vadSensitivity),
             },
-            output: {
-              format: { type: "audio/pcmu" },
-              voice,
-            },
+            output: { format: { type: "audio/pcmu" }, voice: c.voice },
           },
-          tools: tools.map((t) => ({
+          tools: c.tools.map((t) => ({
             type: "function",
             name: t.function.name,
             description: t.function.description,
             parameters: t.function.parameters,
           })),
-          tool_choice: tools.length > 0 ? "auto" : "none",
-          // NOTE: GA Realtime API does NOT accept `temperature` at session level
-          // (returns "Unknown parameter: 'session.temperature'").  For consistency
-          // control, rely on the system prompt and KB grounding instead.
-          // GA renamed max_response_output_tokens → max_output_tokens
-          max_output_tokens: maxResponseTokens,
+          tool_choice: c.tools.length > 0 ? "auto" : "none",
+          max_output_tokens: c.maxResponseTokens,
         },
       });
-      // NOTE: do NOT emit "ready" here — session.update is in-flight and
-      // OpenAI hasn't actually applied the config yet. If we trigger a
-      // response now it races the config and silently produces nothing
-      // (especially with large instructions from a knowledge base).
-      // Instead we emit "ready" in _handleEvent when session.updated arrives.
+      // "ready" is emitted from _handleEvent on session.updated (config applied).
     });
 
     this._ws.on("message", (data) => {
-      try {
-        const evt = JSON.parse(data.toString());
-        this._handleEvent(evt);
-      } catch (e) {
-        this._log(`parse error: ${e.message}`);
-      }
+      try { this._handleEvent(JSON.parse(data.toString())); }
+      catch (e) { this._log(`parse error: ${e.message}`); }
     });
 
     this._ws.on("error", (err) => {
@@ -206,8 +192,22 @@ class RealtimeBridge extends EventEmitter {
 
     this._ws.on("close", (code, reason) => {
       this._log(`WS closed: ${code} ${reason}`);
-      this._closed = true;
-      this.emit("close");
+      if (this._closed) { this.emit("close"); return; }   // intentional teardown
+      if (this._reconnects < MAX_RT_RECONNECT) {
+        this._reconnects++;
+        this._ready = false;
+        this._currentResponseId = null;
+        const backoff = 400 * this._reconnects;
+        this._log(`unexpected close (${code}) — reconnecting in ${backoff}ms (${this._reconnects}/${MAX_RT_RECONNECT})`);
+        setTimeout(() => {
+          if (this._closed) return;
+          try { this._connect(); } catch (e) { this._log(`reconnect failed: ${e.message}`); }
+        }, backoff);
+      } else {
+        this._log("reconnect exhausted — closing call");
+        this._closed = true;
+        this.emit("close");
+      }
     });
   }
 
@@ -338,7 +338,14 @@ class RealtimeBridge extends EventEmitter {
         // This prevents triggerResponse() from racing the config.
         if (!this._ready) {
           this._ready = true;
-          this.emit("ready");
+          if (!this._everReady) {
+            this._everReady = true;
+            this.emit("ready");          // first time → host triggers the greeting
+          } else {
+            this._reconnects = 0;        // healthy again — reset the budget
+            this._log("session re-established after reconnect (same voice) — no re-greeting");
+            this.emit("reconnected");    // host need not act; caller's next turn continues
+          }
         }
         break;
 

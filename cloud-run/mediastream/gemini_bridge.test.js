@@ -170,3 +170,40 @@ test("setup payload reflects constructor config (voice, model, tools, instructio
   const fnNames = (setupMsg.tools?.[0]?.functionDeclarations || []).map((f) => f.name);
   assert.deepEqual(fnNames, ["end_call"], "tool surfaced in functionDeclarations");
 });
+
+test("unexpected mid-call close with NO resume handle → fresh reconnect (doesn't go dead)", async () => {
+  resetInstances();
+  const bridge = makeBridge();
+  bridge.connect();
+  instances[0].__open();
+  assert.equal(instances.length, 1);
+
+  let closed = false;
+  bridge.on("close", () => { closed = true; });
+
+  // Generic server kill (1011) — matches none of the model/lang/voice/resumption
+  // branches, and no sessionResumption handle was ever received → must fall back
+  // to a FRESH reconnect (a new WS), not emit "close".
+  instances[0].emit("close", 1011, Buffer.from("server error"));
+  await new Promise((r) => setImmediate(r));   // reconnect is scheduled via setImmediate
+
+  assert.equal(instances.length, 2, "should open a fresh WS instead of dying");
+  assert.equal(closed, false, "must NOT surface close while a reconnect is in flight");
+});
+
+test("fresh reconnect is capped — gives up (emits close) after 2 attempts", async () => {
+  resetInstances();
+  const bridge = makeBridge();
+  bridge.connect();
+  instances[0].__open();
+  let closed = false;
+  bridge.on("close", () => { closed = true; });
+
+  // Drop three times: attempts 1 and 2 reconnect, the 3rd exhausts the cap.
+  for (let i = 0; i < 3; i++) {
+    instances[instances.length - 1].emit("close", 1011, Buffer.from("server error"));
+    await new Promise((r) => setImmediate(r));
+  }
+  assert.equal(instances.length, 3, "2 fresh reconnects then stop");
+  assert.equal(closed, true, "after the cap, the call closes cleanly");
+});

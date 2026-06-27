@@ -261,6 +261,7 @@ class GeminiBridge extends EventEmitter {
     // close reconnect with the handle: conversation context survives server-side.
     this._resumeHandle = null;
     this._resumeAttempts = 0;
+    this._freshReconnects = 0;   // fallback reconnects when no resume handle exists
     this._resumptionUnsupported = false;
     // Barge-in (hybrid): drop the REST of the current turn's audio. Distinct
     // from _suppressAudio, which the modelTurn handler resets on every chunk —
@@ -532,6 +533,21 @@ class GeminiBridge extends EventEmitter {
       if (!this._closed && this._resumeHandle && this._resumeAttempts < 3) {
         this._resumeAttempts++;
         this._log(`unexpected close (${code}) — resuming session, attempt ${this._resumeAttempts}/3`);
+        this._ws = null;
+        this._ready = false;
+        this._setupSent = false;
+        setImmediate(() => { if (!this._closed) this.connect(); });
+        return;
+      }
+
+      // Fallback: no resume handle (the WS died before one arrived, or the API
+      // rejected resumption) OR resume attempts exhausted — still don't go dead.
+      // Reconnect with a FRESH session (same voice + instructions; the live turn
+      // context is lost but the persona/voice continue — far better than a dead
+      // line). Smaller cap so a hard failure doesn't loop forever.
+      if (!this._closed && this._freshReconnects < 2) {
+        this._freshReconnects++;
+        this._log(`unexpected close (${code}) — fresh reconnect (no resume handle), attempt ${this._freshReconnects}/2`);
         this._ws = null;
         this._ready = false;
         this._setupSent = false;
