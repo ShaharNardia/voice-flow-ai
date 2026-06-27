@@ -1785,6 +1785,8 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
   let callSid = null;
   let sessionHistory = data.conversationHistory || [];
   let callEnding = false;
+  let hangupTimer = null;   // end_call grace timer — cancellable if caller keeps talking
+  let callerSpoke = false;  // has the CALLER produced a real turn? gates end_call
   let bridgeReady = false;
   let streamStarted = false;
   let greetingTriggered = false;
@@ -1893,16 +1895,22 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
         await updateCall(callSid, {twiml: r.toString()});
         return "Transferred";
       } else if (name === "end_call") {
+        // GATE (anti-premature-hangup): ignore a misfire before the caller has
+        // said anything.
+        if (!callerSpoke) {
+          console.warn(`[${callSessionId}] [RT] end_call IGNORED — caller hasn't spoken yet (likely misfire)`);
+          return "Do not end the call yet — the caller hasn't spoken. Keep helping.";
+        }
         callEnding = true;
-        // Let the model finish its goodbye response before hanging up.
-        // 6s gives the model time to generate + stream the full farewell sentence.
-        setTimeout(async () => {
+        // Cancellable grace timer: if the caller speaks again before it fires
+        // (handled in the transcript/speech handlers), the hangup is aborted.
+        hangupTimer = setTimeout(async () => {
+          hangupTimer = null;
           try {
             if (callSid) {
               console.log(`[${callSessionId}] [RT] Hanging up call ${callSid}`);
               await updateCall(callSid, {status: "completed"});
             } else {
-              // Fallback: close the bridge which drops the Twilio WebSocket
               bridge.close();
             }
           } catch (e) {
@@ -2222,6 +2230,12 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
   bridge.on("transcript", ({role, text}) => {
     console.log(`[${callSessionId}] [RT] ${role}: "${text.slice(0, 80)}"`);
     if (role === "user") {
+      callerSpoke = true;   // a real caller turn happened — end_call may now be honored
+      // ANTI-PREMATURE-HANGUP: caller is still talking after end_call → abort it.
+      if (hangupTimer) {
+        clearTimeout(hangupTimer); hangupTimer = null; callEnding = false;
+        console.log(`[${callSessionId}] [RT] end_call hangup CANCELLED — caller still engaged`);
+      }
       // User turns are always one complete utterance — log immediately
       sessionHistory.push({role, content: text, timestamp: new Date()});
       // Telemetry: capture user text for the turn record
@@ -2999,6 +3013,10 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   let lastBotAudioAt = 0;   // updated on every outbound audio chunk (hybrid)
   let anyOutboundAudio = false; // did ANY bot audio reach the caller this call? (mode-3 one-way detector)
   let bargedThisTurn = false; // fired a barge-in for the current bot turn already?
+  let hangupTimer = null;   // end_call grace timer — cancellable if the caller keeps talking
+  let callerSpoke = false;  // has the CALLER (not the bot) produced a real turn? gates end_call
+  let botTurnStartedAt = 0;       // when the current bot turn began (barge-in echo guard)
+  const ECHO_GUARD_MS = 400;      // ignore barge-in in this window — it's almost always the bot's own audio echoing
   // True when the bot's current/last turn ended with a question — the caller's
   // reply is then expected to be SHORT (often one content word like "חדש"/"new"),
   // so the 1-word noise gate must accept it at lower confidence.
@@ -3014,6 +3032,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   const armBusy = () => {
     modelBusy = true;
     bargedThisTurn = false;   // new bot turn — allow one fast barge-in
+    botTurnStartedAt = Date.now();  // echo-guard window for barge-in (see ECHO_GUARD_MS)
     lastBotAskedQuestion = false;  // recomputed from this turn's transcript below
     if (busyWatchdog) clearTimeout(busyWatchdog);
     // Safety: if turnComplete never arrives (model error / dropped frame),
@@ -3101,17 +3120,27 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       let result = "OK";
       let apiMeta = null;  // filled by executeCustomApiTool with the resolved request/response
       if (name === "end_call") {
-        callEnding = true;
-        setTimeout(async () => {
-          try {
-            if (callSid) await updateCall(callSid, { status: "completed" }, { provider: data.telephonyProvider || "twilio" });
-            else bridge.close();
-          } catch (e) {
-            console.error(`[${callSessionId}] [GL] end_call hangup failed:`, e.message);
-            bridge.close();
-          }
-        }, 6000);
-        result = "Call will end in a moment. Say goodbye now.";
+        // GATE (anti-premature-hangup): never hang up if the CALLER hasn't said
+        // anything yet — that's a model misfire right after the greeting.
+        if (!callerSpoke) {
+          console.warn(`[${callSessionId}] [GL] end_call IGNORED — caller hasn't spoken yet (likely misfire)`);
+          result = "Do not end the call yet — the caller hasn't spoken. Keep helping.";
+        } else {
+          callEnding = true;
+          // Cancellable grace timer: if the caller speaks again before it fires
+          // (handled in onResults), we ABORT the hangup and resume the call.
+          hangupTimer = setTimeout(async () => {
+            hangupTimer = null;
+            try {
+              if (callSid) await updateCall(callSid, { status: "completed" }, { provider: data.telephonyProvider || "twilio" });
+              else bridge.close();
+            } catch (e) {
+              console.error(`[${callSessionId}] [GL] end_call hangup failed:`, e.message);
+              bridge.close();
+            }
+          }, 6000);
+          result = "Call will end in a moment. Say goodbye now.";
+        }
       } else if (name === "send_sms" && args.message) {
         const to = data.callerNumber || data.leadNumber;
         // Prefer the company's OWN dialed DID (guaranteed Twilio-owned + same
@@ -3608,7 +3637,12 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       // while the bot is mid-turn, cut the bot. Gate on confidence + word count
       // so line-echo of the bot's own audio doesn't false-trigger. Once per turn.
       if (!isFinal) {
-        if (modelBusy && !bargedThisTurn && !callEnding) {
+        // Echo guard: in the first ECHO_GUARD_MS of a bot turn, "speech" Deepgram
+        // hears is almost always the bot's own audio echoing back — never let that
+        // cut the bot's sentence. Genuine interrupts arrive after the caller has
+        // heard some of the reply, i.e. past this window.
+        const pastEchoWindow = Date.now() - botTurnStartedAt > ECHO_GUARD_MS;
+        if (modelBusy && !bargedThisTurn && !callEnding && pastEchoWindow) {
           const wcI = t.trim().split(/\s+/).length;
           const interimInterrupt = (conf >= 0.70 && wcI >= 2) || (conf >= 0.85 && /\d/.test(t));
           if (interimInterrupt) doBargeIn("interim");
@@ -3628,6 +3662,13 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       const oneWordFloor = lastBotAskedQuestion ? 0.55 : 0.85;
       if (wc < 2 && conf < oneWordFloor && !/\d/.test(t) && !isAckWord) { console.log(`[${callSessionId}] [HYBRID] drop 1-word "${t}" (floor ${oneWordFloor})`); return; }
       console.log(`[${callSessionId}] [HYBRID] DG final: "${t}" conf=${conf.toFixed(2)} modelBusy=${modelBusy}`);
+      callerSpoke = true;   // a real caller turn happened — end_call may now be honored
+      // ANTI-PREMATURE-HANGUP: if end_call armed a hangup but the caller is still
+      // talking, abort it and resume the call (a real goodbye = caller goes quiet).
+      if (hangupTimer) {
+        clearTimeout(hangupTimer); hangupTimer = null; callEnding = false;
+        console.log(`[${callSessionId}] [GL] end_call hangup CANCELLED — caller still engaged: "${t}"`);
+      }
       if (modelBusy) {
         // Model is generating its turn. Queue this — sending clientContent now
         // would be read as a barge-in and abort the turn with zero audio.
@@ -3645,7 +3686,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         // Fallback barge-in if the interim path didn't already cut this turn.
         const strongInterrupt = (conf >= 0.75 && (wc >= 3 || /\d/.test(t)))
           || (conf >= 0.85 && wc >= 2);
-        if (strongInterrupt && !bargedThisTurn && !callEnding) doBargeIn("final");
+        if (strongInterrupt && !bargedThisTurn && !callEnding && (Date.now() - botTurnStartedAt > ECHO_GUARD_MS)) doBargeIn("final");
         return;
       }
       // Model idle — SMART coalescing for minimal latency:
