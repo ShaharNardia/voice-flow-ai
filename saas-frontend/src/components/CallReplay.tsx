@@ -11,7 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Loader2, Play, Wand2, AlertTriangle, Headphones } from "lucide-react";
+import { Loader2, Play, Wand2, AlertTriangle, Headphones, Download } from "lucide-react";
 import { assistantTestChat, assistantVoiceReplay, type TestChatToolCall, type VoiceReplayResult } from "@/lib/firebase-functions";
 
 interface Turn { role: "user" | "assistant" | "tool"; content?: string; }
@@ -224,6 +224,13 @@ export default function CallReplay({
                     {voiceResult.truncated && (
                       <span className="text-neutral-400">· first {voiceResult.callerTurns.length} of {voiceResult.totalCallerTurns} turns</span>
                     )}
+                    <a
+                      href={audioUrl}
+                      download={`replay-${callSessionId || "call"}.wav`}
+                      className="ml-auto flex items-center gap-1 text-indigo-600 hover:underline"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download WAV
+                    </a>
                   </div>
                   <audio controls src={audioUrl} className="w-full" />
                   <p className="text-[11px] text-neutral-400">

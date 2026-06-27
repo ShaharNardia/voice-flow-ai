@@ -1384,6 +1384,99 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
  * KB chunks are always fetched live from Firestore for the saved assistantId.
  */
 /**
+ * Core of the text Re-run: given a resolved assistant + history + the next user
+ * message, produce the assistant's reply (running its custom-tool loop). Shared
+ * by assistantTestChat (text) and the classic voice replay so both produce the
+ * SAME reply. NOTE: custom tools hit their real endpoints (same as before).
+ * To honor unsaved editor tools, the caller sets assistant.customTools first.
+ */
+async function generateAssistantReply(db, assistant, assistantId, userMessage, history) {
+  const language = assistant.language || "en-US";
+  const isHebrew = language.startsWith("he");
+  const isArabic = language.startsWith("ar");
+
+  let systemPrompt;
+  if (assistant.systemPrompt) {
+    const vibe = assistant.assistantVibe || "friendly";
+    const callerGender = assistant.callerGender || "neutral";
+    const langKey = isHebrew ? "he" : isArabic ? "ar" : "en";
+    const vibeSnippet = llmService.getVibeSnippet(langKey, vibe);
+    const genderSnippet = isHebrew ? llmService.hebrewGenderInstruction(callerGender)
+      : isArabic ? llmService.arabicGenderInstruction(callerGender) : "";
+    const accentSnippet = llmService.getAccentInstruction(langKey, assistant.voiceAccent);
+    const styleSection = [vibeSnippet, genderSnippet, accentSnippet].filter(Boolean).join("\n");
+    const identity = `You are ${assistant.name || "an AI assistant"}${assistant.companyName ? ` from ${assistant.companyName}` : ""}.`;
+    systemPrompt = [
+      identity, "", "## Your goal", assistant.systemPrompt, "",
+      ...(styleSection ? ["## Communication style", styleSection, ""] : []),
+      "## Context",
+      "You are being tested via a text chat simulation in the assistant settings panel. Behave exactly as you would on a real phone call, but respond in text.",
+    ].join("\n");
+  } else {
+    systemPrompt = llmService.buildSystemPrompt(assistant, {}, language) +
+      "\n\n## Context\nYou are being tested via a text chat simulation. Behave exactly as you would on a real phone call, but respond in text.";
+  }
+  if (assistant.conversationFlow && String(assistant.conversationFlow).trim()) {
+    systemPrompt += "\n\n## Conversation flow (playbook)\nFollow the matching flow for the caller's use case; adapt naturally, never read it aloud:\n" + String(assistant.conversationFlow).trim();
+  }
+  try {
+    const kbSnap = await db.collection("knowledge_chunks").where("assistantId", "==", assistantId).limit(10).get();
+    if (!kbSnap.empty) {
+      const MAX_KB_CHARS = 10000;
+      let kbText = "";
+      for (const doc of kbSnap.docs) {
+        const c = doc.data().content || "";
+        if ((kbText.length + c.length + 4) > MAX_KB_CHARS) break;
+        kbText += (kbText ? "\n---\n" : "") + c;
+      }
+      if (kbText) systemPrompt += "\n\n## Reference Information\nUse the following knowledge to answer questions accurately:\n\n" + kbText;
+    }
+  } catch (kbErr) {
+    logger.warn("generateAssistantReply KB fetch failed (non-fatal)", kbErr.message);
+  }
+
+  const llmHistory = (history || [])
+    .filter((m) => m.role === "user" || m.role === "assistant")
+    .slice(-20)
+    .map((m) => ({ role: m.role, content: String(m.content || "") }));
+
+  const customTools = Array.isArray(assistant.customTools) ? assistant.customTools : [];
+  const openAiTools = customTools.map(toolExec.toOpenAiTool).filter(Boolean);
+  const llmOpts = {
+    model: assistant.llmModel || "gpt-4o-mini",
+    maxTokens: Math.min(assistant.maxTokens || 200, 500),
+    temperature: assistant.temperature ?? 0.7,
+    timeout: 20000,
+    ...(openAiTools.length ? { tools: openAiTools } : {}),
+  };
+
+  let llmResult = await llmService.getLLMResponse(systemPrompt, userMessage, llmHistory, llmOpts);
+  const toolCallLog = [];
+  if (openAiTools.length) {
+    const convo = [...llmHistory, { role: "user", content: userMessage }];
+    let rounds = 0;
+    const MAX_ROUNDS = 3;
+    while (llmResult.toolCalls && llmResult.toolCalls.length && rounds < MAX_ROUNDS) {
+      rounds++;
+      convo.push({ role: "assistant", content: llmResult.text || null, tool_calls: llmResult.toolCalls });
+      for (const tc of llmResult.toolCalls) {
+        const fnName = tc.function?.name;
+        let args = {};
+        try { args = JSON.parse(tc.function?.arguments || "{}"); } catch { /* leave {} */ }
+        const tool = customTools.find((t) => toolExec.toolFnName(t.name) === fnName && t.url);
+        const exec = tool
+          ? await toolExec.executeCustomApiTool(tool, args)
+          : { ok: false, status: 0, ms: 0, result: `(no such tool: ${fnName})` };
+        toolCallLog.push({ name: fnName, args, ok: exec.ok, status: exec.status, ms: exec.ms, result: exec.result, url: exec.url });
+        convo.push({ role: "tool", tool_call_id: tc.id, content: String(exec.result ?? "") });
+      }
+      llmResult = await llmService.getLLMResponse(systemPrompt, "", convo, llmOpts);
+    }
+  }
+  return { text: llmResult.text || "", toolCalls: toolCallLog };
+}
+
+/**
  * assistantVoiceReplay — "Re-run & Compare → run as a live voice call".
  * Auth-gated proxy to the mediastream /replay endpoint, which re-runs a past
  * call as a REAL voice session against the assistant's CURRENT config and
@@ -1391,7 +1484,8 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
  * this just authorizes the user and forwards with the shared secret.
  */
 exports.assistantVoiceReplay = onRequest(
-  {...corsOptions, secrets: [_REPLAY_SECRET], timeoutSeconds: 300, memory: "256MiB"},
+  // OPENAI key is needed for the classic branch's LLM reply generation.
+  {...corsOptions, secrets: [_REPLAY_SECRET, _OPENAI_API_KEY_SECRET], timeoutSeconds: 300, memory: "256MiB"},
   async (req, res) => {
     if (req.method === "OPTIONS") { res.status(204).send(""); return; }
     if (req.method !== "POST") {
@@ -1422,6 +1516,64 @@ exports.assistantVoiceReplay = onRequest(
       const secret = process.env.REPLAY_SECRET;
       if (!secret) { res.status(503).json({ status: "error", message: "Voice replay is not configured (REPLAY_SECRET missing)." }); return; }
       const base = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-myg46khq7q-uc.a.run.app";
+
+      // Classic (Deepgram→LLM→TTS) plays audio via Twilio <Play>, not WS media
+      // frames, so the live driver can't capture it. Reconstruct it instead: the
+      // reply text comes from the SAME logic as the text Re-run, then /replay-tts
+      // synthesizes + stitches it. V2V providers fall through to the live /replay.
+      const assistant = { id: assistantId, ...aSnap.data() };
+      const provider = (assistant.voiceProvider === "gemini-hybrid" || assistant.voiceProvider === "gemini-live" || assistant.realtimeProvider === "gemini")
+        ? "gemini" : assistant.realtimeEnabled === true ? "realtime" : "classic";
+
+      if (provider === "classic") {
+        const callSnap = await db.collection("call_sessions").doc(String(callSessionId)).get();
+        if (!callSnap.exists) { res.status(404).json({ status: "error", message: "Original call not found." }); return; }
+        const orig = callSnap.data();
+        const allCaller = (orig.conversationHistory || []).filter((m) => m.role === "user" && (m.content || "").trim()).map((m) => m.content.trim());
+        if (!allCaller.length) { res.status(400).json({ status: "error", message: "No caller turns to replay." }); return; }
+        const cap = Math.max(1, Math.min(Number(maxTurns) || 6, 12));
+        const callerTurns = allCaller.slice(0, cap);
+
+        const turns = [];
+        const botTranscript = [];
+        const hist = [];
+        for (const ct of callerTurns) {
+          let reply = "";
+          try { reply = (await generateAssistantReply(db, assistant, assistantId, ct, hist)).text || ""; }
+          catch (e) { console.warn("[assistantVoiceReplay classic] reply failed:", e.message); }
+          hist.push({ role: "user", content: ct }, { role: "assistant", content: reply });
+          turns.push({ role: "caller", text: ct });
+          if (reply) { turns.push({ role: "bot", text: reply }); botTranscript.push(reply); }
+        }
+
+        const botVoice = String(assistant.voice || "").replace(/^Google\./, "") || null;
+        const ctrlC = new AbortController();
+        const timerC = setTimeout(() => ctrlC.abort(), 120000);
+        let tr;
+        try {
+          tr = await fetch(`${base}/replay-tts`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "x-replay-secret": secret },
+            body: JSON.stringify({ turns, language: assistant.language || orig.language || "he-IL", botVoice }),
+            signal: ctrlC.signal,
+          });
+        } finally { clearTimeout(timerC); }
+        const ttext = await tr.text();
+        if (!tr.ok) {
+          let msg = ttext; try { msg = JSON.parse(ttext).error || ttext; } catch (_) {}
+          res.status(502).json({ status: "error", message: String(msg).slice(0, 400) });
+          return;
+        }
+        const built = JSON.parse(ttext);   // { ok, audioBase64, audioMime, durationMs, blocks }
+        res.status(200).json({
+          ok: true, provider: "classic",
+          audioBase64: built.audioBase64, audioMime: built.audioMime || "audio/wav", durationMs: built.durationMs,
+          botSpoke: botTranscript.length > 0, turns: built.blocks || [],
+          callerTurns, botTranscript,
+          truncated: allCaller.length > callerTurns.length, totalCallerTurns: allCaller.length,
+        });
+        return;
+      }
 
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 280000);

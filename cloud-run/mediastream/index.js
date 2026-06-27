@@ -558,6 +558,50 @@ app.post("/replay", express.json({ limit: "1mb" }), async (req, res) => {
   }
 });
 
+// ── Replay (classic path): TTS + stitch a given transcript ───────────
+// POST /replay-tts  { turns:[{role:"caller"|"bot", text}], language, botVoice }
+// The classic provider plays audio via Twilio <Play>, not WS media frames, so
+// it can't be captured by the live driver. Instead the function reconstructs the
+// reply text (same LLM as the text Re-run) and we synthesize each turn here:
+// the bot in the assistant's own Google voice, the caller in a contrasting one,
+// then stitch one WAV. All-Google LINEAR16 8kHz → single codec, no transcoding.
+function voiceLangCode(voiceName, fallback) {
+  const m = String(voiceName || "").match(/^[a-z]{2}-[A-Z]{2}/);
+  return m ? m[0] : fallback;
+}
+app.post("/replay-tts", express.json({ limit: "1mb" }), async (req, res) => {
+  const secret = process.env.REPLAY_SECRET;
+  if (!secret || req.get("x-replay-secret") !== secret) return res.status(403).json({ error: "forbidden" });
+  const { turns, language, botVoice } = req.body || {};
+  if (!Array.isArray(turns) || !turns.length) return res.status(400).json({ error: "turns required" });
+  try {
+    const callerVoice = callerVoiceFor(language || "he-IL");
+    const fallbackLc = langCodeFor(language || "he-IL");
+    // If the bot's own voice happens to match the caller stand-in, nudge the
+    // caller to a different one so the two sides stay distinguishable.
+    const callerName = (botVoice && botVoice === callerVoice) ? (fallbackLc.startsWith("he") ? "he-IL-Wavenet-C" : callerVoice) : callerVoice;
+    const frames = [];
+    for (const t of turns) {
+      const text = String(t.text || "").trim();
+      if (!text) continue;
+      const isBot = t.role === "bot";
+      const voiceName = isBot ? (botVoice || callerName) : callerName;
+      const [resp] = await googleTtsClient.synthesizeSpeech({
+        input: { text },
+        voice: { languageCode: voiceLangCode(voiceName, fallbackLc), name: voiceName },
+        audioConfig: { audioEncoding: "LINEAR16", sampleRateHertz: 8000, speakingRate: 1.0 },
+      });
+      frames.push({ role: isBot ? "bot" : "caller", pcm16: replayDriver.stripWavHeader(Buffer.from(resp.audioContent)) });
+    }
+    if (!frames.length) return res.status(400).json({ error: "nothing to synthesize" });
+    const built = replayDriver.buildConversation(frames);
+    return res.json({ ok: true, audioBase64: built.wav.toString("base64"), audioMime: "audio/wav", durationMs: built.durationMs, blocks: built.blocks });
+  } catch (err) {
+    console.error("[replay-tts]", err.message);
+    return res.status(500).json({ error: err.message });
+  }
+});
+
 // TTS preview — accepts voice in format "openai:nova" or "Google.he-IL-Wavenet-D"
 app.get("/tts-preview", async (req, res) => {
   res.set("Access-Control-Allow-Origin", "*");
