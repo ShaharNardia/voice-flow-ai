@@ -10,7 +10,6 @@
  * flows through our bridge instead.
  */
 
-const STORAGE_BUCKET = "voiceflow-ai-202509231639.firebasestorage.app";
 const SAMPLE_RATE = 8000;            // Twilio + OpenAI g711_ulaw = 8 kHz
 const MULAW_SILENCE = 0xFF;          // g711 mulaw silence byte
 
@@ -102,17 +101,20 @@ class RealtimeRecorder {
 
     const wav = buildMulawStereoWav(stereo, SAMPLE_RATE);
 
-    // Upload to Firebase Storage, generate a 30-day signed URL
+    // Upload to Firebase Storage and store a PROXY url (getRealtimeRecording),
+    // not a signed URL: the Cloud Run signer has no usable private key, so signed
+    // URLs are rejected by GCS (SignatureDoesNotMatch) and won't play. The proxy
+    // streams the object with admin creds. Bucket is env-aware so staging writes
+    // to its own bucket (was hardcoded to prod).
     try {
       const {getStorage} = require("firebase-admin/storage");
-      const bucket = getStorage().bucket(STORAGE_BUCKET);
+      const project = process.env.GCLOUD_PROJECT || "voiceflow-ai-202509231639";
+      const bucketName = `${project}.firebasestorage.app`;
+      const bucket = getStorage().bucket(bucketName);
       const objectPath = `realtime_recordings/${this.callSessionId}.wav`;
       const file = bucket.file(objectPath);
       await file.save(wav, {contentType: "audio/wav", resumable: false});
-      const [url] = await file.getSignedUrl({
-        action: "read",
-        expires: Date.now() + 30 * 24 * 60 * 60 * 1000,
-      });
+      const url = `https://us-central1-${project}.cloudfunctions.net/getRealtimeRecording?id=${encodeURIComponent(this.callSessionId)}`;
       return {
         url,
         durationSec: Math.round(durationMs / 1000),
