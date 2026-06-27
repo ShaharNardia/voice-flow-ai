@@ -1,47 +1,53 @@
 /**
- * observability.js — optional Sentry error reporting for Cloud Functions.
+ * observability.js — error reporting for Cloud Functions via
+ * Google Cloud Error Reporting (GCER).
  *
- * No-op unless SENTRY_DSN is set, and importing never throws even if
- * @sentry/node is absent. Init once at the top of index.js; call captureError
- * from catch blocks in the services that matter (webhooks first).
+ * Why GCER and not Sentry: the functions already run in GCP, so GCER needs no
+ * external account, no DSN, and no SDK — error data stays inside the project
+ * (calls can carry PII). GCER auto-ingests any structured log entry that
+ * carries the ReportedErrorEvent `@type` with a stack trace in `message`, so we
+ * just emit a single-line JSON log; no init, no credentials, no dependency.
  *
- * Activate by setting the SENTRY_DSN secret/env on the functions deployment.
+ * Importing NEVER throws and telemetry NEVER breaks a function. The exported
+ * API (initSentry / captureError / isEnabled) is unchanged, so no call site
+ * changes. Disable with OBS_DISABLED=1 if ever needed.
  */
 "use strict";
 
-let Sentry = null;
-let enabled = false;
+const REPORTED_ERROR_TYPE =
+  "type.googleapis.com/google.devtools.clouderrorreporting.v1beta1.ReportedErrorEvent";
 
+let enabled = !process.env.OBS_DISABLED;
+
+function serviceContext() {
+  return {
+    // K_SERVICE/FUNCTION_TARGET identify the function on gen2; fall back otherwise.
+    service: process.env.K_SERVICE || process.env.FUNCTION_TARGET || process.env.GCLOUD_PROJECT || "voiceflow-functions",
+    version: process.env.K_REVISION || undefined,
+  };
+}
+
+/** Kept for API compatibility — GCER needs no init. */
 function initSentry() {
-  const dsn = process.env.SENTRY_DSN;
-  if (!dsn) return false;
-  try {
-    Sentry = require("@sentry/node");
-    Sentry.init({
-      dsn,
-      environment: process.env.SENTRY_ENV || process.env.GCLOUD_PROJECT || "production",
-      release: process.env.K_REVISION || undefined,
-      tracesSampleRate: Number(process.env.SENTRY_TRACES_RATE || 0),
-      sampleRate: 1.0,
-    });
-    enabled = true;
-    process.on("unhandledRejection", (reason) => captureError(reason, { kind: "unhandledRejection" }));
-    console.log(`[SENTRY] functions telemetry initialized (env=${process.env.SENTRY_ENV || process.env.GCLOUD_PROJECT})`);
-  } catch (e) {
-    console.warn(`[SENTRY] init skipped: ${e && e.message ? e.message : e}`);
-  }
-  return enabled;
+  if (!enabled) return false;
+  console.log(`[OBS] Google Cloud Error Reporting active (service=${serviceContext().service})`);
+  return true;
 }
 
 /** Report an error with optional context (e.g. {fn:"twilioVoiceWebhook", companyId}). */
 function captureError(err, context) {
-  if (!enabled || !Sentry) return;
+  if (!enabled) return;
   try {
     const e = err instanceof Error ? err : new Error(String(err));
-    Sentry.withScope((scope) => {
-      if (context && typeof context === "object") scope.setExtras(context);
-      Sentry.captureException(e);
-    });
+    const message = e.stack || `${e.name || "Error"}: ${e.message}`;
+    const entry = {
+      severity: "ERROR",
+      "@type": REPORTED_ERROR_TYPE,
+      message,
+      serviceContext: serviceContext(),
+    };
+    if (context && typeof context === "object") entry.context = context;
+    console.log(JSON.stringify(entry));   // single-line JSON → structured log → GCER
   } catch (_) { /* telemetry must never break a function */ }
 }
 
