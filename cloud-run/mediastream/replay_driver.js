@@ -54,6 +54,49 @@ function stripWavHeader(buf) {
   return buf;
 }
 
+/**
+ * Normalize a TTS WAV to raw PCM16 mono @ 8 kHz, regardless of what the TTS
+ * actually returned. Google TTS often ignores `sampleRateHertz: 8000` for
+ * Wavenet/Neural2 voices and returns 24 kHz — treating that as 8 kHz makes the
+ * stitched audio ~3× too long and pitch-shifted. We read the real header
+ * (rate, channels, bits), downmix to mono, and linearly resample to 8 kHz.
+ */
+function wavToPcm8kMono(buf) {
+  if (buf.length < 44 || buf.toString("ascii", 0, 4) !== "RIFF") return buf; // assume already raw 8k mono
+  let off = 12, fmt = null, data = null;
+  while (off + 8 <= buf.length) {
+    const id = buf.toString("ascii", off, off + 4);
+    const size = buf.readUInt32LE(off + 4);
+    if (id === "fmt ") fmt = { channels: buf.readUInt16LE(off + 10), rate: buf.readUInt32LE(off + 12), bits: buf.readUInt16LE(off + 22) };
+    else if (id === "data") { data = buf.slice(off + 8, Math.min(off + 8 + size, buf.length)); break; }
+    off += 8 + size + (size & 1);
+  }
+  if (!data) return buf;
+  const ch = fmt ? fmt.channels : 1, rate = fmt ? fmt.rate : SAMPLE_RATE, bits = fmt ? fmt.bits : 16;
+  const bytesPerSample = Math.max(1, bits >> 3);
+  const n = Math.floor(data.length / (bytesPerSample * ch));
+  const mono = new Int16Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0;
+    for (let c = 0; c < ch; c++) s += data.readInt16LE((i * ch + c) * bytesPerSample);
+    mono[i] = Math.max(-32768, Math.min(32767, Math.round(s / ch)));
+  }
+  if (rate === SAMPLE_RATE) {
+    const out = Buffer.allocUnsafe(n * 2);
+    for (let i = 0; i < n; i++) out.writeInt16LE(mono[i], i * 2);
+    return out;
+  }
+  const ratio = SAMPLE_RATE / rate;
+  const outLen = Math.max(1, Math.floor(n * ratio));
+  const out = Buffer.allocUnsafe(outLen * 2);
+  for (let i = 0; i < outLen; i++) {
+    const src = i / ratio;
+    const i0 = Math.floor(src), i1 = Math.min(n - 1, i0 + 1), frac = src - i0;
+    out.writeInt16LE(Math.round(mono[i0] * (1 - frac) + mono[i1] * frac), i * 2);
+  }
+  return out;
+}
+
 /** PCM16 8 kHz buffer → array of 20 ms µ-law base64 frames (Twilio media payloads). */
 function pcm16ToMulawFrames(pcm16) {
   const frames = [];
@@ -254,6 +297,7 @@ module.exports = {
   buildConversation,
   pcm16ToMulawFrames,
   stripWavHeader,
+  wavToPcm8kMono,
   pcmToWav,
   SAMPLE_RATE,
   FRAME_BYTES,

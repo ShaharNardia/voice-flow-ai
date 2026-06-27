@@ -500,7 +500,7 @@ app.post("/replay", express.json({ limit: "1mb" }), async (req, res) => {
         voice: { languageCode: langCodeFor(language), name: callerVoice },
         audioConfig: { audioEncoding: "LINEAR16", sampleRateHertz: 8000, speakingRate: 1.0 },
       });
-      const pcm = replayDriver.stripWavHeader(Buffer.from(resp.audioContent));
+      const pcm = replayDriver.wavToPcm8kMono(Buffer.from(resp.audioContent));
       callerTurns.push({ text, frames: replayDriver.pcm16ToMulawFrames(pcm) });
     }
 
@@ -591,7 +591,7 @@ app.post("/replay-tts", express.json({ limit: "1mb" }), async (req, res) => {
         voice: { languageCode: voiceLangCode(voiceName, fallbackLc), name: voiceName },
         audioConfig: { audioEncoding: "LINEAR16", sampleRateHertz: 8000, speakingRate: 1.0 },
       });
-      frames.push({ role: isBot ? "bot" : "caller", pcm16: replayDriver.stripWavHeader(Buffer.from(resp.audioContent)) });
+      frames.push({ role: isBot ? "bot" : "caller", pcm16: replayDriver.wavToPcm8kMono(Buffer.from(resp.audioContent)) });
     }
     if (!frames.length) return res.status(400).json({ error: "nothing to synthesize" });
     const built = replayDriver.buildConversation(frames);

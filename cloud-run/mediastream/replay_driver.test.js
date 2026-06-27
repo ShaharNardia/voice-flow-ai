@@ -14,7 +14,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   createReplayAdapter, driveConversation, buildConversation,
-  pcm16ToMulawFrames, stripWavHeader, pcmToWav, FRAME_BYTES, SILENCE_FRAME_B64,
+  pcm16ToMulawFrames, stripWavHeader, wavToPcm8kMono, pcmToWav, FRAME_BYTES, SILENCE_FRAME_B64,
 } = require("./replay_driver.js");
 const { pcm16ToMulawBase64 } = require("./voximplant_audio.js");
 
@@ -44,6 +44,30 @@ test("stripWavHeader removes a RIFF header, passes raw through", () => {
   assert.equal(wav.toString("ascii", 0, 4), "RIFF");
   assert.deepEqual(stripWavHeader(wav), raw, "header stripped → original PCM");
   assert.deepEqual(stripWavHeader(raw), raw, "raw PCM passes through untouched");
+});
+
+// Build a WAV at an arbitrary sample rate (mono PCM16) for the resampler test.
+function wavAtRate(rate, samples) {
+  const pcm = Buffer.alloc(samples * 2);
+  for (let i = 0; i < samples; i++) pcm.writeInt16LE(Math.round(8000 * Math.sin(i / 5)), i * 2);
+  const h = Buffer.alloc(44);
+  h.write("RIFF", 0); h.writeUInt32LE(36 + pcm.length, 4); h.write("WAVE", 8);
+  h.write("fmt ", 12); h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22);
+  h.writeUInt32LE(rate, 24); h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+  h.write("data", 36); h.writeUInt32LE(pcm.length, 40);
+  return Buffer.concat([h, pcm]);
+}
+
+test("wavToPcm8kMono resamples 24kHz TTS down to 8kHz (fixes 3x-too-long bug)", () => {
+  const wav24 = wavAtRate(24000, 2400);          // 0.1s @ 24kHz
+  const pcm8 = wavToPcm8kMono(wav24);
+  assert.equal(pcm8.length / 2, 800, "2400 samples @24k → 800 @8k (0.1s preserved)");
+  // 8kHz input passes through unchanged (minus the header).
+  const wav8 = wavAtRate(8000, 800);
+  assert.equal(wavToPcm8kMono(wav8).length / 2, 800, "8kHz passes through");
+  // Raw (headerless) buffer is returned as-is.
+  const raw = Buffer.alloc(320, 3);
+  assert.deepEqual(wavToPcm8kMono(raw), raw);
 });
 
 test("buildConversation concatenates frames in order and reports blocks", () => {
