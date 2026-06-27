@@ -9,6 +9,7 @@ const _OPENAI_API_KEY_SECRET = defineSecret("OPENAI_API_KEY");
 const _REPLAY_SECRET = defineSecret("REPLAY_SECRET");
 const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
+const {getStorage} = require("firebase-admin/storage");
 const twilio = require("twilio");
 
 const {
@@ -4892,6 +4893,32 @@ exports.getRecording = onRequest(corsOptions, async (req, res) => {
         sid: req.query.sid || null,
       },
     });
+    res.status(500).send("Failed to fetch recording");
+  }
+});
+
+// Proxy for realtime/Gemini recordings stored in GCS. The recorder uploads to
+// realtime_recordings/<callSessionId>.wav and historically saved a V2 SIGNED URL
+// — but the Cloud Run signer has no usable private key, so those signatures are
+// rejected by GCS (SignatureDoesNotMatch) and the <audio> tag can't play them.
+// Stream the object with admin credentials instead (same approach as the Twilio
+// getRecording proxy). callSessionId is unguessable, so no extra auth needed.
+exports.getRealtimeRecording = onRequest(corsOptions, async (req, res) => {
+  try {
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+    const id = String(req.query.id || "");
+    if (!/^[A-Za-z0-9_-]{6,128}$/.test(id)) { res.status(400).send("Invalid id"); return; }
+    const bucketName = `${process.env.GCLOUD_PROJECT || "voiceflow-ai-202509231639"}.firebasestorage.app`;
+    const file = getStorage().bucket(bucketName).file(`realtime_recordings/${id}.wav`);
+    const [exists] = await file.exists();
+    if (!exists) { res.status(404).send("Recording not found"); return; }
+    res.set("Content-Type", "audio/wav");
+    res.set("Cache-Control", "private, max-age=3600");
+    file.createReadStream()
+      .on("error", (e) => { console.error("[getRealtimeRecording] stream error:", e.message); if (!res.headersSent) res.status(500).send("stream error"); })
+      .pipe(res);
+  } catch (err) {
+    console.error("[getRealtimeRecording] Error:", err.message);
     res.status(500).send("Failed to fetch recording");
   }
 });

@@ -106,6 +106,7 @@ exports.assistantsGet = voiceService.assistantsGet;
 // the "Test the Bot" UI returned "Failed to fetch" (DNS / 404-level failure).
 exports.assistantTestChat = voiceService.assistantTestChat;
 exports.assistantVoiceReplay = voiceService.assistantVoiceReplay;
+exports.getRealtimeRecording = voiceService.getRealtimeRecording;
 exports.searchPhoneNumbers = voiceService.searchPhoneNumbers;
 exports.purchasePhoneNumber = voiceService.purchasePhoneNumber;
 exports.configurePhoneNumber = voiceService.configurePhoneNumber;

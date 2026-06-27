@@ -968,14 +968,21 @@ function CallDetail() {
             <h2 className="font-semibold text-neutral-800 text-sm">Recordings ({recordings.length})</h2>
           </div>
           <div className="p-5 space-y-5">
-            {recordings.map((rec, i) => (
+            {recordings.map((rec, i) => {
+              // Realtime/Gemini recordings (sid RT_/GL_) live in GCS and were
+              // saved with a broken signed URL — serve them via the auth proxy.
+              const isRealtime = typeof rec.sid === "string" && (rec.sid.startsWith("GL_") || rec.sid.startsWith("RT_"));
+              const audioSrc = isRealtime
+                ? `${FN_BASE}/getRealtimeRecording?id=${encodeURIComponent(rec.sid.slice(3))}`
+                : rec.url;
+              return (
               <div key={rec.sid || i} className="space-y-2">
                 <div className="flex items-center justify-between text-xs text-neutral-400">
                   <span className="font-mono">{rec.sid}</span>
                   {rec.timestamp && <span>{new Date(rec.timestamp).toLocaleString()}</span>}
                 </div>
                 {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                <audio controls src={rec.url} className="w-full h-10 rounded" />
+                <audio controls src={audioSrc} className="w-full h-10 rounded" />
                 {rec.transcription && (
                   <div className="bg-neutral-50 rounded-lg p-3 border border-neutral-100">
                     <p className="text-xs text-neutral-400 font-medium mb-1 uppercase tracking-wide">Transcription</p>
@@ -983,7 +990,8 @@ function CallDetail() {
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
