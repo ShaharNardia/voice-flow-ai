@@ -28,6 +28,33 @@ class FakeVoxWs extends EventEmitter {
 
 function tick() { return new Promise((r) => setImmediate(r)); }
 
+test("audio stats: counts inbound + only SUCCESSFUL outbound (mode-3 alarm basis)", () => {
+  const voxWs = new FakeVoxWs();
+  const adapter = createAdapter(voxWs, "sess-stats", {});
+  // inbound JSON media frame → inAudioFrames++
+  const pcmB64 = Buffer.alloc(320).toString("base64");
+  voxWs.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: pcmB64 } })), false);
+  // outbound (Twilio-shaped µ-law) → transcoded + sent OK → outAudioFrames++
+  adapter.send(JSON.stringify({ event: "media", streamSid: "x", media: { payload: pcm16ToMulawBase64(Buffer.alloc(160)) } }));
+  const s = adapter.getAudioStats();
+  assert.equal(s.inAudioFrames, 1);
+  assert.equal(s.outAudioFrames, 1);
+  assert.equal(s.outSendErrors, 0);
+});
+
+test("audio stats: a failing voxWs.send is counted as an error, NOT as delivered", () => {
+  const voxWs = new FakeVoxWs();
+  voxWs.send = () => { throw new Error("socket gone"); };   // simulate broken outbound
+  const adapter = createAdapter(voxWs, "sess-fail", {});
+  voxWs.emit("message", Buffer.from(JSON.stringify({ event: "media", media: { payload: Buffer.alloc(320).toString("base64") } })), false);
+  adapter.send(JSON.stringify({ event: "media", streamSid: "x", media: { payload: pcm16ToMulawBase64(Buffer.alloc(160)) } }));
+  const s = adapter.getAudioStats();
+  assert.equal(s.inAudioFrames, 1);
+  assert.equal(s.outAudioFrames, 0, "failed send must NOT count as delivered");
+  assert.equal(s.outSendErrors, 1);
+  // This in>0/out===0 state is exactly what fires the zero-outbound alarm on close.
+});
+
 test("handshake (connected + start) is delivered even when the handler attaches late", async () => {
   const voxWs = new FakeVoxWs();
   const adapter = createAdapter(voxWs, "sess-1", { from: "+972501234567", to: "+12025550199" });

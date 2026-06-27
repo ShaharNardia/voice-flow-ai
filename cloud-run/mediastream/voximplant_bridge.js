@@ -32,6 +32,7 @@
 
 const { EventEmitter } = require("events");
 const { pcm16ToMulawBase64, mulawBase64ToPcm16 } = require("./voximplant_audio.js");
+const obs = require("./observability.js");   // no-op unless SENTRY_DSN set
 
 /**
  * Create a Twilio-shaped ws wrapper from a real Voximplant ws.
@@ -60,7 +61,8 @@ function createAdapter(voxWs, callSessionId, opts = {}) {
   // Frame counters — log the FIRST inbound (caller→us) and outbound (us→caller)
   // audio frame so a silent call can be diagnosed: which direction is dead.
   let inAudioFrames = 0;
-  let outAudioFrames = 0;
+  let outAudioFrames = 0;   // counts SUCCESSFUL sends to the caller (mode-3 signal)
+  let outSendErrors = 0;    // voxWs.send threw — frame never reached the caller
   const _seenEventKeys = new Set();
 
   function deliver(json) {
@@ -143,6 +145,18 @@ function createAdapter(voxWs, callSessionId, opts = {}) {
 
   voxWs.on("close", () => {
     adapter.readyState = 3;            // CLOSED
+    // Mode-3 one-way-audio alarm at the BRIDGE level: catches a broken outbound
+    // transcode/send to the Voximplant socket (the historical "Voximplant silent"
+    // bug) that the handler-level detector can miss — it counts handler→adapter
+    // sends, not actual delivery to the vox WS. Caller spoke (inbound frames) but
+    // nothing was successfully delivered back → caller heard silence.
+    if (inAudioFrames > 0 && outAudioFrames === 0) {
+      const m = `VOX ZERO_OUTBOUND_AUDIO: ${inAudioFrames} inbound frames, 0 delivered to caller (session ${callSessionId}, sendErrors=${outSendErrors})`;
+      console.error(`[VOX-WS] ${m}`);
+      obs.captureException(new Error(m), { kind: "zeroOutboundAudio", provider: "voximplant", callSessionId, inAudioFrames, outSendErrors });
+    } else if (outSendErrors > 0) {
+      console.warn(`[VOX-WS] ${outSendErrors} outbound send error(s) this call (session ${callSessionId})`);
+    }
     adapter.emit("close");
   });
 
@@ -168,9 +182,6 @@ function createAdapter(voxWs, callSessionId, opts = {}) {
       const pcmBuf = mulawBase64ToPcm16(msg.media.payload);   // µ-law b64 → PCM16 buffer
       const pcmB64 = pcmBuf.toString("base64");
       const samples = pcmBuf.length >> 1;   // 2 bytes/sample @ 8kHz
-      if (++outAudioFrames === 1) {
-        console.log(`[VOX-WS] first OUTBOUND audio frame → JSON media, ${pcmBuf.length}B PCM16 (session ${callSessionId})`);
-      }
       try {
         // Mirror Voximplant's OWN inbound frame shape exactly, including
         // media.timestamp (a running sample count). The earlier omission of
@@ -181,7 +192,15 @@ function createAdapter(voxWs, callSessionId, opts = {}) {
           media: { timestamp: _outTs, payload: pcmB64 },
         }));
         _outTs += samples;
-      } catch (e) { console.warn(`[VOX-WS] send media to voxWs failed: ${e.message}`); }
+        // Count only AFTER a successful send — outAudioFrames is the mode-3
+        // signal for "audio actually left for the caller".
+        if (++outAudioFrames === 1) {
+          console.log(`[VOX-WS] first OUTBOUND audio frame → JSON media, ${pcmBuf.length}B PCM16 (session ${callSessionId})`);
+        }
+      } catch (e) {
+        outSendErrors++;
+        console.warn(`[VOX-WS] send media to voxWs failed: ${e.message}`);
+      }
     }
     // mark/clear control events — Voximplant has no equivalent; ignore.
   };
@@ -189,6 +208,9 @@ function createAdapter(voxWs, callSessionId, opts = {}) {
   adapter.close = (code, reason) => {
     try { voxWs.close(code, reason); } catch (_) {}
   };
+
+  // Diagnostics + the basis of the zero-outbound alarm (also unit-tested).
+  adapter.getAudioStats = () => ({ inAudioFrames, outAudioFrames, outSendErrors });
 
   return adapter;
 }
