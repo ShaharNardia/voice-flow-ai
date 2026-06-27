@@ -810,50 +810,38 @@ function formatPhoneForSpeech(phone) {
   return prefix + digits;
 }
 
-// Sanitize text for voice — strip markdown, special chars, URLs, etc.
-// The bot should sound natural, never say "hashtag hashtag hashtag" or "asterisk".
-function sanitizeForSpeech(text) {
-  if (!text) return text;
-  return text
-    // Remove markdown headers (### Title → Title)
-    .replace(/^#{1,6}\s*/gm, "")
-    // Remove bold/italic markers (**text** → text, *text* → text, __text__ → text)
-    .replace(/\*{1,3}([^*]+)\*{1,3}/g, "$1")
-    .replace(/_{1,3}([^_]+)_{1,3}/g, "$1")
-    // Remove markdown links [text](url) → text
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    // Remove raw URLs (https://... or http://...)
-    .replace(/https?:\/\/[^\s)]+/g, "")
-    // Remove bullet markers (- item, * item, + item)
-    .replace(/^[\s]*[-*+]\s+/gm, "")
-    // Remove numbered list markers (1. item)
-    .replace(/^\s*\d+\.\s+/gm, "")
-    // Remove code blocks (```...```)
-    .replace(/```[^`]*```/gs, "")
-    // Remove inline code (`code`)
-    .replace(/`([^`]+)`/g, "$1")
-    // Remove blockquotes (> text → text)
-    .replace(/^>\s*/gm, "")
-    // Remove horizontal rules (---, ***, ___)
-    .replace(/^[-*_]{3,}\s*$/gm, "")
-    // Remove remaining special chars that TTS / native-audio models might read
-    // aloud (the native-audio model has been heard speaking quote marks).
-    .replace(/[#*_~`|<>{}[\]\\]/g, "")
-    // Strip every kind of quotation mark (straight + curly + guillemets) — the
-    // words inside stay, the marks go. Caller never wants to hear "quote".
-    .replace(/["'«»“”‘’„‟]/g, "")
-    // Turn slashes and pipes into a spoken-safe space ("ו/או" → "ו או", not "סלאש")
-    .replace(/[/\\]/g, " ")
-    // Drop parentheses but keep their contents
-    .replace(/[()]/g, " ")
-    // Collapse multiple spaces/newlines
-    .replace(/\n{3,}/g, "\n\n")
-    .replace(/ {2,}/g, " ")
-    .trim();
-}
+// Sanitize text for voice — the single source of truth lives in text_sanitize.js
+// (unit-tested there so a regression can't make the bot read symbols aloud).
+const { sanitizeForSpeech } = require("./text_sanitize.js");
 
 // ── Health check ──────────────────────────────────────────────────────
 app.get("/health", (req, res) => res.json({status: "ok", ts: Date.now()}));
+
+// ── Deep self-test ────────────────────────────────────────────────────
+// Verifies the audio/voice pipeline is actually wired AFTER a deploy, without a
+// real call: (1) the speech sanitizer still strips symbols, (2) µ-law transcode
+// round-trips, (3) ffmpeg (the resampler) is present. deploy.sh hits this so a
+// build that breaks the pipeline fails the deploy instead of breaking a call.
+app.get("/selftest", (req, res) => {
+  const checks = {};
+  try {
+    const probe = sanitizeForSpeech('## ‏שלום "עולם" ו/או (בדיקה) <x> `c`');
+    checks.sanitizer = !/[#*_~`|<>{}[\]\\"'«»“”‘’„‟()/]/.test(probe || "");
+  } catch (e) { checks.sanitizer = false; checks.sanitizerErr = e.message; }
+  try {
+    const { pcm16ToMulawBase64, mulawBase64ToPcm16 } = require("./voximplant_audio.js");
+    const pcm = Buffer.alloc(320);                 // 160 samples of silence
+    const rt = mulawBase64ToPcm16(pcm16ToMulawBase64(pcm));
+    checks.mulawRoundTrip = Buffer.isBuffer(rt) && rt.length === 320;
+  } catch (e) { checks.mulawRoundTrip = false; checks.mulawErr = e.message; }
+  try {
+    const r = require("child_process").spawnSync("ffmpeg", ["-version"], { timeout: 4000 });
+    checks.ffmpeg = r.status === 0;
+  } catch (e) { checks.ffmpeg = false; checks.ffmpegErr = e.message; }
+
+  const ok = checks.sanitizer && checks.mulawRoundTrip && checks.ffmpeg;
+  res.status(ok ? 200 : 503).json({ ok, checks, ts: Date.now() });
+});
 
 // Gemini Live connectivity probe — call /gemini-probe to test from within Cloud Run
 app.get("/gemini-probe", (req, res) => {
@@ -3009,6 +2997,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   let pendingUserText = "";
   let busyWatchdog = null;
   let lastBotAudioAt = 0;   // updated on every outbound audio chunk (hybrid)
+  let anyOutboundAudio = false; // did ANY bot audio reach the caller this call? (mode-3 one-way detector)
   let bargedThisTurn = false; // fired a barge-in for the current bot turn already?
   // True when the bot's current/last turn ended with a question — the caller's
   // reply is then expected to be SHORT (often one content word like "חדש"/"new"),
@@ -3230,6 +3219,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   bridge.on("audio", (mulawB64) => {
     if (streamSid && ws.readyState === ws.OPEN) {
       ws.send(JSON.stringify({ event: "media", streamSid, media: { payload: mulawB64 } }));
+      anyOutboundAudio = true;   // mode-3: at least one frame reached the caller
       // HYBRID turn-taking is driven by the model's real turn state (modelBusy,
       // set on promptModel / cleared on turnComplete) — NOT by audio playback.
       // lastBotAudioAt only keeps the busy WATCHDOG from force-idling mid-speech.
@@ -3357,11 +3347,11 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     lastUserActivityAt = Date.now(); // reset so we don't fire again until next gap
     if (silenceChecks >= SILENCE_MAX_CHECKS) {
       // Final silence — end the call politely. Farewell text is admin-editable.
-      const farewell = isHebrew
+      const farewell = sanitizeForSpeech(isHebrew
         ? (policy.silenceFarewell?.hebrew  || DEFAULT_SYSTEM_POLICY.silenceFarewell.hebrew)
         : isArabic
           ? (policy.silenceFarewell?.arabic || DEFAULT_SYSTEM_POLICY.silenceFarewell.arabic)
-          : (policy.silenceFarewell?.english || DEFAULT_SYSTEM_POLICY.silenceFarewell.english);
+          : (policy.silenceFarewell?.english || DEFAULT_SYSTEM_POLICY.silenceFarewell.english));
       console.log(`[${callSessionId}] [GL] Silence watchdog ending call (3rd timeout)`);
       bridge.promptModel(`Say exactly this and nothing else, then stop: "${farewell}"`);
       if (hybridSTT) armBusy();
@@ -3379,11 +3369,11 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       return;
     }
     // 1st…(N-1)th silence → friendly check-in. Phrasing is admin-editable.
-    const checkIn = isHebrew
+    const checkIn = sanitizeForSpeech(isHebrew
       ? (policy.silenceCheckIn?.hebrew  || DEFAULT_SYSTEM_POLICY.silenceCheckIn.hebrew)
       : isArabic
         ? (policy.silenceCheckIn?.arabic || DEFAULT_SYSTEM_POLICY.silenceCheckIn.arabic)
-        : (policy.silenceCheckIn?.english || DEFAULT_SYSTEM_POLICY.silenceCheckIn.english);
+        : (policy.silenceCheckIn?.english || DEFAULT_SYSTEM_POLICY.silenceCheckIn.english));
     console.log(`[${callSessionId}] [GL] Silence check-in #${silenceChecks}`);
     bridge.promptModel(`The caller has been silent. Say exactly: "${checkIn}"`);
     if (hybridSTT) armBusy();
@@ -3407,6 +3397,16 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   bridge.on("close", async () => {
     console.log(`[${callSessionId}] [GL] Bridge closed`);
     const durationSec = Math.round((Date.now() - callStartTime) / 1000);
+
+    // Mode-3 one-way-audio detector: the stream started and the call lasted a
+    // few seconds, yet NOT A SINGLE audio frame reached the caller → the caller
+    // heard silence. Alarm loudly + report so a broken outbound path (codec,
+    // ffmpeg, provider envelope) is caught instead of silently shipping.
+    if (streamStarted && !anyOutboundAudio && durationSec >= 3) {
+      const msg = `ZERO_OUTBOUND_AUDIO: caller heard nothing for ${durationSec}s (session ${callSessionId})`;
+      console.error(`[${callSessionId}] [GL] ${msg}`);
+      obs.captureException(new Error(msg), { kind: "zeroOutboundAudio", callSessionId, durationSec, provider: data.telephonyProvider || "twilio" });
+    }
 
     // ── Cost estimation ────────────────────────────────────────────────
     // gemini-2.5-flash-native-audio-latest pricing (June 2026):
@@ -3567,6 +3567,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   // Best of both: accurate Hebrew understanding + Gemini's natural voice.
   let dgConn = null;
   let dgReady = false;
+  let dgClosing = false;   // true only on intentional teardown — suppresses reconnect
   const dgBuffer = [];
   if (hybridSTT) {
     const dgLang = language.startsWith("he") ? "he"
@@ -3586,12 +3587,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     console.log(`[${callSessionId}] [HYBRID] Deepgram config: model=${dgModel} lang=${dgOpts.language}`);
     const dg = createClient(process.env.DEEPGRAM_API_KEY);
     let pendingTimer = null;
-    dgConn = dg.listen.live(dgOpts);
-    dgConn.on("open", () => {
-      dgReady = true;
-      console.log(`[${callSessionId}] [HYBRID] Deepgram ready (flushing ${dgBuffer.length})`);
-      while (dgBuffer.length) { try { dgConn.send(dgBuffer.shift()); } catch (_) {} }
-    });
+    let dgReconnects = 0;
+    const MAX_HYBRID_DG_RECONNECT = 3;
     const doBargeIn = (why) => {
       bargedThisTurn = true;
       console.log(`[${callSessionId}] [HYBRID] barge-in (${why}) — cutting bot playback`);
@@ -3600,7 +3597,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       }
       bridge.suppressTurn();
     };
-    dgConn.on("Results", (evt) => {
+    const onResults = (evt) => {
       const t = evt.channel?.alternatives?.[0]?.transcript;
       const isFinal = evt.is_final || false;
       const conf = evt.channel?.alternatives?.[0]?.confidence || 0;
@@ -3671,9 +3668,38 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
           sendToModel(combined);
         }, 250);
       }
-    });
-    dgConn.on("error", (e) => console.error(`[${callSessionId}] [HYBRID] Deepgram error: ${e?.message || e}`));
-    dgConn.on("close", () => { dgReady = false; });
+    };
+    // (Re)open the Deepgram socket and wire its handlers. Mirrors the cascade
+    // bridge's reconnect: if Deepgram drops MID-CALL the bot would go deaf (the
+    // old code only set dgReady=false and gave up). Now we reconnect up to
+    // MAX with backoff; buffered audio flushes on reopen. dgClosing/callEnding
+    // suppress reconnect on intentional teardown (so a normal hangup doesn't
+    // trigger pointless reconnects).
+    function wireDg(isReconnect = false) {
+      dgConn = dg.listen.live(dgOpts);
+      dgConn.on("open", () => {
+        dgReady = true;
+        if (isReconnect) { dgReconnects = 0; console.log(`[${callSessionId}] [HYBRID] Deepgram reconnected`); }
+        console.log(`[${callSessionId}] [HYBRID] Deepgram ready (flushing ${dgBuffer.length})`);
+        while (dgBuffer.length) { try { dgConn.send(dgBuffer.shift()); } catch (_) {} }
+      });
+      dgConn.on("Results", onResults);
+      dgConn.on("error", (e) => console.error(`[${callSessionId}] [HYBRID] Deepgram error: ${e?.message || e}`));
+      dgConn.on("close", () => {
+        dgReady = false;
+        if (dgClosing || callEnding) return;   // intentional teardown — do not reconnect
+        if (dgReconnects < MAX_HYBRID_DG_RECONNECT) {
+          dgReconnects++;
+          const backoff = 500 * dgReconnects;
+          console.warn(`[${callSessionId}] [HYBRID] Deepgram dropped mid-call — reconnecting in ${backoff}ms (${dgReconnects}/${MAX_HYBRID_DG_RECONNECT})`);
+          setTimeout(() => { try { wireDg(true); } catch (e) { console.error(`[${callSessionId}] [HYBRID] DG reconnect failed: ${e.message}`); } }, backoff);
+        } else {
+          console.error(`[${callSessionId}] [HYBRID] Deepgram reconnect exhausted — STT down`);
+          obs.captureException(new Error("hybrid Deepgram reconnect exhausted"), { kind: "sttDead", callSessionId });
+        }
+      });
+    }
+    wireDg();
   }
 
   // ── Twilio message handler ────────────────────────────────────────────────
@@ -3731,6 +3757,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
   ws.on("close", () => {
     console.log(`[${callSessionId}] [GL] Twilio WS closed (${Date.now() - callStartTime}ms)`);
+    dgClosing = true;   // intentional teardown — suppress Deepgram reconnect
     if (dgConn?.finish) { try { dgConn.finish(); } catch (_) {} }
     if (!callEnding) bridge.close();
   });

@@ -103,6 +103,13 @@ deploy_mediastream() {
   url="$(gcloud run services describe "$RUN_SERVICE" --region "$REGION" --project "$PROJECT" --format='value(status.url)' 2>/dev/null || true)"
   if [ -n "$url" ]; then
     curl -sf "$url/health" && echo " ✓ healthy ($url)" || echo " ✗ health check FAILED ($url)"
+    echo "▶ Deep self-test (sanitizer + µ-law + ffmpeg):"
+    if curl -sf "$url/selftest" >/tmp/vf_selftest.json 2>/dev/null; then
+      echo " ✓ selftest PASSED — $(cat /tmp/vf_selftest.json)"
+    else
+      echo " ✗ selftest FAILED — voice pipeline broken. Response: $(cat /tmp/vf_selftest.json 2>/dev/null)"
+      echo "   (consider rolling back: scripts/rollback.sh run $RUN_SERVICE $REGION $PROJECT)"
+    fi
   else
     echo " ! could not resolve service URL for health check"
   fi
