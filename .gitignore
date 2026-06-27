@@ -105,3 +105,29 @@ node_modules/
 
 # Flutter SDK (if included as submodule)
 flutter/
+
+# Next.js build artifacts
+saas-frontend/.next/
+saas-frontend/out/
+
+# Service account keys — NEVER commit
+gleaming-idiom-*.json
+*-service-account*.json
+*serviceAccountKey*.json
+
+# Build artifacts + stray temp dumps (added 2026-06-10 prod hardening)
+.next/
+/CTemp*.json
+/CUsers*.json
+
+# Per-project Firebase Functions secret env files (keep .env.example tracked)
+firebase/functions/.env.*
+!firebase/functions/.env.example
+
+# CI deploy keys staged for manual upload to GitHub secrets — never commit
+ci-secrets/
+
+# Accidental Windows absolute-path temp dumps (never commit)
+C*Temp*
+*AppDataLocalTemp*
+oai_k.txt

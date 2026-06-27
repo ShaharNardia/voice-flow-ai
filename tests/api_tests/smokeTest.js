@@ -25,6 +25,33 @@ function logTest(name, status, details = '') {
   }
 }
 
+// For absolute URLs (v2 Cloud Run or other hosts)
+async function smokeTestEndpointAbsolute(name, method, absoluteUrl, data = null) {
+  try {
+    const config = { method, url: absoluteUrl, timeout: 8000 };
+    if (data) config.data = data;
+    const response = await axios(config);
+    if (response.status >= 200 && response.status < 500) {
+      logTest(`${name} - Connectivity`, 'PASS', `Status: ${response.status}`);
+      return true;
+    }
+    logTest(`${name} - Connectivity`, 'FAIL', `Unexpected status: ${response.status}`);
+    return false;
+  } catch (error) {
+    if (error.code === 'ECONNREFUSED') {
+      logTest(`${name} - Connectivity`, 'FAIL', 'Connection refused');
+    } else if (error.code === 'ENOTFOUND') {
+      logTest(`${name} - Connectivity`, 'FAIL', 'DNS lookup failed');
+    } else if (error.response) {
+      logTest(`${name} - Connectivity`, 'PASS', `Server responding (${error.response.status})`);
+      return true;
+    } else {
+      logTest(`${name} - Connectivity`, 'FAIL', error.message);
+    }
+    return false;
+  }
+}
+
 async function smokeTestEndpoint(name, method, url, data = null) {
   try {
     const config = {
@@ -72,6 +99,14 @@ async function runSmokeTests() {
   await smokeTestEndpoint('getLeadDetails', 'POST', '/getLeadDetails', { company: 'test', limit: 1 });
   await smokeTestEndpoint('assignAssistant', 'POST', '/assignAssistant', { phoneNumber: '+10000000000' });
   await smokeTestEndpoint('getPhoneNumberFromJob', 'POST', '/getPhoneNumberFromJob', { jobId: 'smoke-test' });
+
+  // Health & integration status (v2 Cloud Run — absolute URLs, override BASE_URL prefix)
+  await smokeTestEndpointAbsolute('healthCheck', 'GET', 'https://healthcheck-myg46khq7q-uc.a.run.app');
+  await smokeTestEndpointAbsolute('getIntegrationStatus', 'GET', 'https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net/getIntegrationStatus');
+
+  // Auth-required endpoints — expect 401 (server is up) not 404 (function missing)
+  await smokeTestEndpoint('adminListUsers-reachability', 'GET', '/adminListUsers');
+  await smokeTestEndpoint('getUserPlan-reachability',    'GET', '/getUserPlan');
 
   console.log('\n========================================');
   console.log('Smoke Test Summary');

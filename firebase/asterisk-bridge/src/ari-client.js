@@ -4,10 +4,15 @@
  * Handles connection to Asterisk's REST Interface for call control.
  */
 
-const AriClient = require('ari-client');
+const AriClient    = require('ari-client');
+const EventEmitter = require('events');
 
-let client = null;
+let client    = null;
 let connected = false;
+
+// Internal event bus for promise-based ARI event waiting
+const emitter = new EventEmitter();
+emitter.setMaxListeners(200);
 
 const config = {
   host: process.env.ASTERISK_HOST || 'localhost',
@@ -68,6 +73,17 @@ function setupEventHandlers(ari) {
 
   ari.on('PlaybackFinished', (event, playback) => {
     console.log(`PlaybackFinished: ${playback.id}`);
+    emitter.emit(`playback:${playback.id}:finished`);
+  });
+
+  ari.on('RecordingFinished', (event, recording) => {
+    console.log(`RecordingFinished: ${recording.name}`);
+    emitter.emit(`recording:${recording.name}:finished`, recording);
+  });
+
+  ari.on('RecordingFailed', (event, recording) => {
+    console.warn(`RecordingFailed: ${recording.name} — ${recording.cause}`);
+    emitter.emit(`recording:${recording.name}:failed`, recording);
   });
 }
 
@@ -222,6 +238,72 @@ async function startRecording(channelId, name) {
 }
 
 /**
+ * Play a sound and wait for playback to finish
+ */
+async function playAndWait(channelId, media) {
+  if (!client) throw new Error('ARI client not connected');
+
+  let mediaUri = media;
+  if (!media.startsWith('sound:') && !media.startsWith('file:') && !media.startsWith('http:')) {
+    mediaUri = `sound:${media}`;
+  }
+
+  return new Promise((resolve, reject) => {
+    client.channels.play({ channelId, media: mediaUri }, (err, playback) => {
+      if (err) return reject(err);
+
+      const tid = setTimeout(() => {
+        emitter.removeAllListeners(`playback:${playback.id}:finished`);
+        resolve();  // timeout fallback — don't hang forever
+      }, 120000);
+
+      emitter.once(`playback:${playback.id}:finished`, () => {
+        clearTimeout(tid);
+        resolve();
+      });
+    });
+  });
+}
+
+/**
+ * Record speech on a channel with silence-based VAD stop.
+ * Resolves when Asterisk fires RecordingFinished (silence detected or max duration).
+ */
+async function recordWithVAD(channelId, name, maxSilenceSeconds = 3) {
+  if (!client) throw new Error('ARI client not connected');
+
+  return new Promise((resolve, reject) => {
+    client.channels.record({
+      channelId,
+      name,
+      format: 'wav',
+      maxDurationSeconds:  60,
+      maxSilenceSeconds,
+      beep:      false,
+      ifExists:  'overwrite',
+    }, (err, recording) => {
+      if (err) return reject(err);
+
+      const tid = setTimeout(() => {
+        emitter.removeAllListeners(`recording:${name}:finished`);
+        emitter.removeAllListeners(`recording:${name}:failed`);
+        resolve(recording);  // timeout fallback
+      }, (maxSilenceSeconds + 65) * 1000);
+
+      emitter.once(`recording:${name}:finished`, (rec) => {
+        clearTimeout(tid);
+        resolve(rec);
+      });
+
+      emitter.once(`recording:${name}:failed`, (rec) => {
+        clearTimeout(tid);
+        reject(new Error(`Recording failed: ${rec.cause || 'unknown'}`));
+      });
+    });
+  });
+}
+
+/**
  * Check if connected
  */
 function isConnected() {
@@ -247,6 +329,8 @@ module.exports = {
   originateCall,
   answerChannel,
   playSound,
+  playAndWait,
+  recordWithVAD,
   hangupChannel,
   getChannel,
   startRecording,

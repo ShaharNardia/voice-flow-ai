@@ -32,7 +32,10 @@ bool? filterAssistant(
   final metadata = searchItem?['metadata'];
   final ownerId = metadata?['ownerId'];
   final legacyUserId = metadata?['userId'];
-  final isUserMatch = ownerId == userId || legacyUserId == userId;
+  // Show if owned by user, OR if it's a shared/system assistant (no owner)
+  final isOwned = ownerId == userId || legacyUserId == userId;
+  final isShared = (ownerId == null || ownerId == '' || ownerId == 'null');
+  final isUserMatch = isOwned || isShared;
   final name = searchItem?['name']?.toString() ?? '';
   final keyword = searchKeyword?.toLowerCase() ?? '';
   return isUserMatch && name.toLowerCase().contains(keyword);
@@ -106,7 +109,10 @@ bool? getUserAssistants(
   final metadata = searchItem?['metadata'];
   final ownerId = metadata?['ownerId'];
   final legacyUserId = metadata?['userId'];
-  return ownerId == userId || legacyUserId == userId;
+  // Show assistant if owned by this user, OR if it has no owner (system/shared assistant)
+  final isOwned = ownerId == userId || legacyUserId == userId;
+  final isShared = (ownerId == null || ownerId == '' || ownerId == 'null');
+  return isOwned || isShared;
 }
 
 List<String> returnEmptyList(List<String>? selected) {

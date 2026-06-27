@@ -4,6 +4,9 @@ const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const twilio = require("twilio");
 const deepgramService = require("./deepgram_service");
 const llmService = require("./llm_service");
+const {sendWhatsAppMessage} = require("./whatsapp_service");
+const sgMail = require("@sendgrid/mail");
+if (process.env.SENDGRID_API_KEY) sgMail.setApiKey(process.env.SENDGRID_API_KEY);
 
 // Initialize Twilio client
 const TWILIO_ACCOUNT_SID = process.env.TWILIO_ACCOUNT_SID;
@@ -30,16 +33,16 @@ const twilioClient =
 const activeConnections = new Map();
 
 // ── Latency constants ────────────────────────────────────────────────
-const BARGE_IN_CONFIDENCE_THRESHOLD = 0.4; // Lower = more sensitive to interruption
-const BARGE_IN_TIME_THRESHOLD = 200; // ms – faster barge-in for natural feel
+const BARGE_IN_CONFIDENCE_THRESHOLD = 0.20; // Lowered from 0.35 — captures more speech, prevents word loss
+const BARGE_IN_TIME_THRESHOLD = 300; // ms – slightly longer to avoid cutting off first words (was 200)
 const MAX_CONVERSATION_HISTORY = 20; // Cap history to keep LLM fast
-const LLM_TIMEOUT_MS = 5000; // 5s max for real-time voice
+const LLM_TIMEOUT_MS = 3000; // 3s max (GPT-4o-mini rarely exceeds 2s for ≤150 tokens)
 
 /**
  * Handle Twilio Media Stream WebSocket connection
  * This endpoint receives audio from Twilio and forwards it to Deepgram
  */
-exports.twilioMediaStream = onRequest(
+const twilioMediaStream = onRequest(
   {minInstances: 1, timeoutSeconds: 300, memory: "512MiB"},
   async (req, res) => {
   try {
@@ -128,13 +131,25 @@ exports.twilioMediaStream = onRequest(
     const PROJECT_ID = process.env.GCLOUD_PROJECT;
     const streamUrl = `https://${REGION}-${PROJECT_ID}.cloudfunctions.net/twilioMediaStream?callSid=${callSid}&callSessionId=${callSessionId}`;
 
+    // Speech speed from assistant settings (1.0 = normal, 1.1 = 110%, etc.)
+    const speechSpeed = assistant.speechSpeed || 1.0;
+
+    // Helper: escape XML special characters for SSML
+    const escapeXml = (str) => str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
     // Helper function to create TwiML for Say
     // NOTE: Uses <Start><Stream> (correct Twilio SDK method) for Media Streams.
     // This requires a wss:// WebSocket endpoint, not https://.
     // Firebase Cloud Functions cannot handle WebSocket; planned for Cloud Run.
     const createSayTwiML = (text) => {
       const twimlResponse = new twilio.twiml.VoiceResponse();
-      twimlResponse.say({voice: finalVoiceId, language: sayLanguage}, text);
+      if (speechSpeed && speechSpeed !== 1.0) {
+        const rate = Math.round(speechSpeed * 100) + "%";
+        const ssmlText = `<prosody rate="${rate}">${escapeXml(text)}</prosody>`;
+        twimlResponse.say({voice: finalVoiceId, language: sayLanguage}, ssmlText);
+      } else {
+        twimlResponse.say({voice: finalVoiceId, language: sayLanguage}, text);
+      }
       // Continue streaming after saying using correct TwiML verb
       const start = twimlResponse.start();
       start.stream({
@@ -172,34 +187,38 @@ exports.twilioMediaStream = onRequest(
       const now = Date.now();
 
       // ── Handle interim results for barge-in detection ──────────
-      if (!isFinal && text && text.trim() && confidence >= BARGE_IN_CONFIDENCE_THRESHOLD) {
+      if (!isFinal && text && text.trim()) {
+        // Always buffer interim text, even low confidence — prevents word loss
         transcriptBuffer = text;
-
-        const timeSinceLastInterim = now - lastInterimTime;
         lastInterimTime = now;
 
-        // If bot is speaking and we detect speech → barge-in!
-        if (isBotSpeaking && timeSinceLastInterim > BARGE_IN_TIME_THRESHOLD) {
-          const bargeInStartTime = Date.now();
-          logger.info("Barge-in detected - stopping bot speech", {
-            callSessionId,
-            callSid,
-            interimText: text,
-            confidence,
-            timeSinceLastInterim,
-          });
+        // Barge-in: only trigger if confidence is high enough to be real speech
+        if (confidence >= BARGE_IN_CONFIDENCE_THRESHOLD) {
+          const timeSinceLastInterim = now - lastInterimTime;
 
-          const bargeInTwiML = createBargeInTwiML();
-          const bargeInSent = await sendTwiMLToTwilio(bargeInTwiML, "barge-in");
-          const bargeInLatency = Date.now() - bargeInStartTime;
-
-          if (bargeInSent) {
-            isBotSpeaking = false;
-            logger.info("Barge-in executed", {
+          // If bot is speaking and we detect speech → barge-in!
+          if (isBotSpeaking && timeSinceLastInterim > BARGE_IN_TIME_THRESHOLD) {
+            const bargeInStartTime = Date.now();
+            logger.info("Barge-in detected - stopping bot speech", {
               callSessionId,
               callSid,
-              bargeInLatencyMs: bargeInLatency,
+              interimText: text,
+              confidence,
+              timeSinceLastInterim,
             });
+
+            const bargeInTwiML = createBargeInTwiML();
+            const bargeInSent = await sendTwiMLToTwilio(bargeInTwiML, "barge-in");
+            const bargeInLatency = Date.now() - bargeInStartTime;
+
+            if (bargeInSent) {
+              isBotSpeaking = false;
+              logger.info("Barge-in executed", {
+                callSessionId,
+                callSid,
+                bargeInLatencyMs: bargeInLatency,
+              });
+            }
           }
         }
 
@@ -208,6 +227,7 @@ exports.twilioMediaStream = onRequest(
           text,
           confidence,
           isBotSpeaking,
+          belowThreshold: confidence < BARGE_IN_CONFIDENCE_THRESHOLD,
         });
         return;
       }
@@ -287,7 +307,12 @@ exports.twilioMediaStream = onRequest(
 
           // ── STEP 4: Get LLM response ──────────────────────────
           const llmStartTime = Date.now();
-          const systemPrompt = llmService.buildSystemPrompt(assistant, companyData, language);
+          // If assistant has its own systemPrompt (custom instructions), use it directly
+          // Otherwise build from company data. This prevents company context bleeding
+          // into assistants that have their own identity (e.g., Australia Express vs LanceloTech)
+          const systemPrompt = assistant.systemPrompt
+            ? `You are ${assistant.name || "an AI assistant"}${assistant.companyName ? ` from ${assistant.companyName}` : ""}.\n\n${assistant.systemPrompt}`
+            : llmService.buildSystemPrompt(assistant, companyData, language);
           const llmHistory = llmService.getConversationHistory({conversationHistory: currentHistory});
 
           const llmResult = await llmService.getLLMResponse(
@@ -295,26 +320,142 @@ exports.twilioMediaStream = onRequest(
             text,
             llmHistory,
             {
-              model: "gpt-4o-mini",
-              maxTokens: 150,
-              temperature: 0.8,
+              model: assistant.llmModel || "gpt-4o-mini",
+              maxTokens: assistant.maxTokens || 150,
+              temperature: assistant.temperature ?? 0.8,
+              tools: llmService.AGENT_TOOLS,
             },
           );
 
           const llmLatency = Date.now() - llmStartTime;
-          const aiResponse = llmResult.text;
+          let aiResponse = llmResult.text;
           const totalLatency = Date.now() - finalTranscriptStartTime;
+
+          // ── STEP 4b: Handle tool calls (email/WhatsApp/appointment) ──
+          if (llmResult.toolCalls && llmResult.toolCalls.length > 0) {
+            const toolResults = [];
+            for (const toolCall of llmResult.toolCalls) {
+              const toolName = toolCall.function?.name;
+              let toolArgs = {};
+              try {
+                toolArgs = JSON.parse(toolCall.function?.arguments || "{}");
+              } catch (_) { /* ignore parse errors */ }
+
+              logger.info("Agent tool call", {toolName, callSessionId});
+
+              try {
+                if (toolName === "send_email") {
+                  const {to, template, templateVars = {}} = toolArgs;
+                  const templateVarsWithDefaults = {
+                    companyName: assistant.companyName || companyData.name || "",
+                    customerName: templateVars.customerName || "there",
+                    ...templateVars,
+                  };
+                  if (to && template) {
+                    await sgMail.send({
+                      to,
+                      from: process.env.SENDGRID_FROM_EMAIL || "noreply@voiceflow.ai",
+                      subject: `Confirmation from ${templateVarsWithDefaults.companyName}`,
+                      text: `Hi ${templateVarsWithDefaults.customerName}, your ${template.replace(/([A-Z])/g, " $1").toLowerCase()} is confirmed. Thank you for choosing ${templateVarsWithDefaults.companyName}!`,
+                    });
+                    toolResults.push({id: toolCall.id, result: "Email sent successfully"});
+                    logger.info("Tool: email sent", {to, template, callSessionId});
+                  }
+                } else if (toolName === "send_whatsapp") {
+                  const {to, message} = toolArgs;
+                  if (to && message) {
+                    await sendWhatsAppMessage(to, message);
+                    toolResults.push({id: toolCall.id, result: "WhatsApp message sent"});
+                    logger.info("Tool: WhatsApp sent", {to, callSessionId});
+                  }
+                } else if (toolName === "create_appointment") {
+                  // Store appointment in Firestore for team to action
+                  await db.collection("appointments").add({
+                    ...toolArgs,
+                    callSessionId,
+                    companyId: currentData.data()?.companyId,
+                    createdAt: FieldValue.serverTimestamp(),
+                    status: "pending",
+                  });
+                  toolResults.push({id: toolCall.id, result: "Appointment created successfully"});
+                  logger.info("Tool: appointment created", {service: toolArgs.service, callSessionId});
+                } else if (toolName === "book_appointment") {
+                  // Full booking: creates doc, sends ICS invite email w/ deep-links.
+                  // Gated via cap.appointments on the business owner.
+                  try {
+                    const {featureEnabledForUser} = require("./feature_gate");
+                    const ownerId = currentData.data()?.ownerId;
+                    const allowed = ownerId ? await featureEnabledForUser(ownerId, "cap.appointments") : false;
+                    if (!allowed) {
+                      toolResults.push({id: toolCall.id, result: "Booking tool is not enabled for this account."});
+                    } else {
+                      const {createAppointmentInternal} = require("./appointments_service");
+                      const result = await createAppointmentInternal({
+                        ownerId,
+                        assistantId: assistant?.id || null,
+                        callSessionId,
+                        title: toolArgs.title,
+                        startAt: toolArgs.startTime,
+                        endAt: toolArgs.endTime,
+                        attendeeName: toolArgs.customerName,
+                        attendeeEmail: toolArgs.customerEmail,
+                        attendeePhone: toolArgs.customerPhone,
+                        location: toolArgs.location,
+                        notes: toolArgs.notes,
+                        timezone: toolArgs.timezone,
+                      });
+                      toolResults.push({id: toolCall.id, result: `Booked. Calendar invite sent. Appointment id: ${result.id}`});
+                      logger.info("Tool: book_appointment succeeded", {id: result.id, callSessionId});
+                    }
+                  } catch (bookErr) {
+                    logger.error("book_appointment failed", bookErr);
+                    toolResults.push({id: toolCall.id, result: `Failed to book: ${bookErr.message}`});
+                  }
+                } else if (toolName === "transfer_call") {
+                  // Transfer is handled via TwiML — set flag and skip second LLM call
+                  const transferTwiML = `<?xml version="1.0" encoding="UTF-8"?><Response><Dial>${toolArgs.to}</Dial></Response>`;
+                  await sendTwiMLToTwilio(transferTwiML, "transfer");
+                  toolResults.push({id: toolCall.id, result: "Call transferred"});
+                  logger.info("Tool: call transferred", {to: toolArgs.to, callSessionId});
+                }
+              } catch (toolError) {
+                logger.error("Tool execution failed", {toolName, error: toolError.message, callSessionId});
+                toolResults.push({id: toolCall.id, result: `Failed: ${toolError.message}`});
+              }
+            }
+
+            // Second LLM pass: give the model tool results so it can speak a confirmation
+            if (toolResults.length > 0) {
+              const toolResultMessages = [
+                {role: "assistant", content: null, tool_calls: llmResult.toolCalls},
+                ...toolResults.map((r) => ({
+                  role: "tool",
+                  tool_call_id: r.id,
+                  content: r.result,
+                })),
+              ];
+              const confirmResult = await llmService.getLLMResponse(
+                systemPrompt,
+                null,
+                [...llmHistory, ...toolResultMessages],
+                {model: assistant.llmModel || "gpt-4o-mini", maxTokens: 60, temperature: assistant.temperature ?? 0.8},
+              );
+              aiResponse = confirmResult.text || "Done! Anything else I can help with?";
+            } else {
+              aiResponse = "Got it! Is there anything else I can help you with?";
+            }
+          }
 
           // Add AI response to history
           currentHistory.push({
             role: "assistant",
-            content: aiResponse,
+            content: aiResponse || "",
             timestamp: new Date(),
           });
 
           // ── STEP 5: Send AI response (replace filler) ─────────
           const twimlStartTime = Date.now();
-          const sayTwiML = createSayTwiML(aiResponse);
+          const sayTwiML = createSayTwiML(aiResponse || "Is there anything else I can help with?");
           const twimlSent = await sendTwiMLToTwilio(sayTwiML, "llm-response");
           const twimlLatency = Date.now() - twimlStartTime;
 
@@ -340,7 +481,7 @@ exports.twilioMediaStream = onRequest(
             callSessionId,
             callSid,
             userMessage: text.substring(0, 50),
-            aiResponse: aiResponse.substring(0, 100) + (aiResponse.length > 100 ? "..." : ""),
+            aiResponse: (aiResponse || "").substring(0, 100) + ((aiResponse || "").length > 100 ? "..." : ""),
             sttLatencyMs: sttLatency,
             fillerLatencyMs: fillerLatency,
             llmLatencyMs: llmLatency,
@@ -609,6 +750,7 @@ function closeConnection(callSid) {
 }
 
 module.exports = {
+  twilioMediaStream,
   getActiveConnection,
   closeConnection,
 };

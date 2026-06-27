@@ -5,6 +5,7 @@
 
 const {logger} = require("firebase-functions");
 const axios = require("axios");
+const {logAnomaly} = require("./anomaly_service");
 
 // Filler phrases for natural conversation by language
 // Categorized by context for smarter selection
@@ -54,16 +55,14 @@ const FILLER_PHRASES = {
       "One second...",
     ],
     acknowledge: [
-      "I understand...",
-      "Great!",
-      "Excellent!",
-      "Sure!",
-      "Of course!",
-      "No problem!",
-      "Absolutely!",
-      "Perfect!",
-      "That makes sense!",
       "Got it!",
+      "Sure!",
+      "Great!",
+      "No problem!",
+      "Perfect!",
+      "Makes sense!",
+      "That works!",
+      "Sounds good!",
     ],
     backchannel: [
       "Yes",
@@ -116,15 +115,15 @@ const FILLER_PHRASES = {
  * @returns {string} Base language code (e.g., "he", "en", "ar")
  */
 function detectLanguage(language) {
-  if (!language) return "he"; // Default to Hebrew
-  
+  if (!language) return "en"; // Default to English
+
   const lang = language.toLowerCase();
   if (lang.startsWith("he")) return "he";
   if (lang.startsWith("en")) return "en";
   if (lang.startsWith("ar")) return "ar";
-  
-  // Default to Hebrew for unknown languages
-  return "he";
+
+  // Default to English for unknown languages
+  return "en";
 }
 
 /**
@@ -134,7 +133,107 @@ function detectLanguage(language) {
  * @param {string} language - Language code (e.g., "he-IL", "en-US", "he", "en")
  * @returns {string} System prompt in the specified language
  */
-function buildSystemPrompt(assistant, companyData = {}, language = "he-IL") {
+// ── Public accessors used by voice_service.js ─────────────────────────────
+function getVibeSnippet(lang, vibe) {
+  const langKey = lang === "he" ? "he" : lang === "ar" ? "ar" : "en";
+  return VIBE_SNIPPETS[langKey]?.[vibe] || VIBE_SNIPPETS[langKey]?.friendly || "";
+}
+
+// ── Vibe snippets injected into system prompts ────────────────────────────
+const VIBE_SNIPPETS = {
+  en: {
+    professional: "Tone: professional and formal. Polished vocabulary, full sentences, no slang.",
+    friendly:     "Tone: warm and friendly — like chatting with a helpful neighbor.",
+    energetic:    "Tone: upbeat and enthusiastic. High energy, positive, motivated.",
+    empathetic:   "Tone: calm and empathetic. Listen first, acknowledge feelings, never rush.",
+    direct:       "Tone: brief and direct. One sentence max per reply. No small talk, get to the point.",
+    sales:        "Tone: persuasive sales rep. Highlight benefits, handle objections, create urgency naturally.",
+  },
+  he: {
+    professional: "סגנון: מקצועי ורשמי. מילים ברורות, משפטים מלאים, ללא סלנג.",
+    friendly:     "סגנון: חם וידידותי — כמו שיחה עם שכן טוב.",
+    energetic:    "סגנון: אנרגטי ומלא חיות. קול חיובי, נלהב, מוטיבציוני.",
+    empathetic:   "סגנון: רגוע ואמפתי. קשוב, מכיר ברגשות, לא ממהר.",
+    direct:       "סגנון: קצר וישיר. משפט אחד מקסימום. בלי שיחות סרק.",
+    sales:        "סגנון: איש מכירות משכנע. מדגיש יתרונות, מטפל בהתנגדויות, יוצר דחיפות באופן טבעי.",
+  },
+  ar: {
+    professional: "الأسلوب: مهني ورسمي. كلمات واضحة وجمل كاملة بدون عامية.",
+    friendly:     "الأسلوب: دافئ وودي — كالتحدث مع جار لطيف.",
+    energetic:    "الأسلوب: حيوي ومتحمس. إيجابي ومتحفز وملئ بالطاقة.",
+    empathetic:   "الأسلوب: هادئ ومتعاطف. يستمع أولاً ويراعي المشاعر ولا يتسرع.",
+    direct:       "الأسلوب: مختصر ومباشر. جملة واحدة كحد أقصى. بدون كلام زائد.",
+    sales:        "الأسلوب: مندوب مبيعات مقنع. يبرز المزايا ويعالج الاعتراضات ويخلق إلحاحاً بشكل طبيعي.",
+  },
+};
+
+// ── Arabic gender instruction ─────────────────────────────────────────────
+// Arabic grammar is gendered — the assistant needs to know whom it's addressing.
+function arabicGenderInstruction(callerGender) {
+  if (callerGender === "male") {
+    return "الجنس: المتصل رجل. استخدم الصيغة المذكرة طوال المحادثة (أنت، تريد، تفهم، تعرف).";
+  }
+  if (callerGender === "female") {
+    return "الجنس: المتصلة امرأة. استخدم الصيغة المؤنثة طوال المحادثة (أنتِ، تريدين، تفهمين، تعرفين).";
+  }
+  if (callerGender === "ask") {
+    return `الجنس: في بداية المحادثة، بعد التحية الأولى، اسأل بلطف: "كيف تفضل أن أخاطبك؟" — ثم استخدم الصيغة المناسبة طوال المحادثة. إذا لم يرد أو لم يكن واضحاً، استخدم صيغة محايدة.`;
+  }
+  // neutral: rephrase to avoid gendered forms where possible
+  return `الجنس: استخدم صياغة محايدة قدر الإمكان — تجنب الضمائر الجنسية المباشرة. استخدم الاسم إذا كان متاحاً، وإلا صِغ الجملة بأسلوب غير مباشر.`;
+}
+
+// ── Accent instruction ────────────────────────────────────────────────────
+// Returns a system-prompt snippet that guides the model's pronunciation.
+// Primarily useful for Voice-to-Voice (Realtime API); Standard TTS accent
+// is controlled by voice selection, but the instruction doesn't hurt.
+function getAccentInstruction(lang, voiceAccent) {
+  if (!voiceAccent || voiceAccent === "default") return "";
+  if (lang === "he") {
+    if (voiceAccent === "native-il") {
+      return "הגייה: דבר עברית במבטא ישראלי מקומי טבעי (ספרדי מודרני / צבר). ההגייה שלך צריכה להישמע כמו דובר עברית ילידי — לא כמו דובר אנגלי המדבר עברית. שמור על אינטונציה ורצב ישראלי.";
+    }
+    if (voiceAccent === "neutral") {
+      return "הגייה: דבר עברית בהגייה ברורה, ניטרלית ומובנת — ללא מבטא אזורי או זר.";
+    }
+  }
+  if (lang === "ar") {
+    if (voiceAccent === "msa") {
+      return "اللهجة: تحدث بالعربية الفصحى الحديثة (MSA) — رسمية وواضحة ومفهومة في جميع البلدان العربية.";
+    }
+    if (voiceAccent === "levantine") {
+      return "اللهجة: تحدث باللهجة الشامية (سوريا، لبنان، فلسطين، الأردن) — طبيعية وعامية ومألوفة.";
+    }
+    if (voiceAccent === "gulf") {
+      return "اللهجة: تحدث باللهجة الخليجية (الإمارات، السعودية، الكويت) — طبيعية وعامية خليجية.";
+    }
+    if (voiceAccent === "egyptian") {
+      return "اللهجة: تحدث باللهجة المصرية — الأكثر انتشاراً وفهماً في العالم العربي.";
+    }
+  }
+  return "";
+}
+
+// ── Gender instruction for Hebrew ─────────────────────────────────────────
+function hebrewGenderInstruction(callerGender) {
+  if (callerGender === "male") {
+    return "פנייה: הלקוח הוא גבר. השתמש בלשון זכר לאורך כל השיחה: אתה, רוצה, מבין, יודע, מסכים.";
+  }
+  if (callerGender === "female") {
+    return "פנייה: הלקוחה היא אישה. השתמש בלשון נקבה לאורך כל השיחה: את, רוצה, מבינה, יודעת, מסכימה.";
+  }
+  if (callerGender === "ask") {
+    return `פנייה: בתחילת השיחה, אחרי הברכה הראשונה, שאל בעדינות: "כדי לפנות אליך נכון — מה עדיף, זכר, נקבה, או ניטרלי?" — ואז השתמש בצורה שהמשתמש בחר לאורך שאר השיחה. אם המשתמש לא ברור או לא רוצה לענות, עבור לפנייה ניטרלית.`;
+  }
+  // neutral (default): restructure sentences to avoid gendered forms entirely
+  return `פנייה: השתמש בניסוח ניטרלי לאורך כל השיחה — אל תשתמש ב"אתה", "את", "אדוני", "גברתי". במקום זה:
+- השתמש בשם הפרטי אם ידוע ("אז רונן, מה אתם מחפשים?")
+- השתמש בפנייה עקיפה: "מה נשמע?", "מה אפשר לעזור?", "מתאים לך?", "נוח?"
+- נסח מחדש פעלים כדי להימנע מהטיה: "האם יש עניין ב..." במקום "האם תרצה..."
+- בשום אופן אל תנחש מגדר.`;
+}
+
+function buildSystemPrompt(assistant, companyData = {}, language = "en-US") {
   const lang = detectLanguage(language);
   const assistantName = assistant.name || assistant.assistantName || getDefaultAssistantName(lang);
   const companyName = assistant.companyName || companyData.name || getDefaultCompanyName(lang);
@@ -143,6 +242,8 @@ function buildSystemPrompt(assistant, companyData = {}, language = "he-IL") {
   const phoneNumber = companyData.companyPhoneNumbers?.[0] || "";
   const website = companyData.companyLink || "";
   const timeZone = companyData.timeZone || getDefaultTimeZone(lang);
+  const vibe = assistant.assistantVibe || "friendly";
+  const callerGender = assistant.callerGender || "auto";
 
   // Permissions
   const offerFreeEstimation = companyData.offerFreeEstimation || false;
@@ -158,15 +259,15 @@ function buildSystemPrompt(assistant, companyData = {}, language = "he-IL") {
 
   // Build prompt based on language
   if (lang === "he") {
-    return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
+    return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions, vibe, callerGender);
   } else if (lang === "en") {
-    return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
+    return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions, vibe);
   } else if (lang === "ar") {
     return buildArabicPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
   }
-  
-  // Default to Hebrew
-  return buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions);
+
+  // Default to English
+  return buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions, vibe);
 }
 
 /**
@@ -178,7 +279,7 @@ function getDefaultAssistantName(lang) {
     "en": "Virtual Assistant",
     "ar": "المساعد الافتراضي",
   };
-  return defaults[lang] || defaults["he"];
+  return defaults[lang] || defaults["en"];
 }
 
 /**
@@ -190,7 +291,7 @@ function getDefaultCompanyName(lang) {
     "en": "The Company",
     "ar": "الشركة",
   };
-  return defaults[lang] || defaults["he"];
+  return defaults[lang] || defaults["en"];
 }
 
 /**
@@ -202,13 +303,13 @@ function getDefaultTimeZone(lang) {
     "en": "America/New_York",
     "ar": "Asia/Dubai",
   };
-  return defaults[lang] || defaults["he"];
+  return defaults[lang] || defaults["en"];
 }
 
 /**
  * Build Hebrew system prompt
  */
-function buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "") {
+function buildHebrewPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "", vibe = "friendly", callerGender = "auto") {
   // Format services
   const servicesText = services.length > 0
     ? services.map((s) => {
@@ -258,8 +359,8 @@ function buildHebrewPrompt(assistantName, companyName, industry, services, phone
 - "האם תרצה" ← עברית מתורגמת
 - "בהחלט, אשמח לעזור לך בכך" ← נשמע כמו תרגום
 
-מגדר:
-אף פעם לא "אתה" או "את". לא "אדוני" או "גברתי". במקום זה: "מה נשמע?", "רוצה לשמוע?", "מתאים?"
+${hebrewGenderInstruction(callerGender)}
+${VIBE_SNIPPETS.he[vibe] || VIBE_SNIPPETS.he.friendly}
 
 כללים:
 - משפט אחד, מקסימום שניים. קצר.
@@ -267,102 +368,60 @@ function buildHebrewPrompt(assistantName, companyName, industry, services, phone
 - שירות שאין ברשימה: "רגע, אעביר לנציג שיוכל לעזור"
 - איסוף פרטים: שם, טלפון, מתי נוח
 - אישור: "אז רגע, סיכום קצר: [שם], [שירות], [זמן]. הכל טוב?"
-- סיום: "יאללה, תודה! יום טוב!"
+- סיום: "יאללה, תודה! יום טוב!" — ואז הנח לשיחה להסתיים. לא להגיד "אני מסיים את השיחה", "השיחה מסתיימת", וכדומה. פשוט אמור שלום ותן לשיחה להיסגר.
 ${additionalInstructions ? `\nהוראות נוספות: ${additionalInstructions}` : ""}`;
 }
 
 /**
- * Build English system prompt
+ * Build English system prompt — voice-optimized, ~280 tokens
  */
-function buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "") {
-  // Format services
+function buildEnglishPrompt(assistantName, companyName, industry, services, phoneNumber, website, timeZone, offerFreeEstimation, createJobPermission, reschedulePermission, cancelPermission, priceRestriction, legalRestriction, medicalRestriction, additionalInstructions = "", vibe = "friendly") {
   const servicesText = services.length > 0
     ? services.map((s) => {
-        const name = s.name || "Service";
-        const desc = s.description || "";
-        const price = s.price ? `$${s.price}` : "Price upon quote";
-        const duration = s.duration || "";
-        return `${name}: ${desc}${price ? ` | Price: ${price}` : ""}${duration ? ` | Duration: ${duration}` : ""}`;
+        const parts = [s.name || "Service"];
+        if (s.description) parts.push(s.description);
+        if (s.price) parts.push(`$${s.price}`);
+        if (s.duration) parts.push(s.duration);
+        return parts.join(" | ");
       }).join("\n")
-    : "No specific services listed";
+    : "General services — ask caller what they need";
 
-  return `[Identity and Professionalism]
-You are ${assistantName}, a professional, friendly, and fast customer service representative for ${companyName}${industry ? `, operating in the ${industry} industry` : ""}. You sound like an experienced human representative - not a robot. Your role is to assist customers professionally, quickly, and courteously, collect appointment details, and keep everything organized in the system.
+  const canDo = [
+    createJobPermission && "book appointments",
+    reschedulePermission && "reschedule",
+    cancelPermission && "cancel bookings",
+    offerFreeEstimation && "offer free estimates",
+  ].filter(Boolean).join(", ") || "answer questions";
 
-[Company Information]
-- Company Name: ${companyName}
-- Phone Number: ${phoneNumber}
-- Website: ${website || "Not specified"}
-- Time Zone: ${timeZone}
+  const cantDo = [
+    priceRestriction && "negotiate prices",
+    legalRestriction && "give legal advice",
+    medicalRestriction && "give medical advice",
+  ].filter(Boolean).join(", ");
 
-[Services]
-We provide the following services:
+  return `You are ${assistantName}, a phone agent for ${companyName}${industry ? ` (${industry})` : ""}.
+${VIBE_SNIPPETS.en[vibe] || VIBE_SNIPPETS.en.friendly}
+
+Rules (non-negotiable):
+- Max 1–2 short sentences per reply. That's it.
+- Never start a reply with "I". Vary openings: "Sure!", "Got it.", "Mmm, let me check.", "Right, so—"
+- Use contractions always: I'll, we've, that's, don't, can't, you're.
+- Never say "certainly", "absolutely", "of course", "I'd be happy to" — scripted and robotic.
+- Before thinking: say a filler first. "One sec.", "Sure, let me pull that up.", "Mmm."
+- Match caller's energy. They're casual → you're casual. They're in a hurry → you're fast.
+- When in doubt, ask one focused question. Not two.
+- When ending: just say goodbye naturally and stop. Never say "I'm ending the call", "ending the call now", or announce that you're hanging up.
+
+You can: ${canDo}
+${cantDo ? `You cannot: ${cantDo}` : ""}
+
+Company: ${companyName}${phoneNumber ? ` | Phone: ${phoneNumber}` : ""}${website ? ` | ${website}` : ""} | TZ: ${timeZone}
+
+Services:
 ${servicesText}
 
-[Permissions and Restrictions]
-- Free Estimate: ${offerFreeEstimation ? "Yes" : "No"}
-- Permission to Create Appointment: ${createJobPermission ? "Yes" : "No"}
-- Permission to Reschedule: ${reschedulePermission ? "Yes" : "No"}
-- Permission to Cancel: ${cancelPermission ? "Yes" : "No"}
-- Price Negotiation Restriction: ${priceRestriction ? "Yes" : "No"}
-- Legal Advice Restriction: ${legalRestriction ? "Yes" : "No"}
-- Medical Advice Restriction: ${medicalRestriction ? "Yes" : "No"}
-
-[Communication Style - Professional, Fast, and Friendly]
-You are a customer service representative of the highest level. Act like an experienced human representative:
-- **Speed**: Short, focused, and efficient responses - no more than 2 sentences per response
-- **Courtesy**: Always polite, respectful, and welcoming. Use phrases like "Of course", "Certainly", "Absolutely", "I'm here for you"
-- **Professionalism**: Confidence in knowledge, accuracy in details, maintaining a professional yet accessible tone
-- **Naturalness**: Sound like a real person - not a robot. Use a human voice, not too formal
-
-[Natural Conversation Flow - CRITICAL]
-You must sound like a real human representative, not a robot. The following rules are critical:
-- **Natural filler phrases**: When you're "thinking" or processing information, use natural phrases: "Let me see...", "One moment...", "Hmm...", "Yes, I'm checking that...", "Just a second, I'm looking...", "Alright, give me a moment..."
-- **Never silent**: If there's a delay, immediately say a filler phrase. Silence = robotic
-- **Warm acknowledgment**: "Great!", "Excellent!", "Sure!", "Of course!", "No problem!", "I understand exactly", "That makes sense"
-- **Pace matching**: If the customer speaks fast - respond fast. If they're calm - adjust your tone
-- **Backchanneling**: During the customer's speech, add "Yes", "Right", "I see", "Okay", "Alright" - this shows you're listening
-- **Correct word usage**: "I" when referring to yourself, "we" when referring to the company
-
-[Response Guidelines - Professional and Accurate]
-- **Perfect grammar**: No grammatical errors, professional and precise words
-- **Short responses**: Maximum 2-3 sentences. No more. Be focused and efficient
-- **Always on topic**: Don't deviate from the subject. If the customer asks something, answer directly
-- **Information organization**: When presenting options, use "First", "Second", "Third"
-- **Information verification**: When receiving important details (email, phone), repeat them for verification
-- **Presence check**: If there's a long silence, ask "Are you still there?" politely
-
-[Tasks and Goals - Professional Flow]
-1. **Professional greeting**: "Hello! Thank you for calling ${companyName}. This is ${assistantName}. How can I help you today?"
-2. **Understanding the need**: "Can you tell me what service you need?" or "What problem are you dealing with?"
-3. **Confirmation and continuation**: "Great! This is something we can definitely help with. Let's collect the required details."
-4. **Organized information collection**: 
-   - Full name
-   - Email address (with verification by spelling)
-   - Service address
-   - Preferred time (convert to precise time)
-5. **Summary and confirmation**: "Thank you! Just to confirm: [name], [service], [date and time], [address]. Correct?"
-6. **Creating appointment**: After confirmation, state "Great! I'm booking your appointment now..."
-7. **Professional closing**: "Your appointment has been successfully scheduled! Thank you for choosing ${companyName}. Have a wonderful day!"
-
-[Error Handling - Courtesy and Professionalism]
-- **If you didn't hear**: "Sorry, I didn't hear that well. Could you repeat that please?"
-- **If you didn't understand**: "I want to make sure I understood correctly. Do you mean...?"
-- **If there's a technical problem**: "One moment, I have a small issue. Give me a second to check..."
-- **Irrelevant questions**: "I understand your question, but I'm here to help with our services. How can I help?"
-
-[Conversation End Detection]
-End the conversation politely if the customer says:
-- "Thank you", "Thanks", "Goodbye", "Bye", "I'm done", "That's all"
-- Or if the conversation has reached a natural end (appointment scheduled, question answered)
-
-[Very Important - Perfect Professional English]
-- Perfect grammar without errors
-- Professional and precise words
-- Short responses (maximum 2-3 sentences)
-- Always on topic - don't deviate
-- Professional yet accessible and human tone
-${additionalInstructions ? `\n[Additional Instructions - Very Important]\n${additionalInstructions}\n` : ""}`;
+Goal: greet → understand need → collect name + phone + preferred time → confirm → ${createJobPermission ? "book it" : "pass to team"}.
+Wrap up warmly: "Awesome, you're all set! Anything else?"${additionalInstructions ? `\n\nExtra instructions: ${additionalInstructions}` : ""}`;
 }
 
 /**
@@ -460,6 +519,101 @@ ${additionalInstructions ? `\n[تعليمات إضافية - مهم جداً]\n$
 }
 
 /**
+ * Agent tools — exposed to the LLM via OpenAI function calling.
+ * The LLM decides autonomously when to call them based on conversation context.
+ */
+const AGENT_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "send_email",
+      description: "Send a follow-up or confirmation email to the customer. Use this when the customer provides their email address and asks for a confirmation, summary, or any written follow-up.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {type: "string", description: "Customer email address"},
+          template: {type: "string", enum: ["appointmentConfirmation", "callSummary", "welcome"], description: "Email template to use"},
+          templateVars: {type: "object", description: "Template variables (customerName, companyName, appointmentTime, address, details, etc.)"},
+        },
+        required: ["to", "template"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "send_whatsapp",
+      description: "Send a WhatsApp message to the customer. Use this when the customer asks for a WhatsApp confirmation, reminder, or follow-up message.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {type: "string", description: "Customer phone number in E.164 format (e.g. +12125551234)"},
+          message: {type: "string", description: "Message text to send"},
+        },
+        required: ["to", "message"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "create_appointment",
+      description: "Create a job or appointment in the system. Use this after collecting all required details (name, service, time) and the customer confirms they want to book.",
+      parameters: {
+        type: "object",
+        properties: {
+          customerName: {type: "string", description: "Customer full name"},
+          customerEmail: {type: "string", description: "Customer email address (optional)"},
+          customerPhone: {type: "string", description: "Customer phone in E.164 format"},
+          service: {type: "string", description: "Service being booked"},
+          scheduledTime: {type: "string", description: "Appointment date/time in ISO 8601 format"},
+          address: {type: "string", description: "Service address (optional)"},
+          notes: {type: "string", description: "Any additional notes (optional)"},
+        },
+        required: ["customerName", "service", "scheduledTime"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "book_appointment",
+      description: "Book a scheduled appointment on the business calendar and automatically email the customer (and the business) a calendar invite with an .ics attachment plus Google/Outlook deep-links. Use this after the customer confirms a specific date and time.",
+      parameters: {
+        type: "object",
+        properties: {
+          customerName: {type: "string", description: "Customer full name"},
+          customerEmail: {type: "string", description: "Customer email for the calendar invite"},
+          customerPhone: {type: "string", description: "Customer phone in E.164 format (optional)"},
+          title: {type: "string", description: "Short title of the appointment (e.g. 'Consultation with Dr. Smith')"},
+          startTime: {type: "string", description: "Appointment start datetime in ISO 8601 format"},
+          endTime: {type: "string", description: "Appointment end datetime in ISO 8601 format"},
+          location: {type: "string", description: "Address or meeting link (optional)"},
+          notes: {type: "string", description: "Additional notes shown in the invite description (optional)"},
+          timezone: {type: "string", description: "IANA timezone like 'America/New_York' (optional)"},
+        },
+        required: ["customerName", "title", "startTime", "endTime"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "transfer_call",
+      description: "Transfer the call to a human agent. Use this when the customer explicitly asks to speak to a person, when the issue is complex and requires human judgment, or when you cannot resolve the customer's request.",
+      parameters: {
+        type: "object",
+        properties: {
+          to: {type: "string", description: "E.164 phone number of the human agent or queue to transfer to"},
+          reason: {type: "string", description: "Brief reason for the transfer"},
+        },
+        required: ["to"],
+      },
+    },
+  },
+];
+
+/**
  * Get conversation history from session
  */
 function getConversationHistory(sessionData) {
@@ -492,11 +646,11 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
   const temperature = options.temperature || 0.9; // Higher for natural, human-like responses
   const maxTokens = options.maxTokens || 100; // Short for voice: 1-2 sentences max
 
-  // Build messages array
+  // Build messages array (userMessage may be null for tool-result continuation passes)
   const messages = [
     {role: "system", content: systemPrompt},
     ...conversationHistory,
-    {role: "user", content: userMessage},
+    ...(userMessage ? [{role: "user", content: userMessage}] : []),
   ];
 
   try {
@@ -510,38 +664,99 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
       historyLength: conversationHistory.length,
     });
 
-    const response = await axios.post(
-        "https://api.openai.com/v1/chat/completions",
-        {
-          model,
-          messages,
-          temperature,
-          max_tokens: maxTokens,
-          // Optimize for Hebrew
-          response_format: {type: "text"},
-        },
-        {
-          headers: {
-            "Authorization": `Bearer ${OPENAI_API_KEY}`,
-            "Content-Type": "application/json",
-          },
-          timeout: 5000, // 5 seconds max for real-time voice (premium latency target)
-        },
-    );
+    // Build request body - include tools only when provided
+    const requestBody = {
+      model,
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+      response_format: {type: "text"},
+    };
+
+    if (options.tools && options.tools.length > 0) {
+      requestBody.tools = options.tools;
+      requestBody.tool_choice = "auto";
+      // When tools are enabled, response_format must not be set
+      delete requestBody.response_format;
+    }
+
+    // Retry logic for transient OpenAI failures
+    let response;
+    const maxRetries = 2;
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        response = await axios.post(
+            "https://api.openai.com/v1/chat/completions",
+            requestBody,
+            {
+              headers: {
+                "Authorization": `Bearer ${OPENAI_API_KEY}`,
+                "Content-Type": "application/json",
+              },
+              timeout: options.timeout || 5000,
+            },
+        );
+        break; // Success — exit retry loop
+      } catch (err) {
+        const isRetryable = err.code === "ECONNRESET" ||
+          err.code === "ETIMEDOUT" ||
+          err.code === "ECONNABORTED" ||
+          (err.response && (err.response.status === 429 || err.response.status >= 500));
+
+        if (!isRetryable || attempt === maxRetries) {
+          logAnomaly({
+            severity: "error",
+            category: "llm",
+            code: "OPENAI_CALL_FAIL",
+            message: `OpenAI chat.completions failed after ${attempt} retries: ${err.message}`,
+            details: {
+              status: err.response?.status || null,
+              errCode: err.code || null,
+              attempt,
+              model: requestBody?.model || null,
+            },
+          });
+          throw err; // Not retryable or max retries reached
+        }
+
+        const delay = 200 * Math.pow(2, attempt); // 200ms, 400ms
+        logger.warn(`OpenAI retry ${attempt + 1}/${maxRetries}`, {
+          error: err.message,
+          status: err.response?.status,
+          delay,
+        });
+        await new Promise((r) => setTimeout(r, delay));
+      }
+    }
 
     const processingTime = Date.now() - startTime;
-    const content = response.data.choices[0]?.message?.content;
-    
-    if (!content) {
-      logger.error("OpenAI API returned empty content", {
+    const choice = response.data.choices[0];
+    const content = choice?.message?.content;
+    const toolCalls = choice?.message?.tool_calls || [];
+
+    // LLM either returns text OR tool calls — not both
+    if (!content && toolCalls.length === 0) {
+      logger.error("OpenAI API returned empty content and no tool calls", {
         responseData: response.data,
         choices: response.data.choices,
+      });
+      logAnomaly({
+        severity: "warn",
+        category: "llm",
+        code: "EMPTY_LLM_RESPONSE",
+        message: "OpenAI returned empty content and no tool calls",
+        details: {
+          finishReason: choice?.finish_reason || null,
+          usage: response.data?.usage || null,
+        },
       });
       throw new Error("No content in AI response");
     }
 
     logger.info("OpenAI response received", {
-      responseLength: content.length,
+      responseLength: content?.length || 0,
+      toolCallCount: toolCalls.length,
+      toolNames: toolCalls.map((tc) => tc.function?.name),
       tokensUsed: response.data.usage?.total_tokens,
       processingTimeMs: processingTime,
       promptTokens: response.data.usage?.prompt_tokens,
@@ -549,7 +764,8 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
     });
 
     return {
-      text: content.trim(),
+      text: content ? content.trim() : null,
+      toolCalls,
       tokensUsed: response.data.usage?.total_tokens || 0,
     };
   } catch (error) {
@@ -623,9 +839,9 @@ async function getLLMResponse(systemPrompt, userMessage, conversationHistory, op
  * @param {string} [context="thinking"] - Context: "thinking", "acknowledge", "backchannel"
  * @returns {string} Random filler phrase
  */
-function getRandomFiller(language = "he-IL", context = "thinking") {
+function getRandomFiller(language = "en-US", context = "thinking") {
   const lang = detectLanguage(language);
-  const langFillers = FILLER_PHRASES[lang] || FILLER_PHRASES["he"];
+  const langFillers = FILLER_PHRASES[lang] || FILLER_PHRASES["en"];
   const fillers = langFillers[context] || langFillers.thinking;
   return fillers[Math.floor(Math.random() * fillers.length)];
 }
@@ -635,4 +851,9 @@ module.exports = {
   getLLMResponse,
   getConversationHistory,
   getRandomFiller,
+  AGENT_TOOLS,
+  getVibeSnippet,
+  hebrewGenderInstruction,
+  arabicGenderInstruction,
+  getAccentInstruction,
 };

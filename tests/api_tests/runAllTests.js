@@ -6,6 +6,9 @@ const { runSmokeTests } = require('./smokeTest');
 const { runAllTests: runFunctionTests } = require('./testFirebaseFunctions');
 const { runAllTests: runEdgeCaseTests } = require('./testEdgeCases');
 const { runAllTests: runIntegrationTests } = require('./testIntegration');
+const { runAllTests: runAdminFunctionTests } = require('./testAdminFunctions');
+const { runAllTests: runAnalysisAndPlanTests } = require('./testAnalysisAndPlan');
+const { runAllTests: runCampaignLeadsTests } = require('./testCampaignsAndLeads');
 const { runAllTests: runPerformanceTests } = require('../performance/load-test');
 const { runAllTests: runSecurityTests } = require('../security/security-tests');
 
@@ -55,6 +58,45 @@ async function runAllTestSuites() {
   }
 
   console.log('\n\n');
+
+  // Run analysis & plan tests
+  console.log('→ Running Analysis & Plan Tests...\n');
+  try {
+    const analysisResult = await runAnalysisAndPlanTests();
+    totalFailed += analysisResult;
+  } catch (error) {
+    console.error('Error running analysis & plan tests:', error.message);
+    totalFailed += 1;
+  }
+
+  console.log('\n\n');
+
+  // Run campaign & leads CRM tests
+  console.log('→ Running Campaign & Leads CRM Tests...\n');
+  try {
+    const crmResult = await runCampaignLeadsTests();
+    totalFailed += crmResult;
+  } catch (error) {
+    console.error('Error running campaign & leads tests:', error.message);
+    totalFailed += 1;
+  }
+
+  console.log('\n\n');
+
+  // Run admin function tests (requires QA_ADMIN_EMAIL + FIREBASE_API_KEY)
+  if (process.env.QA_ADMIN_EMAIL && process.env.FIREBASE_API_KEY) {
+    console.log('→ Running Admin Functions Tests...\n');
+    try {
+      const adminResult = await runAdminFunctionTests();
+      totalFailed += adminResult;
+    } catch (error) {
+      console.error('Error running admin function tests:', error.message);
+      totalFailed += 1;
+    }
+    console.log('\n\n');
+  } else {
+    console.log('⚠ Skipping Admin Function Tests (QA_ADMIN_EMAIL or FIREBASE_API_KEY not set)\n\n');
+  }
 
   // Run performance tests
   console.log('→ Running Performance Tests...\n');

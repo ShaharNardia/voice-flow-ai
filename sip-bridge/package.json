@@ -1,0 +1,23 @@
+{
+  "name": "voiceflow-sip-bridge",
+  "version": "3.0.0",
+  "description": "SIP bridge — replaces Twilio, connects Asterisk to Firebase/Cloud Run",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "ari-client": "^2.2.0",
+    "axios": "^1.7.0",
+    "express": "^4.19.0",
+    "uuid": "^9.0.0",
+    "ws": "^8.17.0",
+    "xml2js": "^0.6.2",
+    "@google-cloud/text-to-speech": "^5.3.0",
+    "dotenv": "^16.4.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

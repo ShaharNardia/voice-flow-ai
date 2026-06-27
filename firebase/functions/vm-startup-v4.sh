@@ -1,0 +1,175 @@
+#!/bin/bash
+# VoiceFlow SIP Bridge Startup Script v4
+# Uses Node.js binary tarball instead of apt to ensure v20 every time
+LOG=/var/log/voiceflow-startup.log
+log() { echo "$(date '+%Y-%m-%d %H:%M:%S') [startup] $*" | tee -a "$LOG"; }
+log "=== VoiceFlow SIP Startup v4 ==="
+
+# 1. Install Node.js 20 from tarball (reliable, no apt repo issues)
+NODE_VER=$(node --version 2>/dev/null || echo "none")
+log "Current Node.js: $NODE_VER"
+if ! echo "$NODE_VER" | grep -q "^v20"; then
+  log "Installing Node.js 20 from binary tarball..."
+  cd /tmp
+  curl -fsSL https://nodejs.org/dist/v20.18.3/node-v20.18.3-linux-x64.tar.xz -o node20.tar.xz >> "$LOG" 2>&1
+  tar -xf node20.tar.xz >> "$LOG" 2>&1
+  # Copy binaries to /usr/local (takes precedence over /usr/bin)
+  cp -rf node-v20.18.3-linux-x64/bin/* /usr/local/bin/
+  cp -rf node-v20.18.3-linux-x64/include/* /usr/local/include/ 2>/dev/null || true
+  cp -rf node-v20.18.3-linux-x64/lib/* /usr/local/lib/ 2>/dev/null || true
+  cp -rf node-v20.18.3-linux-x64/share/* /usr/local/share/ 2>/dev/null || true
+  hash -r
+  # Verify
+  NEW_VER=$(/usr/local/bin/node --version 2>/dev/null || echo "FAILED")
+  log "Node.js installed: $NEW_VER"
+  # Create symlink if needed
+  ln -sf /usr/local/bin/node /usr/bin/node20 2>/dev/null || true
+  # Override system node
+  ln -sf /usr/local/bin/node /usr/bin/node 2>/dev/null || true
+  ln -sf /usr/local/bin/npm /usr/bin/npm 2>/dev/null || true
+  cd /
+fi
+NODE_VER=$(node --version 2>/dev/null || /usr/local/bin/node --version 2>/dev/null || echo "STILL FAILED")
+log "Final Node.js: $NODE_VER"
+
+# Ensure we use the right node/npm for everything below
+NODE_BIN=$(command -v node 2>/dev/null || echo "/usr/local/bin/node")
+NPM_BIN=$(command -v npm 2>/dev/null || echo "/usr/local/bin/npm")
+log "node=$NODE_BIN npm=$NPM_BIN"
+
+# 2. Install Asterisk if not present
+if ! command -v asterisk &>/dev/null; then
+  log "Installing Asterisk..."
+  apt-get update -y >> "$LOG" 2>&1 || true
+  DEBIAN_FRONTEND=noninteractive apt-get install -y asterisk >> "$LOG" 2>&1 || true
+fi
+log "Asterisk: $(command -v asterisk 2>/dev/null || echo MISSING)"
+
+# 3. Asterisk config
+log "Writing Asterisk configs..."
+
+cat > /etc/asterisk/pjsip.conf << 'PJSIP_DONE'
+[transport-udp]
+type=transport
+protocol=udp
+bind=0.0.0.0:5060
+
+[partner]
+type=endpoint
+context=from-partner
+disallow=all
+allow=ulaw
+allow=alaw
+allow=g722
+aors=partner
+direct_media=no
+dtmf_mode=rfc4733
+rtp_symmetric=yes
+force_rport=yes
+
+[partner]
+type=aor
+contact=sip:partner@212.199.156.201:5060
+qualify_frequency=60
+
+[partner-identify]
+type=identify
+endpoint=partner
+match=212.199.156.201
+match=212.199.156.202
+PJSIP_DONE
+
+cat > /etc/asterisk/extensions.conf << 'EXT_DONE'
+[from-partner]
+exten => _X.,1,NoOp(Inbound: ${CALLERID(num)} -> ${EXTEN})
+ same => n,Stasis(voiceflow-app)
+ same => n,Hangup()
+
+[default]
+exten => _X.,1,Stasis(voiceflow-app)
+ same => n,Hangup()
+EXT_DONE
+
+cat > /etc/asterisk/ari.conf << 'ARI_DONE'
+[general]
+enabled=yes
+pretty=yes
+allowed_origins=*
+
+[voiceflow]
+type=user
+read_only=no
+password=vf_bridge_2024_secure
+ARI_DONE
+
+cat > /etc/asterisk/rtp.conf << 'RTP_DONE'
+[general]
+rtpstart=10000
+rtpend=20000
+strictrtp=no
+RTP_DONE
+
+# Enable Asterisk built-in HTTP server (required for ARI on port 8088)
+cat > /etc/asterisk/http.conf << 'HTTP_DONE'
+[general]
+enabled=yes
+bindaddr=127.0.0.1
+bindport=8088
+prefix=
+HTTP_DONE
+
+log "Restarting Asterisk..."
+systemctl enable asterisk >> "$LOG" 2>&1 || true
+systemctl restart asterisk >> "$LOG" 2>&1 || true
+log "Asterisk service: $(systemctl is-active asterisk 2>/dev/null || echo unknown)"
+
+# 4. Bridge app
+log "Setting up bridge..."
+mkdir -p /opt/voiceflow-bridge
+
+cat > /opt/voiceflow-bridge/package.json << 'PKG_DONE'
+{"name":"voiceflow-bridge","version":"1.1.0","main":"bridge.js","dependencies":{"express":"^4.18.2","ari-client":"^2.2.0","axios":"^1.6.0"}}
+PKG_DONE
+
+# Write bridge.js from base64
+echo "Y29uc3QgZXhwcmVzcyA9IHJlcXVpcmUoJ2V4cHJlc3MnKTsKY29uc3QgYXJpID0gcmVxdWlyZSgnYXJpLWNsaWVudCcpOwpjb25zdCBheGlvcyA9IHJlcXVpcmUoJ2F4aW9zJyk7Cgpjb25zdCBCUklER0VfU0VDUkVUID0gcHJvY2Vzcy5lbnYuQlJJREdFX1NFQ1JFVCB8fCAndmZfYnJpZGdlXzIwMjRfc2VjdXJlJzsKY29uc3QgRklSRUJBU0VfVVJMID0gcHJvY2Vzcy5lbnYuRklSRUJBU0VfVVJMIHx8ICdodHRwczovL3VzLWNlbnRyYWwxLXZvaWNlZmxvdy1haS0yMDI1MDkyMzE2MzkuY2xvdWRmdW5jdGlvbnMubmV0JzsKY29uc3QgQVJJX1VSTCA9ICdodHRwOi8vMTI3LjAuMC4xOjgwODgnOwpjb25zdCBBUklfVVNFUiA9ICd2b2ljZWZsb3cnOwpjb25zdCBBUklfUEFTUyA9ICd2Zl9icmlkZ2VfMjAyNF9zZWN1cmUnOwpjb25zdCBBUFBfTkFNRSA9ICd2b2ljZWZsb3ctYXBwJzsKY29uc3QgUE9SVCA9IDMwMDA7Cgpjb25zdCBhcHAgPSBleHByZXNzKCk7CmFwcC51c2UoZXhwcmVzcy5qc29uKCkpOwoKbGV0IGFyaUNsaWVudCA9IG51bGw7CmxldCBjb25uZWN0ZWQgPSBmYWxzZTsKY29uc3QgYWN0aXZlU2Vzc2lvbnMgPSB7fTsgIC8vIGNoYW5uZWxJZCAtPiB7IHNlc3Npb25JZCwgYXNzaXN0YW50SWQgfQoKYXN5bmMgZnVuY3Rpb24gc2xlZXAobXMpIHsKICByZXR1cm4gbmV3IFByb21pc2UoZnVuY3Rpb24ocikgeyBzZXRUaW1lb3V0KHIsIG1zKTsgfSk7Cn0KCmFzeW5jIGZ1bmN0aW9uIGNvbm5lY3RBcmkocmV0cmllcykgewogIHJldHJpZXMgPSByZXRyaWVzIHx8IDMwOwogIGZvciAodmFyIGkgPSAwOyBpIDwgcmV0cmllczsgaSsrKSB7CiAgICB0cnkgewogICAgICBhcmlDbGllbnQgPSBhd2FpdCBhcmkuY29ubmVjdChBUklfVVJMLCBBUklfVVNFUiwgQVJJX1BBU1MpOwogICAgICBjb25uZWN0ZWQgPSB0cnVlOwogICAgICBjb25zb2xlLmxvZygnW0FSSV0gQ29ubmVjdGVkIHRvIEFzdGVyaXNrIEFSSScpOwoKICAgICAgYXJpQ2xpZW50Lm9uKCdTdGFzaXNTdGFydCcsIGFzeW5jIGZ1bmN0aW9uKGV2ZW50LCBjaGFubmVsKSB7CiAgICAgICAgdmFyIGZyb20gPSBjaGFubmVsLmNhbGxlci5udW1iZXIgfHwgJ3Vua25vd24nOwogICAgICAgIHZhciB0byA9IGNoYW5uZWwuZGlhbHBsYW4uZXh0ZW4gfHwgJ3Vua25vd24nOwogICAgICAgIGNvbnNvbGUubG9nKCdbQVJJXSBJbmJvdW5kIGNhbGw6ICcgKyBmcm9tICsgJyAtPiAnICsgdG8gKyAnIChjaGFubmVsICcgKyBjaGFubmVsLmlkICsgJyknKTsKCiAgICAgICAgdHJ5IHsKICAgICAgICAgIC8vIEFuc3dlciBpbW1lZGlhdGVseQogICAgICAgICAgYXdhaXQgY2hhbm5lbC5hbnN3ZXIoKTsKICAgICAgICAgIGNvbnNvbGUubG9nKCdbQVJJXSBDaGFubmVsIGFuc3dlcmVkOiAnICsgY2hhbm5lbC5pZCk7CgogICAgICAgICAgLy8gTm90aWZ5IEZpcmViYXNlIC0gZ2V0IHJvdXRpbmcKICAgICAgICAgIHZhciByZXNwID0gYXdhaXQgYXhpb3MucG9zdChGSVJFQkFTRV9VUkwgKyAnL3NpcEluYm91bmRDYWxsJywgewogICAgICAgICAgICBjaGFubmVsSWQ6IGNoYW5uZWwuaWQsCiAgICAgICAgICAgIGZyb206IGZyb20sCiAgICAgICAgICAgIHRvOiB0bywKICAgICAgICAgICAgYnJpZGdlU2VjcmV0OiBCUklER0VfU0VDUkVUCiAgICAgICAgICB9LCB7IHRpbWVvdXQ6IDEwMDAwIH0pOwoKICAgICAgICAgIHZhciByb3V0aW5nID0gcmVzcC5kYXRhOwogICAgICAgICAgY29uc29sZS5sb2coJ1tBUkldIEZpcmViYXNlIHJvdXRpbmc6JywgSlNPTi5zdHJpbmdpZnkocm91dGluZykpOwoKICAgICAgICAgIC8vIFN0b3JlIHNlc3Npb24KICAgICAgICAgIGFjdGl2ZVNlc3Npb25zW2NoYW5uZWwuaWRdID0gewogICAgICAgICAgICBzZXNzaW9uSWQ6IHJvdXRpbmcuc2Vzc2lvbklkLAogICAgICAgICAgICBhc3Npc3RhbnRJZDogcm91dGluZy5hc3Npc3RhbnRJZCwKICAgICAgICAgICAgYXNzaXN0YW50TmFtZTogcm91dGluZy5hc3Npc3RhbnROYW1lLAogICAgICAgICAgICBmcm9tOiBmcm9tLAogICAgICAgICAgICB0bzogdG8KICAgICAgICAgIH07CgogICAgICAgICAgLy8gUGxheSBhIGdyZWV0aW5nIHdoaWxlIHdlIHNldCB1cCB0aGUgY29ubmVjdGlvbgogICAgICAgICAgLy8gVE9ETzogQ29ubmVjdCB0byBhY3R1YWwgQUkgYXVkaW8gc3RyZWFtIG9uY2UgYXZhaWxhYmxlCiAgICAgICAgICB0cnkgewogICAgICAgICAgICBhd2FpdCBjaGFubmVsLnBsYXkoeyBtZWRpYTogJ3NvdW5kOmhlbGxvLXdvcmxkJyB9KTsKICAgICAgICAgIH0gY2F0Y2ggKHBsYXlFcnIpIHsKICAgICAgICAgICAgY29uc29sZS5sb2coJ1tBUkldIENvdWxkIG5vdCBwbGF5IGdyZWV0aW5nOicsIHBsYXlFcnIubWVzc2FnZSk7CiAgICAgICAgICB9CgogICAgICAgIH0gY2F0Y2ggKGVycikgewogICAgICAgICAgY29uc29sZS5lcnJvcignW0FSSV0gRXJyb3IgaGFuZGxpbmcgaW5ib3VuZCBjYWxsOicsIGVyci5tZXNzYWdlKTsKICAgICAgICAgIGlmIChlcnIucmVzcG9uc2UpIHsKICAgICAgICAgICAgY29uc29sZS5lcnJvcignW0FSSV0gRmlyZWJhc2UgcmVzcG9uc2U6JywgZXJyLnJlc3BvbnNlLnN0YXR1cywgSlNPTi5zdHJpbmdpZnkoZXJyLnJlc3BvbnNlLmRhdGEpKTsKICAgICAgICAgIH0KICAgICAgICAgIC8vIEhhbmcgdXAgb24gZXJyb3IKICAgICAgICAgIHRyeSB7IGF3YWl0IGNoYW5uZWwuaGFuZ3VwKCk7IH0gY2F0Y2ggKGUpIHt9CiAgICAgICAgfQogICAgICB9KTsKCiAgICAgIGFyaUNsaWVudC5vbignU3Rhc2lzRW5kJywgYXN5bmMgZnVuY3Rpb24oZXZlbnQsIGNoYW5uZWwpIHsKICAgICAgICB2YXIgc2Vzc2lvbiA9IGFjdGl2ZVNlc3Npb25zW2NoYW5uZWwuaWRdOwogICAgICAgIGNvbnNvbGUubG9nKCdbQVJJXSBDYWxsIGVuZGVkOiAnICsgY2hhbm5lbC5pZCArIChzZXNzaW9uID8gKCcgc2Vzc2lvbj0nICsgc2Vzc2lvbi5zZXNzaW9uSWQpIDogJycpKTsKCiAgICAgICAgLy8gVXBkYXRlIHNlc3Npb24gc3RhdHVzIGluIEZpcmViYXNlCiAgICAgICAgaWYgKHNlc3Npb24gJiYgc2Vzc2lvbi5zZXNzaW9uSWQpIHsKICAgICAgICAgIHRyeSB7CiAgICAgICAgICAgIGF3YWl0IGF4aW9zLnBvc3QoRklSRUJBU0VfVVJMICsgJy9zaXBDYWxsRW5kZWQnLCB7CiAgICAgICAgICAgICAgY2hhbm5lbElkOiBjaGFubmVsLmlkLAogICAgICAgICAgICAgIHNlc3Npb25JZDogc2Vzc2lvbi5zZXNzaW9uSWQsCiAgICAgICAgICAgICAgYnJpZGdlU2VjcmV0OiBCUklER0VfU0VDUkVUCiAgICAgICAgICAgIH0sIHsgdGltZW91dDogNTAwMCB9KTsKICAgICAgICAgIH0gY2F0Y2ggKGUpIHsKICAgICAgICAgICAgY29uc29sZS5sb2coJ1tBUkldIENvdWxkIG5vdCBub3RpZnkgY2FsbCBlbmQ6JywgZS5tZXNzYWdlKTsKICAgICAgICAgIH0KICAgICAgICB9CgogICAgICAgIGRlbGV0ZSBhY3RpdmVTZXNzaW9uc1tjaGFubmVsLmlkXTsKICAgICAgfSk7CgogICAgICBhcmlDbGllbnQuc3RhcnQoQVBQX05BTUUpOwogICAgICBjb25zb2xlLmxvZygnW0FSSV0gU3RhcnRlZCBhcHA6ICcgKyBBUFBfTkFNRSk7CiAgICAgIHJldHVybjsKCiAgICB9IGNhdGNoIChlcnIpIHsKICAgICAgY29uc29sZS5sb2coJ1tBUkldIEF0dGVtcHQgJyArIChpKzEpICsgJy8nICsgcmV0cmllcyArICcgZmFpbGVkOiAnICsgZXJyLm1lc3NhZ2UpOwogICAgICBpZiAoaSA8IHJldHJpZXMgLSAxKSBhd2FpdCBzbGVlcCgyMDAwKTsKICAgIH0KICB9CiAgY29uc29sZS5lcnJvcignW0FSSV0gQ291bGQgbm90IGNvbm5lY3QgYWZ0ZXIgJyArIHJldHJpZXMgKyAnIGF0dGVtcHRzIC0gYnJpZGdlIHdpbGwgb3BlcmF0ZSBpbiBkZWdyYWRlZCBtb2RlJyk7Cn0KCi8vIEhlYWx0aCBjaGVjawphcHAuZ2V0KCcvaGVhbHRoJywgZnVuY3Rpb24ocmVxLCByZXMpIHsKICByZXMuanNvbih7CiAgICBzdGF0dXM6IGNvbm5lY3RlZCA/ICdvaycgOiAnZGVncmFkZWQnLAogICAgYXN0ZXJpc2tDb25uZWN0ZWQ6IGNvbm5lY3RlZCwKICAgIGFjdGl2ZUNhbGxzOiBPYmplY3Qua2V5cyhhY3RpdmVTZXNzaW9ucykubGVuZ3RoLAogICAgdGltZXN0YW1wOiBuZXcgRGF0ZSgpLnRvSVNPU3RyaW5nKCkKICB9KTsKfSk7CgovLyBPdXRib3VuZCBjYWxsCmFwcC5wb3N0KCcvZGlhbCcsIGFzeW5jIGZ1bmN0aW9uKHJlcSwgcmVzKSB7CiAgdmFyIHNlY3JldCA9IHJlcS5ib2R5LnNlY3JldDsKICB2YXIgdG8gPSByZXEuYm9keS50bzsKICB2YXIgZnJvbSA9IHJlcS5ib2R5LmZyb207CiAgdmFyIGNoYW5uZWxWYXJzID0gcmVxLmJvZHkuY2hhbm5lbFZhcnMgfHwge307CgogIGlmIChzZWNyZXQgIT09IEJSSURHRV9TRUNSRVQpIHJldHVybiByZXMuc3RhdHVzKDQwMykuanNvbih7IGVycm9yOiAnRm9yYmlkZGVuJyB9KTsKICBpZiAoIWFyaUNsaWVudCB8fCAhY29ubmVjdGVkKSByZXR1cm4gcmVzLnN0YXR1cyg1MDMpLmpzb24oeyBlcnJvcjogJ0FSSSBub3QgY29ubmVjdGVkJyB9KTsKCiAgdHJ5IHsKICAgIHZhciBjaGFubmVsID0gYXJpQ2xpZW50LkNoYW5uZWwoKTsKICAgIGF3YWl0IGNoYW5uZWwub3JpZ2luYXRlKHsKICAgICAgZW5kcG9pbnQ6ICdQSlNJUC8nICsgdG8gKyAnQHBhcnRuZXInLAogICAgICBhcHA6IEFQUF9OQU1FLAogICAgICBjYWxsZXJJZDogZnJvbSB8fCAnKzEyMTc4MDc4MjgxJywKICAgICAgdmFyaWFibGVzOiBjaGFubmVsVmFycwogICAgfSk7CiAgICBjb25zb2xlLmxvZygnW0RJQUxdIE9yaWdpbmF0ZWQ6ICcgKyB0byArICcgY2hhbm5lbD0nICsgY2hhbm5lbC5pZCk7CiAgICByZXMuanNvbih7IHN0YXR1czogJ29rJywgY2hhbm5lbElkOiBjaGFubmVsLmlkIH0pOwogIH0gY2F0Y2ggKGVycikgewogICAgY29uc29sZS5lcnJvcignW0RJQUxdIEVycm9yOicsIGVyci5tZXNzYWdlKTsKICAgIHJlcy5zdGF0dXMoNTAwKS5qc29uKHsgZXJyb3I6IGVyci5tZXNzYWdlIH0pOwogIH0KfSk7CgovLyBIYW5ndXAgYSBzcGVjaWZpYyBjaGFubmVsCmFwcC5wb3N0KCcvaGFuZ3VwJywgYXN5bmMgZnVuY3Rpb24ocmVxLCByZXMpIHsKICB2YXIgc2VjcmV0ID0gcmVxLmJvZHkuc2VjcmV0OwogIHZhciBjaGFubmVsSWQgPSByZXEuYm9keS5jaGFubmVsSWQ7CgogIGlmIChzZWNyZXQgIT09IEJSSURHRV9TRUNSRVQpIHJldHVybiByZXMuc3RhdHVzKDQwMykuanNvbih7IGVycm9yOiAnRm9yYmlkZGVuJyB9KTsKCiAgdHJ5IHsKICAgIHZhciBjaGFubmVsID0gYXJpQ2xpZW50LkNoYW5uZWwoY2hhbm5lbElkKTsKICAgIGF3YWl0IGNoYW5uZWwuaGFuZ3VwKCk7CiAgICByZXMuanNvbih7IHN0YXR1czogJ29rJyB9KTsKICB9IGNhdGNoIChlcnIpIHsKICAgIHJlcy5zdGF0dXMoNTAwKS5qc29uKHsgZXJyb3I6IGVyci5tZXNzYWdlIH0pOwogIH0KfSk7CgovLyBMaXN0IGFjdGl2ZSBzZXNzaW9ucwphcHAuZ2V0KCcvc2Vzc2lvbnMnLCBmdW5jdGlvbihyZXEsIHJlcykgewogIHZhciBhdXRoID0gcmVxLmhlYWRlcnNbJ3gtYnJpZGdlLXNlY3JldCddIHx8IHJlcS5xdWVyeS5zZWNyZXQ7CiAgaWYgKGF1dGggIT09IEJSSURHRV9TRUNSRVQpIHJldHVybiByZXMuc3RhdHVzKDQwMykuanNvbih7IGVycm9yOiAnRm9yYmlkZGVuJyB9KTsKICByZXMuanNvbih7IHNlc3Npb25zOiBhY3RpdmVTZXNzaW9ucyB9KTsKfSk7CgphcHAubGlzdGVuKFBPUlQsIGZ1bmN0aW9uKCkgewogIGNvbnNvbGUubG9nKCdbQnJpZGdlXSBWb2ljZUZsb3cgU0lQIEJyaWRnZSB2MS4wIGxpc3RlbmluZyBvbiBwb3J0ICcgKyBQT1JUKTsKICBjb25zb2xlLmxvZygnW0JyaWRnZV0gRmlyZWJhc2UgVVJMOiAnICsgRklSRUJBU0VfVVJMKTsKICBjb25uZWN0QXJpKCk7Cn0pOwo=" | base64 -d > /opt/voiceflow-bridge/bridge.js
+log "bridge.js: $(wc -l < /opt/voiceflow-bridge/bridge.js 2>/dev/null || echo FAILED) lines"
+
+# 5. npm install using the correct node/npm
+cd /opt/voiceflow-bridge
+log "Running npm install..."
+"$NPM_BIN" install --production >> "$LOG" 2>&1
+NPM_RC=$?
+log "npm exit: $NPM_RC, packages: $(ls node_modules 2>/dev/null | wc -l)"
+
+# 6. Update systemd service to use full path to node binary
+cat > /etc/systemd/system/voiceflow-bridge.service << SVC_DONE
+[Unit]
+Description=VoiceFlow SIP Bridge
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/voiceflow-bridge
+ExecStart=${NODE_BIN} bridge.js
+Restart=always
+RestartSec=5
+Environment=NODE_ENV=production
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=voiceflow-bridge
+
+[Install]
+WantedBy=multi-user.target
+SVC_DONE
+
+systemctl daemon-reload >> "$LOG" 2>&1 || true
+systemctl enable voiceflow-bridge >> "$LOG" 2>&1 || true
+systemctl restart voiceflow-bridge >> "$LOG" 2>&1 || true
+
+log "=== Final Status ==="
+log "Asterisk: $(systemctl is-active asterisk 2>/dev/null || echo unknown)"
+log "Bridge: $(systemctl is-active voiceflow-bridge 2>/dev/null || echo unknown)"
+log "Node.js: $($NODE_BIN --version 2>/dev/null || echo unknown)"
+log "=== Startup Complete ==="

@@ -8,6 +8,7 @@ import '/pages/extra_components/systerm_setting/systerm_setting_widget.dart';
 import '/pages/extra_components/tabbar/tabbar_widget.dart';
 import 'dart:ui';
 import '/flutter_flow/random_data_util.dart' as random_data;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -40,7 +41,7 @@ class _AdminWidgetState extends State<AdminWidget>
 
     _model.tabBarController = TabController(
       vsync: this,
-      length: 4,
+      length: 6,
       initialIndex: 0,
     )..addListener(() => safeSetState(() {}));
 
@@ -62,7 +63,29 @@ class _AdminWidgetState extends State<AdminWidget>
     _model.textController6 ??= TextEditingController();
     _model.textFieldFocusNode6 ??= FocusNode();
 
-    WidgetsBinding.instance.addPostFrameCallback((_) => safeSetState(() {}));
+    // API Keys tab controllers
+    _model.keysController1 ??= TextEditingController();
+    _model.keysFocusNode1 ??= FocusNode();
+    _model.keysController2 ??= TextEditingController();
+    _model.keysFocusNode2 ??= FocusNode();
+    _model.keysController3 ??= TextEditingController();
+    _model.keysFocusNode3 ??= FocusNode();
+    _model.keysController4 ??= TextEditingController();
+    _model.keysFocusNode4 ??= FocusNode();
+    _model.keysController5 ??= TextEditingController();
+    _model.keysFocusNode5 ??= FocusNode();
+
+    // Billing Settings tab controllers
+    _model.billingController1 ??= TextEditingController();
+    _model.billingFocusNode1 ??= FocusNode();
+    _model.billingController2 ??= TextEditingController();
+    _model.billingFocusNode2 ??= FocusNode();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      safeSetState(() {});
+      await _model.loadSystemSettings();
+      safeSetState(() {});
+    });
   }
 
   @override
@@ -400,10 +423,18 @@ class _AdminWidgetState extends State<AdminWidget>
                                     Tab(
                                       text: 'Trial Accounts',
                                     ),
+                                    Tab(
+                                      text: 'API Keys',
+                                    ),
+                                    Tab(
+                                      text: 'Billing',
+                                    ),
                                   ],
                                   controller: _model.tabBarController,
                                   onTap: (i) async {
                                     [
+                                      () async {},
+                                      () async {},
                                       () async {},
                                       () async {},
                                       () async {},
@@ -4220,6 +4251,10 @@ class _AdminWidgetState extends State<AdminWidget>
                                         ),
                                       ),
                                     ),
+                                    // ── Tab 5: System API Keys ──────────────
+                                    _buildApiKeysTab(context),
+                                    // ── Tab 6: Billing Settings ─────────────
+                                    _buildBillingTab(context),
                                   ],
                                 ),
                               ),
@@ -4235,6 +4270,163 @@ class _AdminWidgetState extends State<AdminWidget>
           ),
         ),
       ),
+    );
+  }
+
+  // ── System API Keys tab ─────────────────────────────────────────────────────
+  Widget _buildApiKeysTab(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'System API Keys',
+            style: FlutterFlowTheme.of(context).headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'These keys are used as fallback when a company has not configured its own credentials.',
+            style: FlutterFlowTheme.of(context).bodyMedium,
+          ),
+          const SizedBox(height: 24),
+          _buildKeyField(context, 'Twilio Account SID', _model.keysController1!,
+              _model.keysFocusNode1!, false),
+          const SizedBox(height: 16),
+          _buildKeyField(context, 'Twilio Auth Token', _model.keysController2!,
+              _model.keysFocusNode2!, true),
+          const SizedBox(height: 16),
+          _buildKeyField(context, 'Twilio Default From (phone)',
+              _model.keysController3!, _model.keysFocusNode3!, false),
+          const SizedBox(height: 16),
+          _buildKeyField(context, 'OpenAI API Key', _model.keysController4!,
+              _model.keysFocusNode4!, true),
+          const SizedBox(height: 16),
+          _buildKeyField(context, 'Deepgram API Key', _model.keysController5!,
+              _model.keysFocusNode5!, true),
+          const SizedBox(height: 32),
+          if (_model.keysSaved)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text('✅ Saved!',
+                  style: FlutterFlowTheme.of(context)
+                      .bodyMedium
+                      .copyWith(color: Colors.green)),
+            ),
+          FFButtonWidget(
+            onPressed: _model.keysLoading
+                ? null
+                : () async {
+                    safeSetState(() => _model.keysLoading = true);
+                    await _model.saveApiKeys();
+                    safeSetState(() {});
+                  },
+            text: _model.keysLoading ? 'Saving…' : 'Save API Keys',
+            options: FFButtonOptions(
+              width: 200,
+              height: 44,
+              color: FlutterFlowTheme.of(context).primary,
+              textStyle: FlutterFlowTheme.of(context).titleSmall.copyWith(
+                    color: Colors.white,
+                  ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Billing Settings tab ────────────────────────────────────────────────────
+  Widget _buildBillingTab(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24.0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Billing Settings',
+            style: FlutterFlowTheme.of(context).headlineSmall,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Configure the free signup credit given to new BASIC plan users.',
+            style: FlutterFlowTheme.of(context).bodyMedium,
+          ),
+          const SizedBox(height: 24),
+          _buildKeyField(context, 'Signup Credit (USD, e.g. 10.00)',
+              _model.billingController1!, _model.billingFocusNode1!, false),
+          const SizedBox(height: 16),
+          _buildKeyField(context, 'Credit Duration (days, e.g. 30)',
+              _model.billingController2!, _model.billingFocusNode2!, false),
+          const SizedBox(height: 8),
+          Text(
+            'When credit reaches \$0 or expires, BASIC users will be prompted to upgrade to Pro.',
+            style: FlutterFlowTheme.of(context).bodySmall,
+          ),
+          const SizedBox(height: 32),
+          if (_model.billingSaved)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Text('✅ Saved!',
+                  style: FlutterFlowTheme.of(context)
+                      .bodyMedium
+                      .copyWith(color: Colors.green)),
+            ),
+          FFButtonWidget(
+            onPressed: _model.billingLoading
+                ? null
+                : () async {
+                    safeSetState(() => _model.billingLoading = true);
+                    await _model.saveBillingSettings();
+                    safeSetState(() {});
+                  },
+            text: _model.billingLoading ? 'Saving…' : 'Save Billing Settings',
+            options: FFButtonOptions(
+              width: 220,
+              height: 44,
+              color: FlutterFlowTheme.of(context).primary,
+              textStyle: FlutterFlowTheme.of(context).titleSmall.copyWith(
+                    color: Colors.white,
+                  ),
+              borderRadius: BorderRadius.circular(8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildKeyField(BuildContext context, String label,
+      TextEditingController controller, FocusNode focusNode, bool obscure) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: FlutterFlowTheme.of(context).labelMedium),
+        const SizedBox(height: 6),
+        TextFormField(
+          controller: controller,
+          focusNode: focusNode,
+          obscureText: obscure,
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: FlutterFlowTheme.of(context).secondaryBackground,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                  color: FlutterFlowTheme.of(context).alternate, width: 1),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide(
+                  color: FlutterFlowTheme.of(context).alternate, width: 1),
+            ),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          ),
+          style: FlutterFlowTheme.of(context).bodyMedium,
+        ),
+      ],
     );
   }
 }

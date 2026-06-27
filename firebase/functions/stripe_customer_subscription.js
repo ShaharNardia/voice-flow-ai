@@ -1,6 +1,6 @@
 const {onRequest} = require("firebase-functions/v2/https");
 const {logger} = require("firebase-functions");
-const {getFirestore} = require("firebase-admin/firestore");
+const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 
 // ── Stripe initialisation ───────────────────────────────────────────
 // SECURITY: Keys are loaded from environment / Firebase Secrets.
@@ -45,6 +45,13 @@ async function markEventProcessed(eventId, eventType) {
     processedAt: new Date().toISOString(),
     expiresAt: new Date(Date.now() + EVENT_TTL_MS).toISOString(),
   });
+}
+
+// ── Plan helpers ─────────────────────────────────────────────────────
+function derivePlanFromPriceId(priceId) {
+  if (!priceId) return "pro";
+  if (priceId === process.env.STRIPE_SCALE_PRICE_ID) return "scale";
+  return "pro";
 }
 
 // ── Webhook handler ─────────────────────────────────────────────────
@@ -121,15 +128,27 @@ exports.stripeCustomerSubscription = onRequest(async (req, res) => {
       } else {
         // Process each user doc individually so one failure doesn't
         // prevent the rest from updating.
+        // Derive plan from price ID for paid events
+        const priceId = dataObject.items?.data?.[0]?.price?.id || null;
+        const newPlan = subscribedValue ? derivePlanFromPriceId(priceId) : "basic";
+
         for (const userDoc of userSnapshot.docs) {
           try {
             await userDoc.ref.update({
               subscribed: subscribedValue,
               stripe_subscription_id: dataObject.id,
               stripe_subscription_status: dataObject.status,
+              plan: newPlan,
+              planUpdatedAt: FieldValue.serverTimestamp(),
             });
+            // Also mirror plan to `users` collection
+            const db = getFirestore();
+            await db.collection("users").doc(userDoc.id).set(
+              { plan: newPlan, planUpdatedAt: FieldValue.serverTimestamp() },
+              { merge: true },
+            );
             logger.info(
-              `Updated subscription for user ${userDoc.id} → subscribed=${subscribedValue}`,
+              `Updated subscription for user ${userDoc.id} → subscribed=${subscribedValue}, plan=${newPlan}`,
             );
           } catch (updateErr) {
             logger.error(

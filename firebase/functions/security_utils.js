@@ -6,6 +6,7 @@
 
 const {logger} = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
+const admin = require("firebase-admin");
 
 // ── HTML / XSS Sanitization ──────────────────────────────────────────
 
@@ -195,6 +196,7 @@ function validateRequired(payload, fields) {
 const ALLOWED_ORIGINS = [
   "https://voiceflow-ai-202509231639.web.app",
   "https://voiceflow-ai-202509231639.firebaseapp.com",
+    "https://voice.lancelotech.com",
 ];
 
 // Allow localhost only in development
@@ -252,6 +254,34 @@ function handleCorsSafe(req, res) {
   return false; // Continue processing
 }
 
+// ── Auth Token Extraction ─────────────────────────────────────────────
+
+/**
+ * Extract and verify a Firebase UID from the Authorization: Bearer header.
+ * Returns null if missing, invalid, or expired.
+ */
+async function extractUidFromRequest(req) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader || !authHeader.startsWith("Bearer ")) return null;
+  try {
+    const decoded = await admin.auth().verifyIdToken(authHeader.slice(7));
+    return decoded.uid;
+  } catch (e) {
+    logger.warn("extractUidFromRequest: invalid token", e.message);
+    return null;
+  }
+}
+
+/**
+ * Get user document from Firestore, checking both `users` (new) and `user` (legacy) collections.
+ * Returns the DocumentSnapshot (may or may not exist).
+ */
+async function getUserDoc(db, uid) {
+  const newSnap = await db.collection("users").doc(uid).get();
+  if (newSnap.exists) return newSnap;
+  return db.collection("user").doc(uid).get();
+}
+
 module.exports = {
   stripHtml,
   sanitizeObject,
@@ -264,4 +294,6 @@ module.exports = {
   ALLOWED_ORIGINS,
   setCorsHeadersSafe,
   handleCorsSafe,
+  extractUidFromRequest,
+  getUserDoc,
 };

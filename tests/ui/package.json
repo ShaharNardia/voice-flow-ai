@@ -19,6 +19,10 @@
     "test:e2e:admin": "playwright test specs/e2e.admin.spec.ts",
     "test:e2e:customer": "playwright test specs/e2e.customer.spec.ts",
     "test:performance": "playwright test specs/performance.spec.ts",
+    "test:admin": "playwright test specs/admin.spec.ts",
+    "test:scenarios": "playwright test specs/scenarios.spec.ts",
+    "test:analytics": "playwright test specs/analytics.spec.ts",
+    "test:campaigns": "playwright test specs/campaigns.spec.ts",
     "test:ui": "playwright test --ui",
     "test:debug": "playwright test --debug",
     "report": "playwright show-report"

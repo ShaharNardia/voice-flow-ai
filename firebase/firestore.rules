@@ -16,7 +16,23 @@ service cloud.firestore {
     }
 
     function isAdmin() {
-      return isAuthenticated() && getUserData().role == 'admin';
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin')) ||
+        (exists(/databases/$(database)/documents/user/$(request.auth.uid)) &&
+         (get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'admin' ||
+          get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'super_admin'))
+      );
+    }
+
+    function isSuperAdmin() {
+      return isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'super_admin') ||
+        (exists(/databases/$(database)/documents/user/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/user/$(request.auth.uid)).data.role == 'super_admin')
+      );
     }
 
     function belongsToCompany(companyId) {
@@ -30,15 +46,20 @@ service cloud.firestore {
       return !(value is string) || (!value.matches('.*<script.*') && !value.matches('.*onerror.*=.*'));
     }
 
-    // ── User collection ───────────────────────────────────────────
-    // Users can only create their own document.
-    // Users can read/write their own document.
-    // Admins can read any user document.
+    // ── User collection (legacy singular) ────────────────────────
     match /user/{userId} {
       allow create: if isOwner(userId);
       allow read:   if isOwner(userId) || isAdmin();
       allow update: if isOwner(userId) || isAdmin();
-      allow delete: if false; // Users cannot be deleted from client
+      allow delete: if false;
+    }
+
+    // ── Users collection (new plural — multi-tenant) ──────────────
+    match /users/{userId} {
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow read:   if isAuthenticated();
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if false;
     }
 
     // ── Company collection ────────────────────────────────────────
@@ -64,13 +85,26 @@ service cloud.firestore {
       allow delete: if isAdmin();
     }
 
-    // ── Lead collection ───────────────────────────────────────────
-    // Company members can read/write leads belonging to their company.
+    // ── Lead collection (both legacy "Lead" and new "leads") ──────
     match /Lead/{leadId} {
       allow create: if isAuthenticated();
-      allow read:   if isAuthenticated();
-      allow update: if isAuthenticated();
+      allow read:   if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
       allow delete: if isAdmin();
+    }
+    match /leads/{leadId} {
+      allow create: if isAuthenticated();
+      allow read:   if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    // ── Campaigns collection ──────────────────────────────────────
+    match /campaigns/{campaignId} {
+      allow create: if isAuthenticated();
+      allow read:   if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow delete: if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
     }
 
     // ── Call / CallLogs / CallSessions ─────────────────────────────
@@ -90,33 +124,76 @@ service cloud.firestore {
 
     match /CallSessions/{sessionId} {
       allow create: if isAuthenticated();
-      allow read:   if isAuthenticated();
-      allow update: if isAuthenticated();
+      allow read:   if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow delete: if false;
+    }
+
+    // ── call_sessions collection (lowercase — actual backend collection name) ─
+    match /call_sessions/{sessionId} {
+      allow create: if isAuthenticated();
+      allow read:   if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
+      allow update: if isAuthenticated() && (resource.data.ownerId == null || resource.data.ownerId == request.auth.uid || isAdmin());
       allow delete: if false;
     }
 
     // ── Assistants collection ─────────────────────────────────────
     match /assistants/{assistantId} {
       allow create: if isAuthenticated();
-      allow read:   if isAuthenticated();
+      allow read:   if isAuthenticated() &&
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
+                        isAdmin());
       allow update: if isAuthenticated() &&
-                       (resource.data.ownerId == request.auth.uid ||
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
                         isAdmin());
       allow delete: if isAuthenticated() &&
-                       (resource.data.ownerId == request.auth.uid ||
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
                         isAdmin());
     }
 
     // ── Scenarios collection ──────────────────────────────────────
     match /scenarios/{scenarioId} {
       allow create: if isAuthenticated();
-      allow read:   if isAuthenticated();
+      allow read:   if isAuthenticated() &&
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
+                        isAdmin());
       allow update: if isAuthenticated() &&
-                       (resource.data.ownerId == request.auth.uid ||
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
                         isAdmin());
       allow delete: if isAuthenticated() &&
-                       (resource.data.ownerId == request.auth.uid ||
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
                         isAdmin());
+    }
+
+    // ── phone_numbers collection ──────────────────────────────────
+    match /phone_numbers/{numberId} {
+      allow create: if isAuthenticated();
+      allow read:   if isAuthenticated();
+      allow update: if isAuthenticated() &&
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
+                        isAdmin());
+      allow delete: if isAuthenticated() &&
+                       (resource.data.ownerId == null ||
+                        resource.data.ownerId == request.auth.uid ||
+                        isAdmin());
+    }
+
+    // ── sip_trunks — per-user, server manages all writes ─────────
+    // Clients may NOT read/write directly; all access goes through
+    // sipTrunk* Cloud Functions (which enforce uid ownership + encrypt passwords).
+    match /sip_trunks/{trunkId} {
+      allow read:   if isAuthenticated() &&
+                       resource.data.userId == request.auth.uid;
+      allow create: if false;  // server-side only
+      allow update: if false;  // server-side only
+      allow delete: if false;  // server-side only
     }
 
     // ── Technician collection ─────────────────────────────────────
@@ -158,50 +235,98 @@ service cloud.firestore {
       allow delete: if false;
     }
 
-    // ── leads collection (saas-frontend, lowercase) ───────────────
-    match /leads/{leadId} {
+    // ── Config collection (admin-managed settings) ────────────────
+    // Feature defaults are readable by all authenticated users so the
+    // client-side resolver can compute which modules to show. Writes
+    // always go through super_admin callable endpoints (never direct).
+    match /config/featureDefaults {
+      allow read:  if isAuthenticated();
+      allow write: if false;
+    }
+    match /config/{document} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // ── call_feedback collection (post-call quality ratings) ──────
+    match /call_feedback/{feedbackId} {
       allow create: if isAuthenticated();
       allow read:   if isAuthenticated();
-      allow update: if isAuthenticated();
+      allow update: if false;
       allow delete: if isAdmin();
     }
 
-    // ── campaigns collection ───────────────────────────────────────
-    match /campaigns/{campaignId} {
-      allow create: if isAuthenticated();
+    // ── knowledge_chunks (RAG chunks) — server-side only ──────────
+    match /knowledge_chunks/{chunkId} {
       allow read:   if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+      allow write:  if false;
     }
 
-    // ── call_sessions collection (saas-frontend, lowercase) ───────
-    match /call_sessions/{sessionId} {
-      allow create: if isAuthenticated();
-      allow read:   if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if false;
+    // ── Audit logs (super_admin read, server-side write only) ────────
+    match /audit_logs/{logId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
     }
 
-    // ── phone_numbers collection ───────────────────────────────────
-    match /phone_numbers/{phoneId} {
-      allow create: if isAuthenticated();
-      allow read:   if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAdmin();
+    // ── Anomaly logs (super_admin read, server-side write only) ──────
+    // Runtime anomalies: latency spikes, non-2xx HTTP, user frustration
+    // cues, recording failures. Written only via admin SDK from backend.
+    match /anomaly_logs/{logId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
     }
 
-    // ── knowledge_sources subcollection (per assistant) ────────────
-    match /assistants/{assistantId}/knowledge_sources/{sourceId} {
-      allow create: if isAuthenticated();
-      allow read:   if isAuthenticated();
-      allow update: if isAuthenticated();
-      allow delete: if isAuthenticated();
+    // ── Super-admin call telemetry (super_admin read, Cloud Run write) ──
+    // Detailed per-call technical log: event timeline, turn latencies,
+    // tool call timings, errors.  Written by Cloud Run at call end.
+    match /super_admin_call_logs/{callId} {
+      allow read: if isSuperAdmin();
+      allow write: if false;
     }
 
-    // ── SystemSettings (admin-only config) ────────────────────────
-    match /SystemSettings/{docId} {
-      allow read:   if isAdmin();
-      allow write:  if isAdmin();
+    // ── Language tutor lessons (per-user ownership) ──────────────────
+    match /lessons/{lessonId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() &&
+        request.resource.data.ownerId == request.auth.uid;
+      allow update, delete: if isAuthenticated() &&
+        (resource.data.ownerId == request.auth.uid || isAdmin());
+    }
+
+    // ── Tutor student profile (self-read, server writes) ─────────────
+    match /tutor_students/{uid} {
+      allow read: if isAuthenticated() &&
+        (uid == request.auth.uid || isAdmin());
+      allow write: if false;   // only server/admin SDK writes
+    }
+
+    // ── Tutor student knowledge chunks (self-ownership) ──────────────
+    match /tutor_knowledge_chunks/{chunkId} {
+      allow read: if isAuthenticated() &&
+        (resource.data.studentUid == request.auth.uid || isAdmin());
+      allow write: if false;
+    }
+
+    // ── Scheduled lessons (self + admin read; server writes) ─────────
+    match /scheduled_lessons/{id} {
+      allow read: if isAuthenticated() &&
+        (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow write: if false;   // server-only writes
+    }
+
+    // ── Appointments (booking tool — self + admin read; server writes) ──
+    match /appointments/{id} {
+      allow read: if isAuthenticated() &&
+        (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow write: if false;   // server-only writes via appointments_service
+    }
+
+    // ── Wizard sessions (short-lived assistant-creation state) ───────
+    match /wizard_sessions/{sid} {
+      allow read: if isAuthenticated() &&
+        (resource.data.ownerId == request.auth.uid || isAdmin());
+      allow write: if false;   // server-only writes
     }
 
     // ── Deny everything else by default ───────────────────────────

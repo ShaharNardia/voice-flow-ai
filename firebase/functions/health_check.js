@@ -3,16 +3,22 @@
  *
  * Provides system health status for uptime monitoring services.
  * Checks: Firestore connectivity, Twilio config, Stripe config, SendGrid config.
+ *
+ * Also exports getIntegrationStatus — lightweight, no-auth, env-var-presence check
+ * for the user-facing Settings page.
  */
 
 const {onRequest} = require("firebase-functions/v2/https");
+const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const {getFirestore} = require("firebase-admin/firestore");
+
+const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 
 const VERSION = "1.0.0";
 const START_TIME = Date.now();
 
-exports.healthCheck = onRequest(async (req, res) => {
+exports.healthCheck = onRequest({secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method !== "GET") {
     res.set("Allow", "GET");
     res.status(405).json({status: "error", message: "Method not allowed."});
@@ -75,4 +81,64 @@ exports.healthCheck = onRequest(async (req, res) => {
 
   const statusCode = overallHealthy ? 200 : 503;
   res.status(statusCode).json(result);
+});
+
+/**
+ * getIntegrationStatus — public (no auth required), no live API calls.
+ * Returns boolean "configured" flag per service based on env var presence.
+ * Used by the user-facing Settings page to display which integrations are active.
+ */
+exports.getIntegrationStatus = onRequest({secrets: [OPENAI_API_KEY]}, async (req, res) => {
+  // Allow CORS from any origin — this is read-only, non-sensitive data
+  res.set("Access-Control-Allow-Origin", "*");
+  res.set("Access-Control-Allow-Methods", "GET, OPTIONS");
+  res.set("Access-Control-Allow-Headers", "Content-Type, Authorization");
+  if (req.method === "OPTIONS") {
+    res.status(204).send("");
+    return;
+  }
+  if (req.method !== "GET") {
+    res.status(405).json({error: "Method not allowed"});
+    return;
+  }
+
+  const services = {
+    twilio: {
+      configured: !!(process.env.TWILIO_ACCOUNT_SID && process.env.TWILIO_AUTH_TOKEN),
+      label: "Twilio",
+      description: "Voice calls & SMS",
+    },
+    stripe: {
+      configured: !!process.env.STRIPE_SECRET_KEY,
+      label: "Stripe",
+      description: "Billing & subscriptions",
+    },
+    sendgrid: {
+      configured: !!process.env.SENDGRID_API_KEY,
+      label: "SendGrid",
+      description: "Transactional email",
+    },
+    elevenlabs: {
+      configured: !!process.env.ELEVENLABS_API_KEY,
+      label: "ElevenLabs",
+      description: "AI voice synthesis",
+    },
+    deepgram: {
+      configured: !!process.env.DEEPGRAM_API_KEY,
+      label: "Deepgram",
+      description: "Speech-to-text transcription",
+    },
+    openai: {
+      configured: !!process.env.OPENAI_API_KEY,
+      label: "OpenAI",
+      description: "AI language model",
+    },
+    whatsapp: {
+      configured: !!process.env.TWILIO_WHATSAPP_FROM,
+      label: "WhatsApp",
+      description: "WhatsApp messaging via Twilio",
+    },
+  };
+
+  res.status(200).json({services, timestamp: new Date().toISOString()});
 });

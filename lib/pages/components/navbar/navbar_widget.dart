@@ -349,14 +349,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               ),
                             ),
                           ),
-                        if ((currentUserDocument?.role != Role.agent) &&
-                            responsiveVisibility(
-                              context: context,
-                              phone: false,
-                              tablet: false,
-                              tabletLandscape: false,
-                              desktop: false,
-                            ))
+                        if (currentUserDocument?.role != Role.agent)
                           AuthUserStreamWidget(
                             builder: (context) => Container(
                               width: 40.0,
@@ -396,14 +389,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               ),
                             ),
                           ),
-                        if ((currentUserDocument?.role != Role.agent) &&
-                            responsiveVisibility(
-                              context: context,
-                              phone: false,
-                              tablet: false,
-                              tabletLandscape: false,
-                              desktop: false,
-                            ))
+                        if (currentUserDocument?.role != Role.agent)
                           AuthUserStreamWidget(
                             builder: (context) => Container(
                               width: 40.0,
@@ -443,14 +429,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               ),
                             ),
                           ),
-                        if ((currentUserDocument?.role != Role.agent) &&
-                            responsiveVisibility(
-                              context: context,
-                              phone: false,
-                              tablet: false,
-                              tabletLandscape: false,
-                              desktop: false,
-                            ))
+                        if (currentUserDocument?.role != Role.agent)
                           AuthUserStreamWidget(
                             builder: (context) => Container(
                               width: 40.0,
@@ -491,50 +470,43 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                               ),
                             ),
                           ),
-                        if (responsiveVisibility(
-                          context: context,
-                          phone: false,
-                          tablet: false,
-                          tabletLandscape: false,
-                          desktop: false,
-                        ))
-                          Container(
-                            width: 40.0,
-                            height: 40.0,
-                            decoration: BoxDecoration(
+                        Container(
+                          width: 40.0,
+                          height: 40.0,
+                          decoration: BoxDecoration(
+                            color: valueOrDefault<Color>(
+                              widget!.pageNum == 9.0
+                                  ? FlutterFlowTheme.of(context).primary
+                                  : FlutterFlowTheme.of(context)
+                                      .secondaryBackground,
+                              FlutterFlowTheme.of(context)
+                                  .secondaryBackground,
+                            ),
+                            borderRadius: BorderRadius.circular(8.0),
+                          ),
+                          child: FlutterFlowIconButton(
+                            borderColor: Colors.transparent,
+                            borderRadius: 8.0,
+                            borderWidth: 1.0,
+                            buttonSize: 40.0,
+                            icon: Icon(
+                              Icons.help_outline,
                               color: valueOrDefault<Color>(
                                 widget!.pageNum == 9.0
-                                    ? FlutterFlowTheme.of(context).primary
-                                    : FlutterFlowTheme.of(context)
-                                        .secondaryBackground,
-                                FlutterFlowTheme.of(context)
-                                    .secondaryBackground,
+                                    ? FlutterFlowTheme.of(context)
+                                        .secondaryBackground
+                                    : Color(0xFF919191),
+                                Color(0xFF919191),
                               ),
-                              borderRadius: BorderRadius.circular(8.0),
+                              size: 20.0,
                             ),
-                            child: FlutterFlowIconButton(
-                              borderColor: Colors.transparent,
-                              borderRadius: 8.0,
-                              borderWidth: 1.0,
-                              buttonSize: 40.0,
-                              icon: Icon(
-                                Icons.help_outline,
-                                color: valueOrDefault<Color>(
-                                  widget!.pageNum == 9.0
-                                      ? FlutterFlowTheme.of(context)
-                                          .secondaryBackground
-                                      : Color(0xFF919191),
-                                  Color(0xFF919191),
-                                ),
-                                size: 20.0,
-                              ),
-                              onPressed: () async {
-                                if (widget!.pageNum != 6.0) {
-                                  context.goNamed(HelpWidget.routeName);
-                                }
-                              },
-                            ),
+                            onPressed: () async {
+                              if (widget!.pageNum != 6.0) {
+                                context.goNamed(HelpWidget.routeName);
+                              }
+                            },
                           ),
+                        ),
                         Spacer(),
                         Divider(
                           thickness: 2.0,
@@ -567,40 +539,38 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                             ),
                           ),
                         ),
-                        if (responsiveVisibility(
-                          context: context,
-                          phone: false,
-                          tablet: false,
-                          tabletLandscape: false,
-                          desktop: false,
-                        ))
-                          Padding(
-                            padding: EdgeInsetsDirectional.fromSTEB(
-                                0.0, 0.0, 0.0, 20.0),
-                            child: Container(
-                              width: 40.0,
-                              height: 40.0,
-                              decoration: BoxDecoration(
-                                color: FlutterFlowTheme.of(context)
-                                    .secondaryBackground,
-                                borderRadius: BorderRadius.circular(8.0),
+                        Padding(
+                          padding: EdgeInsetsDirectional.fromSTEB(
+                              0.0, 0.0, 0.0, 20.0),
+                          child: Container(
+                            width: 40.0,
+                            height: 40.0,
+                            decoration: BoxDecoration(
+                              color: FlutterFlowTheme.of(context)
+                                  .secondaryBackground,
+                              borderRadius: BorderRadius.circular(8.0),
+                            ),
+                            child: FlutterFlowIconButton(
+                              borderColor: Colors.transparent,
+                              borderRadius: 8.0,
+                              borderWidth: 1.0,
+                              buttonSize: 35.0,
+                              icon: Icon(
+                                Icons.logout_outlined,
+                                color: Color(0xFF919191),
+                                size: 20.0,
                               ),
-                              child: FlutterFlowIconButton(
-                                borderColor: Colors.transparent,
-                                borderRadius: 8.0,
-                                borderWidth: 1.0,
-                                buttonSize: 35.0,
-                                icon: Icon(
-                                  Icons.logout_outlined,
-                                  color: Color(0xFF919191),
-                                  size: 20.0,
-                                ),
-                                onPressed: () {
-                                  print('IconButton pressed ...');
-                                },
-                              ),
+                              onPressed: () async {
+                                GoRouter.of(context).prepareAuthEvent();
+                                await authManager.signOut();
+                                GoRouter.of(context).clearRedirectLocation();
+                                context.goNamedAuth(
+                                    LoginScreenWidget.routeName,
+                                    context.mounted);
+                              },
                             ),
                           ),
+                        ),
                       ].divide(SizedBox(height: 8.0)),
                     );
                   } else {
@@ -3417,15 +3387,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         ),
                                       ),
                                     ),
-                                  if ((currentUserDocument?.role !=
-                                          Role.agent) &&
-                                      responsiveVisibility(
-                                        context: context,
-                                        phone: false,
-                                        tablet: false,
-                                        tabletLandscape: false,
-                                        desktop: false,
-                                      ))
+                                  if (currentUserDocument?.role != Role.agent)
                                     AuthUserStreamWidget(
                                       builder: (context) => FFButtonWidget(
                                         onPressed: () async {
@@ -3508,15 +3470,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         showLoadingIndicator: false,
                                       ),
                                     ),
-                                  if ((currentUserDocument?.role !=
-                                          Role.agent) &&
-                                      responsiveVisibility(
-                                        context: context,
-                                        phone: false,
-                                        tablet: false,
-                                        tabletLandscape: false,
-                                        desktop: false,
-                                      ))
+                                  if (currentUserDocument?.role != Role.agent)
                                     AuthUserStreamWidget(
                                       builder: (context) => FFButtonWidget(
                                         onPressed: () async {
@@ -3599,15 +3553,7 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         showLoadingIndicator: false,
                                       ),
                                     ),
-                                  if ((currentUserDocument?.role !=
-                                          Role.agent) &&
-                                      responsiveVisibility(
-                                        context: context,
-                                        phone: false,
-                                        tablet: false,
-                                        tabletLandscape: false,
-                                        desktop: false,
-                                      ))
+                                  if (currentUserDocument?.role != Role.agent)
                                     AuthUserStreamWidget(
                                       builder: (context) => FFButtonWidget(
                                         onPressed: () async {
@@ -3690,20 +3636,13 @@ class _NavbarWidgetState extends State<NavbarWidget> {
                                         showLoadingIndicator: false,
                                       ),
                                     ),
-                                  if (responsiveVisibility(
-                                    context: context,
-                                    phone: false,
-                                    tablet: false,
-                                    tabletLandscape: false,
-                                    desktop: false,
-                                  ))
-                                    FFButtonWidget(
-                                      onPressed: () async {
-                                        if (widget!.pageNum != 6.0) {
-                                          context.goNamed(HelpWidget.routeName);
-                                        }
-                                      },
-                                      text: 'Help',
+                                  FFButtonWidget(
+                                    onPressed: () async {
+                                      if (widget!.pageNum != 6.0) {
+                                        context.goNamed(HelpWidget.routeName);
+                                      }
+                                    },
+                                    text: 'Help',
                                       icon: Icon(
                                         Icons.help_outline,
                                         size: 17.0,

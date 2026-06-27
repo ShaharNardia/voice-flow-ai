@@ -1,0 +1,55 @@
+name: Deploy Production
+
+# Deploys the whole stack to PRODUCTION on push to `main` (i.e. when a
+# staging→main PR is merged). The `environment: production` gate PAUSES this job
+# until a required reviewer approves it in the GitHub UI — that's your manual
+# approval step.
+#
+# Required repo secrets (set by a repo admin):
+#   GCP_SA_KEY_PROD     — JSON key for gh-deployer@voiceflow-ai-202509231639
+#   FUNCTIONS_ENV_PROD  — contents of firebase/functions/.env
+#
+# Required GitHub Environment "production" with you as a Required reviewer.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy → voiceflow-ai (production)
+    runs-on: ubuntu-latest
+    environment: production       # ⏸ manual-approval gate
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SA_KEY_PROD }}
+
+      - uses: google-github-actions/setup-gcloud@v2
+
+      - name: Install Firebase CLI
+        run: npm i -g firebase-tools
+
+      - name: Restore production functions env
+        run: printf '%s' "${{ secrets.FUNCTIONS_ENV_PROD }}" > firebase/functions/.env
+
+      - name: Install dependencies
+        run: |
+          (cd saas-frontend && npm ci)
+          (cd firebase/functions && npm ci)
+
+      - name: Deploy all to production
+        # --yes is required by the script for any production deploy.
+        run: bash scripts/deploy.sh production all --yes

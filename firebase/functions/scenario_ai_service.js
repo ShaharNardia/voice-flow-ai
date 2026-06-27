@@ -1,21 +1,23 @@
-/**
+﻿/**
  * Scenario AI Service - AI-powered scenario generation
  * Uses OpenAI to generate call flow scenarios from natural language descriptions
  */
 
 const {onRequest} = require("firebase-functions/v2/https");
+const {defineSecret} = require("firebase-functions/params");
 const {logger} = require("firebase-functions");
 const axios = require("axios");
+
+const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 
 // CORS configuration
 const corsOptions = {
   cors: [
     "https://voiceflow-ai-202509231639.web.app",
     "https://voiceflow-ai-202509231639.firebaseapp.com",
+    "https://voice.lancelotech.com",
     "http://localhost:3000",
     "http://localhost:5000",
-    /\.web\.app$/,
-    /\.firebaseapp\.com$/,
   ],
 };
 
@@ -65,7 +67,7 @@ Do not include any explanation, only the JSON.`;
 /**
  * Generate a scenario from natural language description
  */
-exports.generateScenario = onRequest(corsOptions, async (req, res) => {
+exports.generateScenario = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;
@@ -184,7 +186,7 @@ exports.generateScenario = onRequest(corsOptions, async (req, res) => {
 /**
  * Get AI suggestions for improving a scenario
  */
-exports.suggestImprovements = onRequest(corsOptions, async (req, res) => {
+exports.suggestImprovements = onRequest({...corsOptions, secrets: [OPENAI_API_KEY]}, async (req, res) => {
   if (req.method === "OPTIONS") {
     res.status(204).send("");
     return;

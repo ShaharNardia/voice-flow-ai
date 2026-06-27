@@ -754,17 +754,18 @@ class _ScenarioEditorWidgetState extends State<ScenarioEditorWidget> {
 
   List<Widget> _buildEdges() {
     final widgets = <Widget>[];
-    
+
     for (final edge in _model.edges) {
       final sourceNode = _model.nodes.firstWhereOrNull((n) => n.id == edge.source);
       final targetNode = _model.nodes.firstWhereOrNull((n) => n.id == edge.target);
-      
+
       if (sourceNode == null || targetNode == null) continue;
 
       // Calculate connection points (bottom of source, top of target)
       final sourceCenter = Offset(sourceNode.position.dx + 75, sourceNode.position.dy + 80);
       final targetCenter = Offset(targetNode.position.dx + 75, targetNode.position.dy);
 
+      // Draw the edge line
       widgets.add(
         CustomPaint(
           size: Size.infinite,
@@ -776,8 +777,36 @@ class _ScenarioEditorWidgetState extends State<ScenarioEditorWidget> {
           ),
         ),
       );
+
+      // Add a delete button at the midpoint of the edge
+      final midX = (sourceCenter.dx + targetCenter.dx) / 2;
+      final midY = (sourceCenter.dy + targetCenter.dy) / 2;
+      final edgeId = edge.id;
+      widgets.add(
+        Positioned(
+          left: midX - 12,
+          top: midY - 12,
+          child: GestureDetector(
+            onTap: () {
+              setState(() {
+                _model.removeEdge(edgeId);
+              });
+            },
+            child: Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                color: Colors.red.shade400,
+                shape: BoxShape.circle,
+                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+              ),
+              child: const Icon(Icons.close, color: Colors.white, size: 14),
+            ),
+          ),
+        ),
+      );
     }
-    
+
     return widgets;
   }
 

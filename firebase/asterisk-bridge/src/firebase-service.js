@@ -47,6 +47,21 @@ async function initialize() {
 }
 
 /**
+ * Get a call session document
+ */
+async function getCallSession(sessionId) {
+  if (!db || !sessionId) return null;
+
+  try {
+    const doc = await db.collection('call_sessions').doc(sessionId).get();
+    return doc.exists ? doc.data() : null;
+  } catch (error) {
+    console.error(`[Firebase] Failed to get call_session ${sessionId}:`, error.message);
+    return null;
+  }
+}
+
+/**
  * Update a call session document
  */
 async function updateCallSession(sessionId, data) {
@@ -178,6 +193,7 @@ async function markCallRequestProcessed(requestId, result) {
 
 module.exports = {
   initialize,
+  getCallSession,
   updateCallSession,
   updateLead,
   saveCallRecord,
