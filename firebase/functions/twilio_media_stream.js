@@ -76,7 +76,7 @@ const twilioMediaStream = onRequest(
     const assistant = data.assistantDefinition || {};
     const language = assistant.language || "he-IL";
     const sttModel = assistant.sttModel || "nova-2";
-    const voiceId = assistant.voice || "Google.he-IL-Wavenet-A";
+    const voiceId = assistant.voice || "Google.he-IL-Neural2-A";
     const sayLanguage = language === "he" ? "he-IL" : (language || "he-IL");
 
     // Helper function to resolve voice for language
@@ -87,7 +87,7 @@ const twilioMediaStream = onRequest(
         return voice;
       }
       if (langLower.startsWith("he")) {
-        return "Google.he-IL-Wavenet-A";
+        return "Google.he-IL-Neural2-A";
       }
       return voice || "Google.en-US-Wavenet-A";
     };

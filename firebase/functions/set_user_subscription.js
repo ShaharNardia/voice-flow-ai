@@ -86,6 +86,34 @@ async function applySubscription(data, authUid) {
   const derivedPlan = data.plan || existingPlan || (subscribed ? "pro" : "basic");
 
   const userRef = db.collection("user").doc(uid);
+
+  // Issue 7: On first BASIC signup, grant signup credit (configurable in SystemSettings/billing)
+  let creditUpdate = {};
+  const existingDoc = await userRef.get();
+  const isNewUser = !existingDoc.exists;
+  const planRequested = data?.plan || stripeStatus;
+  const isBasicPlan = planRequested === "basic" || (!subscribed && stripeStatus !== "active");
+  const alreadyGranted = existingDoc.exists && existingDoc.get("creditGranted") === true;
+  if (isBasicPlan && !alreadyGranted) {
+    try {
+      const billingSettings = await db.collection("SystemSettings").doc("billing").get();
+      const bs = billingSettings.exists ? billingSettings.data() : {};
+      const creditCents = bs.signupCreditCents || 1000; // default $10 = 1000 cents
+      const creditDays = bs.signupCreditDays || 30;
+      const expiresAt = new Date();
+      expiresAt.setDate(expiresAt.getDate() + creditDays);
+      creditUpdate = {
+        creditBalance: creditCents,
+        creditGranted: true,
+        creditExpiresAt: expiresAt,
+        subscriptionPlan: "basic",
+      };
+      logger.info(`Granting signup credit: $${(creditCents / 100).toFixed(2)} to uid=${uid}`);
+    } catch (creditErr) {
+      logger.warn("Failed to read billing settings for credit grant:", creditErr.message);
+    }
+  }
+
   await userRef.set(
     {
       subscribed,
@@ -95,6 +123,7 @@ async function applySubscription(data, authUid) {
       planUpdatedAt: FieldValue.serverTimestamp(),
       ...(role ? {role} : {}),
       ...(status ? {status} : {}),
+      ...creditUpdate,
     },
     {merge: true},
   );
