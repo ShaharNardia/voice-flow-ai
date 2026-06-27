@@ -5,6 +5,8 @@ const _NLPEARL_TOKEN_SECRET = defineSecret("NLPEARL_API_TOKEN");
 // assistantTestChat calls the OpenAI LLM (llm_service.getLLMResponse reads
 // process.env.OPENAI_API_KEY) — bind the secret or it 500s "OPENAI_API_KEY not configured".
 const _OPENAI_API_KEY_SECRET = defineSecret("OPENAI_API_KEY");
+// Shared secret authenticating assistantVoiceReplay → mediastream /replay.
+const _REPLAY_SECRET = defineSecret("REPLAY_SECRET");
 const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const twilio = require("twilio");
@@ -1381,6 +1383,75 @@ exports.assistantsUpdate = onRequest(corsOptions, async (req, res) => {
  * The `override` fields let the frontend test unsaved draft settings.
  * KB chunks are always fetched live from Firestore for the saved assistantId.
  */
+/**
+ * assistantVoiceReplay — "Re-run & Compare → run as a live voice call".
+ * Auth-gated proxy to the mediastream /replay endpoint, which re-runs a past
+ * call as a REAL voice session against the assistant's CURRENT config and
+ * returns a WAV recording. Heavy work (the live session) happens in Cloud Run;
+ * this just authorizes the user and forwards with the shared secret.
+ */
+exports.assistantVoiceReplay = onRequest(
+  {...corsOptions, secrets: [_REPLAY_SECRET], timeoutSeconds: 300, memory: "256MiB"},
+  async (req, res) => {
+    if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+    if (req.method !== "POST") {
+      res.set("Allow", "POST");
+      res.status(405).json({ status: "error", message: "Method not allowed." });
+      return;
+    }
+    // Replays spin up paid model sessions — keep the rate tight.
+    if (!applyRateLimit(req, res, {maxRequests: 10, windowMs: 60000})) return;
+
+    try {
+      const uid = await extractUidFromRequest(req);
+      const payload = sanitizeObject(getJsonBody(req));
+      const callSessionId = payload.callSessionId;
+      const assistantId = payload.assistantId;
+      const maxTurns = payload.maxTurns;
+      if (!callSessionId) { res.status(400).json({ status: "error", message: "callSessionId is required." }); return; }
+      if (!assistantId) { res.status(400).json({ status: "error", message: "assistantId is required." }); return; }
+
+      const db = getFirestore();
+      const aSnap = await db.collection("assistants").doc(String(assistantId)).get();
+      if (!aSnap.exists) { res.status(404).json({ status: "error", message: "Assistant not found." }); return; }
+      if (uid && aSnap.data().ownerId && aSnap.data().ownerId !== uid) {
+        res.status(403).json({ status: "error", message: "Forbidden." });
+        return;
+      }
+
+      const secret = process.env.REPLAY_SECRET;
+      if (!secret) { res.status(503).json({ status: "error", message: "Voice replay is not configured (REPLAY_SECRET missing)." }); return; }
+      const base = process.env.CLOUD_RUN_URL || "https://voiceflow-mediastream-myg46khq7q-uc.a.run.app";
+
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), 280000);
+      let r;
+      try {
+        r = await fetch(`${base}/replay`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "x-replay-secret": secret },
+          body: JSON.stringify({ callSessionId, assistantId, maxTurns }),
+          signal: ctrl.signal,
+        });
+      } finally { clearTimeout(timer); }
+
+      const text = await r.text();
+      if (!r.ok) {
+        let msg = text;
+        try { msg = JSON.parse(text).error || text; } catch (_) {}
+        res.status(r.status === 400 || r.status === 404 ? r.status : 502).json({ status: "error", message: String(msg).slice(0, 400) });
+        return;
+      }
+      res.set("Content-Type", "application/json");
+      res.status(200).send(text);   // pass through { ok, audioBase64, durationMs, turns, ... }
+    } catch (e) {
+      console.error("[assistantVoiceReplay]", e.message);
+      const aborted = e.name === "AbortError";
+      res.status(aborted ? 504 : 500).json({ status: "error", message: aborted ? "Replay timed out." : (e.message || "Replay failed.") });
+    }
+  },
+);
+
 exports.assistantTestChat = onRequest({...corsOptions, secrets: [_OPENAI_API_KEY_SECRET]}, async (req, res) => {
   if (req.method === "OPTIONS") { res.status(204).send(""); return; }
   if (req.method !== "POST") {

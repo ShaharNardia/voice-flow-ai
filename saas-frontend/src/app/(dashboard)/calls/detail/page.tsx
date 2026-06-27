@@ -1148,7 +1148,7 @@ function CallDetail() {
 
       {call?.id && call.assistantId && (call.conversationHistory || []).some((m) => m.role === "user") && (
         <div className="mt-4">
-          <CallReplay assistantId={call.assistantId} history={call.conversationHistory || []} />
+          <CallReplay assistantId={call.assistantId} history={call.conversationHistory || []} callSessionId={call.id} />
         </div>
       )}
 

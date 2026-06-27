@@ -292,6 +292,34 @@ const GOOGLE_TTS_VOICES = {
 const audioCache = new Map(); // id → {buffer, contentType, createdAt}
 const AUDIO_CACHE_TTL = 120000; // 2 minutes
 
+// ── Live voice replay (Re-run & Compare → "run as a live call") ──────────
+// callSessionIds currently being replayed synthetically. The session handlers
+// run the EXACT live pipeline, so we must neutralize tools that would take a
+// real-world action against the original caller (texting them, calling them,
+// creating real leads/appointments). Read-only tools (KB search, lookups) and
+// the user's own custom HTTP tools still run, so the test stays faithful.
+const REPLAY_SESSIONS = new Set();
+const REPLAY_NEUTRALIZE = new Set(["send_sms", "send_email", "transfer_call", "create_appointment", "save_lead"]);
+function isReplayNeutralized(callSessionId, toolName) {
+  return REPLAY_SESSIONS.has(callSessionId) && REPLAY_NEUTRALIZE.has(toolName);
+}
+const replayDriver = require("./replay_driver.js");
+// Caller voice for replays — a Google voice DISTINCT from the assistant's own,
+// so the two sides are easy to tell apart when listening.
+const REPLAY_CALLER_VOICE = {
+  "he": "he-IL-Wavenet-B", "he-il": "he-IL-Wavenet-B",
+  "en": "en-US-Wavenet-D", "en-us": "en-US-Wavenet-D",
+  "ar": "ar-XA-Wavenet-B", "ar-sa": "ar-XA-Wavenet-B", "ar-xa": "ar-XA-Wavenet-B",
+};
+function callerVoiceFor(language) {
+  const lc = String(language || "he-IL").toLowerCase();
+  return REPLAY_CALLER_VOICE[lc] || REPLAY_CALLER_VOICE[lc.split("-")[0]] || "he-IL-Wavenet-B";
+}
+function langCodeFor(language) {
+  const l = String(language || "he-IL");
+  return l.includes("-") ? l : (l === "he" ? "he-IL" : l === "ar" ? "ar-XA" : l === "en" ? "en-US" : l);
+}
+
 // TTS Models registry — available for selection via Admin Panel
 const TTS_MODELS = {
   "openai-nova":    {provider: "openai", voice: "nova",    label: "OpenAI Nova (נשי, חם)"},
@@ -415,6 +443,118 @@ app.post("/tts-models", express.json(), async (req, res) => {
   } catch (err) {
     console.error("[TTS] Failed to save model:", err.message);
     res.status(500).json({error: err.message});
+  }
+});
+
+// ── Live voice replay ────────────────────────────────────────────────
+// POST /replay  { callSessionId, assistantId?, maxTurns? }   (internal: x-replay-secret)
+// Re-runs a past call as a REAL voice session against the assistant's CURRENT
+// prompt/flow/tools/KB and returns a WAV recording of the whole conversation.
+// The caller's turns are TTS'd into the live pipeline; the bot's real audio is
+// captured back. Destructive tools (SMS/email/transfer/lead/appointment) are
+// neutralized so the original caller is never contacted.
+app.post("/replay", express.json({ limit: "1mb" }), async (req, res) => {
+  const secret = process.env.REPLAY_SECRET;
+  if (!secret || req.get("x-replay-secret") !== secret) return res.status(403).json({ error: "forbidden" });
+
+  const { callSessionId, assistantId: bodyAssistantId, maxTurns } = req.body || {};
+  if (!callSessionId) return res.status(400).json({ error: "callSessionId required" });
+
+  const db = getFirestore();
+  const replayId = `replay_${callSessionId}_${Date.now()}`;
+  let tempCreated = false;
+  try {
+    // 1) Original call → caller turns.
+    const origSnap = await db.collection("call_sessions").doc(String(callSessionId)).get();
+    if (!origSnap.exists) return res.status(404).json({ error: "original call not found" });
+    const orig = origSnap.data();
+    const callerTurnsText = (orig.conversationHistory || [])
+      .filter((m) => m.role === "user" && (m.content || "").trim())
+      .map((m) => m.content.trim());
+    if (!callerTurnsText.length) return res.status(400).json({ error: "no caller turns to replay" });
+
+    // 2) CURRENT assistant config (so the replay reflects the latest fix).
+    const assistantId = bodyAssistantId || orig.assistantId;
+    if (!assistantId) return res.status(400).json({ error: "assistantId required" });
+    const aSnap = await db.collection("assistants").doc(String(assistantId)).get();
+    if (!aSnap.exists) return res.status(404).json({ error: "assistant not found" });
+    const assistant = { id: assistantId, ...aSnap.data() };
+
+    const provider = assistant.voiceProvider === "gemini-hybrid" ? "gemini-hybrid"
+      : (assistant.voiceProvider === "gemini-live" || assistant.realtimeProvider === "gemini") ? "gemini"
+      : assistant.realtimeEnabled === true ? "realtime" : "classic";
+    if (provider === "classic") {
+      return res.status(400).json({ error: "Voice replay supports realtime / Gemini assistants. This assistant uses the classic TTS path." });
+    }
+
+    const language = assistant.language || orig.language || "he-IL";
+    const cap = Math.max(1, Math.min(Number(maxTurns) || 6, 12));
+    const turnsText = callerTurnsText.slice(0, cap);
+
+    // 3) TTS each caller turn → µ-law frames (Google, contrasting voice).
+    const callerVoice = callerVoiceFor(language);
+    const callerTurns = [];
+    for (const text of turnsText) {
+      const [resp] = await googleTtsClient.synthesizeSpeech({
+        input: { text },
+        voice: { languageCode: langCodeFor(language), name: callerVoice },
+        audioConfig: { audioEncoding: "LINEAR16", sampleRateHertz: 8000, speakingRate: 1.0 },
+      });
+      const pcm = replayDriver.stripWavHeader(Buffer.from(resp.audioContent));
+      callerTurns.push({ text, frames: replayDriver.pcm16ToMulawFrames(pcm) });
+    }
+
+    // 4) Temp session doc so handler writes land on a throwaway record.
+    const replayData = {
+      ...orig, assistantDefinition: assistant, assistantId,
+      isReplay: true, originalCallSessionId: callSessionId,
+      conversationHistory: [], createdAt: new Date().toISOString(),
+    };
+    const sessionRef = db.collection("call_sessions").doc(replayId);
+    await sessionRef.set(replayData);
+    tempCreated = true;
+
+    // 5) Drive the REAL pipeline with the synthetic caller.
+    REPLAY_SESSIONS.add(replayId);
+    const adapter = replayDriver.createReplayAdapter(replayId, {
+      from: orig.leadNumber || orig.callerNumber || "", to: orig.assistantPhone || "",
+    });
+    const ctx = {
+      callSessionId: replayId, data: replayData, assistant, assistantId, db, sessionRef,
+      messageBuffer: [], markSetupComplete: (fn) => adapter.on("message", fn),
+    };
+    let handlerDone;
+    if (provider === "gemini-hybrid") handlerDone = handleGeminiSession(adapter, { ...ctx, hybridSTT: true });
+    else if (provider === "gemini") handlerDone = handleGeminiSession(adapter, ctx);
+    else handlerDone = handleRealtimeSession(adapter, ctx);
+    handlerDone = Promise.resolve(handlerDone).catch((e) => console.warn(`[replay] handler ${replayId}: ${e.message}`));
+
+    const result = await replayDriver.driveConversation(adapter, callerTurns, {
+      greetingMaxWaitMs: 10000, maxTurnWaitMs: 15000, idleMs: 1200, trailingSilenceMs: 700,
+    });
+    await Promise.race([handlerDone, new Promise((r) => setTimeout(r, 3000))]);
+
+    // 6) Pull the bot's text the handler persisted on the temp doc.
+    let botTranscript = [];
+    try {
+      const after = await sessionRef.get();
+      botTranscript = (after.data()?.conversationHistory || []).filter((m) => m.role === "assistant").map((m) => m.content || "");
+    } catch (_) { /* best-effort */ }
+
+    console.log(`[replay] ${replayId} done: provider=${provider}, ${turnsText.length} turns, ${result.durationMs}ms, botSpoke=${result.botSpoke}`);
+    return res.json({
+      ok: true, provider,
+      audioBase64: result.wav.toString("base64"), audioMime: "audio/wav",
+      durationMs: result.durationMs, botSpoke: result.botSpoke,
+      turns: result.blocks, callerTurns: turnsText, botTranscript,
+      truncated: callerTurnsText.length > turnsText.length, totalCallerTurns: callerTurnsText.length,
+    });
+  } catch (err) {
+    console.error(`[replay] ${replayId} failed:`, err.message);
+    return res.status(500).json({ error: err.message });
+  } finally {
+    REPLAY_SESSIONS.delete(replayId);
+    if (tempCreated) db.collection("call_sessions").doc(replayId).delete().catch(() => {});
   }
 });
 
@@ -1858,6 +1998,12 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
   // ── Tool execution (mirrors standard path) ─────────────────────────
   async function executeRealtimeTool(name, args) {
     try {
+      // Replay safety: don't text/call/record the real caller during a synthetic
+      // re-run. The model gets a success so the conversation flows naturally.
+      if (isReplayNeutralized(callSessionId, name)) {
+        console.log(`[${callSessionId}] [replay] neutralized ${name} — no real action taken`);
+        return "Done.";
+      }
       if (name === "send_email" && args.to) {
         const companyName = assistant.companyName || "";
         await sgMail.send({
@@ -1907,11 +2053,11 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
         hangupTimer = setTimeout(async () => {
           hangupTimer = null;
           try {
-            if (callSid) {
+            if (callSid && !REPLAY_SESSIONS.has(callSessionId)) {
               console.log(`[${callSessionId}] [RT] Hanging up call ${callSid}`);
               await updateCall(callSid, {status: "completed"});
             } else {
-              bridge.close();
+              bridge.close();   // replay (or no callSid): just end the synthetic session
             }
           } catch (e) {
             console.error(`[${callSessionId}] [RT] Hangup failed:`, e.message);
@@ -3119,6 +3265,11 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       console.log(`[${callSessionId}] [GL] Tool call: ${name}(${JSON.stringify(args).slice(0, 200)})`);
       let result = "OK";
       let apiMeta = null;  // filled by executeCustomApiTool with the resolved request/response
+      // Replay safety: skip any tool that would act on the real caller.
+      if (isReplayNeutralized(callSessionId, name)) {
+        console.log(`[${callSessionId}] [replay] neutralized ${name} — no real action taken`);
+        return "Done.";
+      }
       if (name === "end_call") {
         // GATE (anti-premature-hangup): never hang up if the CALLER hasn't said
         // anything yet — that's a model misfire right after the greeting.
@@ -3132,8 +3283,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
           hangupTimer = setTimeout(async () => {
             hangupTimer = null;
             try {
-              if (callSid) await updateCall(callSid, { status: "completed" }, { provider: data.telephonyProvider || "twilio" });
-              else bridge.close();
+              if (callSid && !REPLAY_SESSIONS.has(callSessionId)) await updateCall(callSid, { status: "completed" }, { provider: data.telephonyProvider || "twilio" });
+              else bridge.close();   // replay (or no callSid): end the synthetic session locally
             } catch (e) {
               console.error(`[${callSessionId}] [GL] end_call hangup failed:`, e.message);
               bridge.close();

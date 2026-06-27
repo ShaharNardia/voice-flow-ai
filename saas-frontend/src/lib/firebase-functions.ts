@@ -22,18 +22,31 @@ async function httpGet<T>(path: string): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-async function httpPost<T>(path: string, body: unknown): Promise<T> {
+async function httpPost<T>(path: string, body: unknown, opts?: { timeoutMs?: number }): Promise<T> {
   const headers = await getAuthHeaders();
-  const res = await fetch(`${FUNCTIONS_BASE}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error((err as { message?: string }).message || res.statusText);
+  // Optional client-side timeout (e.g. voice replay can run for minutes).
+  let signal: AbortSignal | undefined;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (opts?.timeoutMs) {
+    const ctrl = new AbortController();
+    signal = ctrl.signal;
+    timer = setTimeout(() => ctrl.abort(), opts.timeoutMs);
   }
-  return res.json() as Promise<T>;
+  try {
+    const res = await fetch(`${FUNCTIONS_BASE}${path}`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ message: res.statusText }));
+      throw new Error((err as { message?: string }).message || res.statusText);
+    }
+    return res.json() as Promise<T>;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // ── Assistants ────────────────────────────────────────────────────────
@@ -72,6 +85,28 @@ export const assistantTestChat = (data: {
     customTools?: unknown[];
   };
 }) => httpPost<{ reply: string; toolCalls?: TestChatToolCall[] }>("/assistantTestChat", data);
+
+export interface VoiceReplayResult {
+  ok: boolean;
+  provider: string;
+  audioBase64: string;
+  audioMime: string;
+  durationMs: number;
+  botSpoke: boolean;
+  turns: { role: "caller" | "bot"; startMs: number; durMs: number }[];
+  callerTurns: string[];
+  botTranscript: string[];
+  truncated: boolean;
+  totalCallerTurns: number;
+}
+// "Run as a live voice call" — re-runs a past call through the REAL voice
+// pipeline against the assistant's current config and returns a WAV recording.
+// Long-running (a real session); allow up to 5 minutes.
+export const assistantVoiceReplay = (data: {
+  callSessionId: string;
+  assistantId: string;
+  maxTurns?: number;
+}) => httpPost<VoiceReplayResult>("/assistantVoiceReplay", data, { timeoutMs: 300000 });
 
 export const assistantsDelete = (data: { id: string }) =>
   httpPost<{ status: string }>("/assistantsDelete", data);

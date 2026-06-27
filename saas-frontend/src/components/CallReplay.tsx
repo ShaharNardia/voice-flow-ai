@@ -10,9 +10,9 @@
  * override lets you A/B a different prompt/flow before saving it.
  */
 
-import { useMemo, useState } from "react";
-import { Loader2, Play, Wand2, AlertTriangle } from "lucide-react";
-import { assistantTestChat, type TestChatToolCall } from "@/lib/firebase-functions";
+import { useEffect, useMemo, useState } from "react";
+import { Loader2, Play, Wand2, AlertTriangle, Headphones } from "lucide-react";
+import { assistantTestChat, assistantVoiceReplay, type TestChatToolCall, type VoiceReplayResult } from "@/lib/firebase-functions";
 
 interface Turn { role: "user" | "assistant" | "tool"; content?: string; }
 interface Pair { user: string; oldAnswer: string; }
@@ -23,9 +23,11 @@ const norm = (s: string) => (s || "").replace(/\s+/g, " ").trim().toLowerCase();
 export default function CallReplay({
   assistantId,
   history,
+  callSessionId,
 }: {
   assistantId?: string;
   history: Turn[];
+  callSessionId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [running, setRunning] = useState(false);
@@ -35,6 +37,49 @@ export default function CallReplay({
   const [showOverride, setShowOverride] = useState(false);
   const [ovPrompt, setOvPrompt] = useState("");
   const [ovFlow, setOvFlow] = useState("");
+
+  // ── Live voice replay (run as a real call, hear the conversation) ──────
+  const [voiceRunning, setVoiceRunning] = useState(false);
+  const [voiceErr, setVoiceErr] = useState("");
+  const [voiceResult, setVoiceResult] = useState<VoiceReplayResult | null>(null);
+  const [audioUrl, setAudioUrl] = useState<string>("");
+
+  // Revoke the blob URL when it changes or the component unmounts.
+  useEffect(() => () => { if (audioUrl) URL.revokeObjectURL(audioUrl); }, [audioUrl]);
+
+  async function runVoiceReplay() {
+    if (!assistantId || !callSessionId) return;
+    setVoiceRunning(true); setVoiceErr(""); setVoiceResult(null);
+    if (audioUrl) { URL.revokeObjectURL(audioUrl); setAudioUrl(""); }
+    try {
+      const res = await assistantVoiceReplay({ callSessionId, assistantId, maxTurns: 6 });
+      const bytes = Uint8Array.from(atob(res.audioBase64), (c) => c.charCodeAt(0));
+      const url = URL.createObjectURL(new Blob([bytes], { type: res.audioMime || "audio/wav" }));
+      setAudioUrl(url);
+      setVoiceResult(res);
+    } catch (e: unknown) {
+      setVoiceErr(e instanceof Error ? e.message : "Voice replay failed");
+    } finally {
+      setVoiceRunning(false);
+    }
+  }
+
+  // Build a readable chat transcript from the replay: greeting, then each caller
+  // turn paired with the bot's reply (best-effort ordering).
+  const voiceConvo = useMemo(() => {
+    if (!voiceResult) return [] as { role: "bot" | "caller"; text: string }[];
+    const out: { role: "bot" | "caller"; text: string }[] = [];
+    const bot = voiceResult.botTranscript || [];
+    const callers = voiceResult.callerTurns || [];
+    let bi = 0;
+    if (bot[bi]) out.push({ role: "bot", text: bot[bi++] });
+    for (const c of callers) {
+      out.push({ role: "caller", text: c });
+      if (bot[bi]) out.push({ role: "bot", text: bot[bi++] });
+    }
+    while (bi < bot.length) out.push({ role: "bot", text: bot[bi++] });
+    return out;
+  }, [voiceResult]);
 
   // Pair each recorded user turn with the assistant answer(s) that followed it.
   const pairs = useMemo<Pair[]>(() => {
@@ -119,6 +164,15 @@ export default function CallReplay({
                     {running ? (progress ? `Re-running… ${progress.i}/${progress.n}` : "Re-running…") : `Re-run ${pairs.length} turn${pairs.length === 1 ? "" : "s"}`}
                   </button>
                   <button
+                    onClick={runVoiceReplay}
+                    disabled={voiceRunning || !callSessionId}
+                    title={!callSessionId ? "Call id unavailable" : "Re-run as a real voice call and listen to the conversation"}
+                    className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-60 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors"
+                  >
+                    {voiceRunning ? <Loader2 className="w-4 h-4 animate-spin" /> : <Headphones className="w-4 h-4" />}
+                    {voiceRunning ? "Running live call…" : "Run as live voice call"}
+                  </button>
+                  <button
                     onClick={() => setShowOverride((v) => !v)}
                     className="flex items-center gap-1.5 text-xs text-violet-600 hover:underline"
                   >
@@ -144,6 +198,57 @@ export default function CallReplay({
 
               {error && (
                 <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5">{error}</div>
+              )}
+
+              {/* ── Live voice replay result ─────────────────────────── */}
+              {voiceErr && (
+                <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg p-2.5">{voiceErr}</div>
+              )}
+              {voiceRunning && !voiceResult && (
+                <div className="text-sm text-indigo-700 bg-indigo-50 border border-indigo-200 rounded-lg p-3 flex items-center gap-2">
+                  <Loader2 className="w-4 h-4 animate-spin shrink-0" />
+                  Running a real voice call against the current settings — speaking each caller turn into the live pipeline and recording the bot. This can take up to a minute…
+                </div>
+              )}
+              {voiceResult && audioUrl && (
+                <div className="rounded-xl border border-indigo-200 bg-indigo-50/40 p-4 space-y-3">
+                  <div className="flex items-center gap-2 flex-wrap text-xs">
+                    <span className="font-semibold text-indigo-800 flex items-center gap-1">
+                      <Headphones className="w-3.5 h-3.5" /> Live voice replay
+                    </span>
+                    <span className="text-neutral-500">· {voiceResult.provider}</span>
+                    <span className="text-neutral-500">· {(voiceResult.durationMs / 1000).toFixed(1)}s</span>
+                    {!voiceResult.botSpoke && (
+                      <span className="text-amber-600 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> bot produced no audio</span>
+                    )}
+                    {voiceResult.truncated && (
+                      <span className="text-neutral-400">· first {voiceResult.callerTurns.length} of {voiceResult.totalCallerTurns} turns</span>
+                    )}
+                  </div>
+                  <audio controls src={audioUrl} className="w-full" />
+                  <p className="text-[11px] text-neutral-400">
+                    This is a real run through the live voice pipeline with the assistant&apos;s current prompt, flow &amp; tools. The caller is a synthesized stand-in; SMS / email / transfer actions are simulated, not sent.
+                  </p>
+                  {voiceConvo.length > 0 && (
+                    <div className="space-y-1.5 pt-1">
+                      {voiceConvo.map((m, i) => (
+                        <div key={i} className={`flex ${m.role === "caller" ? "justify-start" : "justify-end"}`}>
+                          <div
+                            dir="auto"
+                            className={`max-w-[80%] text-sm rounded-2xl px-3 py-1.5 ${
+                              m.role === "caller"
+                                ? "bg-white border border-neutral-200 text-neutral-700 rounded-bl-sm"
+                                : "bg-indigo-600 text-white rounded-br-sm"
+                            }`}
+                          >
+                            <span className="text-[10px] opacity-60 block">{m.role === "caller" ? "🗣️ caller" : "🤖 bot"}</span>
+                            {m.text}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
               )}
 
               {/* Side-by-side comparison */}

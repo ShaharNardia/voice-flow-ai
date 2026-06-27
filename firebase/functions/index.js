@@ -105,6 +105,7 @@ exports.assistantsGet = voiceService.assistantsGet;
 // this file; without this line the endpoint did not exist and every call from
 // the "Test the Bot" UI returned "Failed to fetch" (DNS / 404-level failure).
 exports.assistantTestChat = voiceService.assistantTestChat;
+exports.assistantVoiceReplay = voiceService.assistantVoiceReplay;
 exports.searchPhoneNumbers = voiceService.searchPhoneNumbers;
 exports.purchasePhoneNumber = voiceService.purchasePhoneNumber;
 exports.configurePhoneNumber = voiceService.configurePhoneNumber;
