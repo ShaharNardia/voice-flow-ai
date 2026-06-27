@@ -1508,7 +1508,15 @@ exports.assistantVoiceReplay = onRequest(
       const db = getFirestore();
       const aSnap = await db.collection("assistants").doc(String(assistantId)).get();
       if (!aSnap.exists) { res.status(404).json({ status: "error", message: "Assistant not found." }); return; }
-      if (uid && aSnap.data().ownerId && aSnap.data().ownerId !== uid) {
+      // Owner-or-super-admin: a super admin can replay any account's call (same
+      // bypass as assistantsUpdate). Strict-owner-only blocked admins from
+      // replaying calls whose assistant belongs to a tenant account.
+      let callerIsSuperAdmin = false;
+      if (uid) {
+        const uDoc = await getUserDoc(db, uid);
+        callerIsSuperAdmin = uDoc.exists && uDoc.data().role === "super_admin";
+      }
+      if (uid && aSnap.data().ownerId && aSnap.data().ownerId !== uid && !callerIsSuperAdmin) {
         res.status(403).json({ status: "error", message: "Forbidden." });
         return;
       }
