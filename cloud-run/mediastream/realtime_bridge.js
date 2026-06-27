@@ -206,6 +206,7 @@ class RealtimeBridge extends EventEmitter {
       } else {
         this._log("reconnect exhausted — closing call");
         this._closed = true;
+        this._clearTimers();    // give up cleanly — don't strand the keepalive intervals
         this.emit("close");
       }
     });
@@ -243,13 +244,21 @@ class RealtimeBridge extends EventEmitter {
    * Cleanly close the bridge.
    */
   close() {
+    // Always release the keepalive/hang-check intervals, even if we were already
+    // marked closed by an exhausted-reconnect teardown — otherwise they leak past
+    // the call (the host calls close() on our "close" event, which would otherwise
+    // early-return and strand both setIntervals).
+    this._clearTimers();
     if (this._closed) return;
     this._closed = true;
-    if (this._hangCheck)   { clearInterval(this._hangCheck);   this._hangCheck   = null; }
-    if (this._pingInterval){ clearInterval(this._pingInterval); this._pingInterval = null; }
     try {
       this._ws.close(1000, "session ended");
     } catch (_) {}
+  }
+
+  _clearTimers() {
+    if (this._hangCheck)   { clearInterval(this._hangCheck);    this._hangCheck    = null; }
+    if (this._pingInterval){ clearInterval(this._pingInterval); this._pingInterval = null; }
   }
 
   // ── Internal ───────────────────────────────────────────────────────
