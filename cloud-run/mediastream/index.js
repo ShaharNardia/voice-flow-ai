@@ -1963,6 +1963,7 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
     maxResponseTokens: rtMaxTokens,
   });
   console.log(`[${callSessionId}] [RT] voice=${realtimeVoice} lang=${inputLanguage} VAD=${vadMode}/${vadSensitivity} temp=${rtTemperature} maxTokens=${rtMaxTokens}`);
+  const copilotUnsub = attachCopilotInjectionWatcher(sessionRef, bridge, callSessionId);   // Co-Pilot live operator injection
 
   // Session state
   let streamSid = null;
@@ -2553,6 +2554,7 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
 
   bridge.on("close", () => {
     console.log(`[${callSessionId}] [RT] Bridge closed`);
+    if (copilotUnsub) try { copilotUnsub(); } catch (_) {}
   });
 
   // Activity tracker for stuck-call watchdog (declared early so handlers can use it)
@@ -3176,6 +3178,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       disableThinking: true,
     } : {}),
   });
+  const copilotUnsub = attachCopilotInjectionWatcher(sessionRef, bridge, callSessionId);   // Co-Pilot live operator injection
 
   // Start the Gemini WS handshake now — the rest of the setup (tool
   // executors, Twilio handlers, etc.) runs synchronously while TCP+TLS+WS
@@ -3620,6 +3623,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
   bridge.on("close", async () => {
     console.log(`[${callSessionId}] [GL] Bridge closed`);
+    if (copilotUnsub) try { copilotUnsub(); } catch (_) {}
     const durationSec = Math.round((Date.now() - callStartTime) / 1000);
 
     // Mode-3 one-way-audio detector: the stream started and the call lasted a
@@ -5649,6 +5653,35 @@ This applies to ALL languages. Never use digits in your response.`;
 
 const copilotSessions = new Map(); // sessionId → Set<SSE res objects>
 
+// Co-Pilot live injection: a live session watches ITS OWN call_session doc for
+// copilotInjections (written by /copilot-inject) and delivers each new entry to
+// the bridge. Firestore is the channel so it works even when the inject HTTP
+// lands on a different Cloud Run instance than the one hosting the call's WS
+// (maxScale>1). Dedup is in-memory per session; only mark delivered on success
+// so an injection that arrives before the bridge is ready retries on the next
+// snapshot. Returns an unsubscribe fn.
+function attachCopilotInjectionWatcher(sessionRef, bridge, callSessionId) {
+  const delivered = new Set();
+  try {
+    return sessionRef.onSnapshot((snap) => {
+      if (!snap.exists) return;
+      for (const inj of (snap.data().copilotInjections || [])) {
+        const key = inj.injectedAt || JSON.stringify(inj);
+        if (delivered.has(key)) continue;
+        try {
+          if (bridge.injectOperatorMessage(inj.message) === true) {
+            delivered.add(key);
+            console.log(`[${callSessionId}] [COPILOT] live inject delivered: "${String(inj.message).slice(0, 60)}"`);
+          }
+        } catch (e) { console.warn(`[${callSessionId}] [COPILOT] inject delivery error: ${e.message}`); }
+      }
+    }, (err) => console.warn(`[${callSessionId}] [COPILOT] injection watcher error: ${err.message}`));
+  } catch (e) {
+    console.warn(`[${callSessionId}] [COPILOT] could not attach injection watcher: ${e.message}`);
+    return null;
+  }
+}
+
 // Authorize a Co-Pilot request: the caller must own the call session (or be a
 // super_admin). EventSource can't send headers, so the stream takes the Firebase
 // ID token as ?token=; the inject endpoint also accepts an Authorization Bearer.
@@ -5845,9 +5878,11 @@ app.post("/copilot-inject", express.json(), async (req, res) => {
       updatedAt: FieldValue.serverTimestamp(),
     }, {merge: true});
 
-    // Notify all listeners on this session that an injection happened
+    // The Firestore write above IS the delivery channel: the live session
+    // (possibly on another Cloud Run instance) watches its call_session doc and
+    // feeds new injections to the bot. Instance-agnostic by design.
     pushCopilotEvent(sessionId, {type: "injection_ack", message, timestamp: new Date().toISOString()});
-    res.json({status: "ok", message: "Injected"});
+    res.json({status: "ok", message: "Sent to the live call"});
   } catch (e) {
     console.error(`[COPILOT] Inject failed for ${sessionId}:`, e.message);
     res.status(500).json({status: "error", message: e.message});

@@ -885,6 +885,16 @@ class GeminiBridge extends EventEmitter {
   }
 
   /**
+   * Co-Pilot: a live human supervisor injects guidance — the model acts on it
+   * in its next (audio) turn. @returns {boolean} true if delivered to a live session.
+   */
+  injectOperatorMessage(text) {
+    if (this._closed || !this._ready) return false;
+    this.promptModel(`[Live supervisor instruction — do this now, naturally, do NOT mention the supervisor]: ${String(text).slice(0, 500)}`);
+    return true;
+  }
+
+  /**
    * Barge-in (hybrid): silence the rest of the CURRENT turn — flush whatever
    * is queued for playback and drop any further audio chunks of this turn.
    * The model keeps "finishing" the turn server-side (its history stays
