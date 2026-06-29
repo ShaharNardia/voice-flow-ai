@@ -59,7 +59,32 @@ async function enqueueFollowup({leadId, phone, companyPhone, assistantId, ownerI
       status: "exhausted", attemptCount: prevAttempts, reason: reason || "callback",
       nextAttemptAt: FAR_FUTURE, updatedAt: FieldValue.serverTimestamp(),
     }, {merge: true});
-    logger.info("[followup] exhausted — handoff candidate", {leadId, attempts: prevAttempts});
+    // ── HANDOFF: the bot gave up → hand the lead to a human ──────────────────
+    // Three channels so it can't be missed: (1) a durable escalations record,
+    // (2) the lead's own status flips to "escalated" (shows in the Leads list),
+    // (3) a best-effort push to the owner.
+    try {
+      await db.collection("escalations").doc(String(leadId)).set({
+        leadId, phone: phone || null, assistantId: assistantId || null,
+        ownerId: ownerId || null, campaignId: campaignId || null,
+        reason: "followup_exhausted", attempts: prevAttempts, status: "open",
+        createdAt: FieldValue.serverTimestamp(), updatedAt: FieldValue.serverTimestamp(),
+      }, {merge: true});
+      await db.collection("leads").doc(String(leadId)).set(
+        {status: "escalated", needsHuman: true, updatedAt: FieldValue.serverTimestamp()}, {merge: true}).catch(() => {});
+      if (ownerId) {
+        const {sendPushToUser} = require("./push_service");
+        await sendPushToUser(ownerId, {
+          title: "Lead needs a human",
+          body: `Tried ${prevAttempts}× to reach ${phone || "a lead"} with no resolution — take over?`,
+          url: "/leads",
+          data: {leadId: String(leadId), kind: "followup_exhausted"},
+        });
+      }
+    } catch (escErr) {
+      logger.warn("[followup] escalation/notify failed (non-blocking)", {leadId, err: escErr.message});
+    }
+    logger.info("[followup] exhausted — escalated to human", {leadId, attempts: prevAttempts});
     return "exhausted";
   }
 
