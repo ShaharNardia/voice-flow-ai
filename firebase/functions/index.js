@@ -241,6 +241,10 @@ exports.bookingsCancel = appointmentsService.bookingsCancel;
 const remindersService = require("./reminders_service.js");
 exports.dispatchReminders = remindersService.dispatchReminders;
 
+// Automatic follow-up calls — re-dials unresolved campaign leads (business hours, capped).
+const followupsService = require("./followups_service.js");
+exports.dispatchFollowups = followupsService.dispatchFollowups;
+
 // Assistant Wizard — chat-based assistant builder
 const assistantWizardService = require("./assistant_wizard_service.js");
 exports.wizardChat = assistantWizardService.wizardChat;
