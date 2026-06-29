@@ -5649,8 +5649,35 @@ This applies to ALL languages. Never use digits in your response.`;
 
 const copilotSessions = new Map(); // sessionId → Set<SSE res objects>
 
+// Authorize a Co-Pilot request: the caller must own the call session (or be a
+// super_admin). EventSource can't send headers, so the stream takes the Firebase
+// ID token as ?token=; the inject endpoint also accepts an Authorization Bearer.
+const { getAuth } = require("firebase-admin/auth");
+async function verifyCopilotAccess(token, sessionId) {
+  if (!token || !sessionId) return { ok: false, code: 401, reason: "auth required" };
+  let uid;
+  try { uid = (await getAuth().verifyIdToken(String(token))).uid; }
+  catch (_) { return { ok: false, code: 401, reason: "invalid token" }; }
+  try {
+    const db = getFirestore();
+    const snap = await db.collection("call_sessions").doc(String(sessionId)).get();
+    if (!snap.exists) return { ok: false, code: 404, reason: "session not found" };
+    if ((snap.data().ownerId || null) === uid) return { ok: true, uid };
+    const u = await db.collection("users").doc(uid).get();
+    if (u.exists && u.data().role === "super_admin") return { ok: true, uid };
+    return { ok: false, code: 403, reason: "forbidden" };
+  } catch (e) { return { ok: false, code: 500, reason: e.message }; }
+}
+
 // Register a new Co-Pilot listener
 app.get("/copilot-stream", async (req, res) => {
+  // Authorize BEFORE writing SSE headers (so we can still return a 4xx).
+  const sessionId = req.query.sessionId;
+  const access = await verifyCopilotAccess(req.query.token, sessionId);
+  if (!access.ok) {
+    res.set("Access-Control-Allow-Origin", req.headers.origin || "*");
+    return res.status(access.code).json({ error: access.reason });
+  }
   res.set({
     "Content-Type":  "text/event-stream",
     "Cache-Control": "no-cache",
@@ -5659,13 +5686,6 @@ app.get("/copilot-stream", async (req, res) => {
     "X-Accel-Buffering": "no",       // Disable nginx buffering
   });
   res.flushHeaders();
-
-  const sessionId = req.query.sessionId;
-  if (!sessionId) {
-    res.write(`data: ${JSON.stringify({type:"error", message:"sessionId required"})}\n\n`);
-    res.end();
-    return;
-  }
 
   // Register this SSE connection
   if (!copilotSessions.has(sessionId)) copilotSessions.set(sessionId, new Set());
@@ -5809,6 +5829,10 @@ app.post("/copilot-inject", express.json(), async (req, res) => {
   if (!sessionId || !message) {
     return res.status(400).json({status: "error", message: "sessionId and message required"});
   }
+  // Authorize: Bearer header or body.token, must own the session (or super_admin).
+  const bearer = (req.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  const access = await verifyCopilotAccess(bearer || req.body.token, sessionId);
+  if (!access.ok) return res.status(access.code).json({ status: "error", message: access.reason });
 
   try {
     const db = getFirestore();

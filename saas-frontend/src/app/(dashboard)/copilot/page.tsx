@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { collection, query, orderBy, limit, onSnapshot, where, Timestamp } from "firebase/firestore";
 import { useAuth } from "@/hooks/useAuth";
-import { db } from "@/lib/firebase";
+import { db, auth } from "@/lib/firebase";
 import { Bot, User, Mic, PhoneCall, TrendingUp, TrendingDown, Minus, Zap, Send, Circle } from "lucide-react";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -141,12 +141,18 @@ export default function CopilotPage() {
     setCurrentSentiment("neutral");
     setLatestSuggestion(null);
 
-    const sse = new EventSource(`${CLOUD_RUN_URL}/copilot-stream?sessionId=${encodeURIComponent(selectedSession)}`);
-    sseRef.current = sse;
+    let cancelled = false;
+    (async () => {
+      // SSE/EventSource can't send headers — pass the Firebase ID token as a
+      // query param; the backend verifies it owns this session before streaming.
+      const token = await auth.currentUser?.getIdToken().catch(() => "") || "";
+      if (cancelled || !token) { if (!token) setConnected(false); return; }
+      const sse = new EventSource(`${CLOUD_RUN_URL}/copilot-stream?sessionId=${encodeURIComponent(selectedSession)}&token=${encodeURIComponent(token)}`);
+      sseRef.current = sse;
 
-    sse.onopen = () => setConnected(true);
+      sse.onopen = () => setConnected(true);
 
-    sse.onmessage = (e) => {
+      sse.onmessage = (e) => {
       try {
         const event = JSON.parse(e.data) as CopilotEvent;
         if (event.type === "session_state") {
@@ -163,11 +169,12 @@ export default function CopilotPage() {
           setEvents(prev => [...prev, event]);
         }
       } catch {}
-    };
+      };
 
-    sse.onerror = () => { setConnected(false); };
+      sse.onerror = () => { setConnected(false); };
+    })();
 
-    return () => { sse.close(); };
+    return () => { cancelled = true; if (sseRef.current) { sseRef.current.close(); sseRef.current = null; } };
   }, [selectedSession]);
 
   // Auto-scroll transcript
@@ -179,9 +186,10 @@ export default function CopilotPage() {
     if (!selectedSession || !injectMsg.trim()) return;
     setInjecting(true);
     try {
+      const token = await auth.currentUser?.getIdToken().catch(() => "") || "";
       await fetch(`${CLOUD_RUN_URL}/copilot-inject`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...(token ? { Authorization: `Bearer ${token}` } : {}) },
         body: JSON.stringify({ sessionId: selectedSession, message: injectMsg.trim() }),
       });
       setInjectMsg("");
