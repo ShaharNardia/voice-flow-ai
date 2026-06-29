@@ -50,7 +50,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/leads", label: "Leads", icon: Users, featureId: "module.leads" },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone, lockedFor: "campaigns", featureId: "module.campaigns" },
   // NLPearl removed — all NLPearl assistants now run on Gemini Live.
-  { href: "/bench", label: "Bench", icon: BarChart3 },
+  { href: "/bench", label: "Bench", icon: BarChart3, featureId: "module.bench" },
   { href: "/calendar", label: "Calendar", icon: Calendar, lockedFor: "calendar", featureId: "module.calendar" },
   { href: "/scenarios", label: "Scenarios", icon: GitBranch, featureId: "module.scenarios" },
   { href: "/analytics", label: "Analytics", icon: BarChart3, lockedFor: "analytics", featureId: "module.analytics" },

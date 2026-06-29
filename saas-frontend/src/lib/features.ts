@@ -29,6 +29,9 @@ export const FEATURES: readonly FeatureDef[] = [
   { id: "module.calendar", label: "Calendar", defaultOn: true, kind: "nav" },
   { id: "module.scenarios", label: "Scenarios", defaultOn: true, kind: "nav" },
   { id: "module.analytics", label: "Analytics", defaultOn: true, kind: "nav" },
+  // Internal benchmarking rig — not a customer feature. Hidden by default
+  // (super_admin still sees it; flip on per-account if ever needed).
+  { id: "module.bench", label: "Bench (STT/TTS benchmark)", defaultOn: false, kind: "nav" },
   { id: "module.billing", label: "Billing", defaultOn: true, kind: "nav" },
   { id: "module.settings", label: "Settings", defaultOn: true, kind: "nav" },
   { id: "cap.customApiTools", label: "Custom API Tools (assistant)", defaultOn: false, kind: "cap" },
@@ -39,15 +42,18 @@ export const FEATURES: readonly FeatureDef[] = [
   { id: "cap.scheduleReminders", label: "Lesson/appointment reminders", defaultOn: true, kind: "cap" },
   { id: "cap.pwaPush", label: "PWA install + push notifications", defaultOn: true, kind: "cap" },
   { id: "cap.sipTrunks", label: "SIP Trunk integration", defaultOn: true, kind: "cap" },
-  // ── New enterprise features ────────────────────────────────────────────────
-  { id: "module.compliance", label: "Compliance Intelligence (TCPA/GDPR)", defaultOn: true, kind: "nav" },
-  { id: "module.contracts", label: "Verbal Contracts", defaultOn: true, kind: "nav" },
-  { id: "module.voiceCommerce", label: "Voice Commerce", defaultOn: true, kind: "nav" },
-  { id: "module.agentDirectory", label: "Agent-to-Agent Network", defaultOn: true, kind: "nav" },
+  // ── Enterprise extras — HIDDEN by default (kept behind a flag, not deleted).
+  // These are niche/heavy add-ons that clutter the core phonebot product; a
+  // super_admin still sees them, and any account can be opted in per-feature.
+  // Co-Pilot stays visible (required now). See [base+ cleanup].
+  { id: "module.compliance", label: "Compliance Intelligence (TCPA/GDPR)", defaultOn: false, kind: "nav" },
+  { id: "module.contracts", label: "Verbal Contracts", defaultOn: false, kind: "nav" },
+  { id: "module.voiceCommerce", label: "Voice Commerce", defaultOn: false, kind: "nav" },
+  { id: "module.agentDirectory", label: "Agent-to-Agent Network", defaultOn: false, kind: "nav" },
   { id: "module.copilot", label: "AI Co-Pilot for Agents", defaultOn: true, kind: "nav" },
-  { id: "cap.verbalContract", label: "Verbal Contract engine (assistant)", defaultOn: true, kind: "cap" },
-  { id: "cap.voiceCommerce", label: "Voice Commerce engine (assistant)", defaultOn: true, kind: "cap" },
-  { id: "cap.agentNetwork", label: "Agent-to-Agent calling (assistant)", defaultOn: true, kind: "cap" },
+  { id: "cap.verbalContract", label: "Verbal Contract engine (assistant)", defaultOn: false, kind: "cap" },
+  { id: "cap.voiceCommerce", label: "Voice Commerce engine (assistant)", defaultOn: false, kind: "cap" },
+  { id: "cap.agentNetwork", label: "Agent-to-Agent calling (assistant)", defaultOn: false, kind: "cap" },
   { id: "cap.translationMode", label: "Multilingual translation mode", defaultOn: true, kind: "cap" },
 ] as const;
 

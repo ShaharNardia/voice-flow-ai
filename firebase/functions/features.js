@@ -15,6 +15,7 @@ const FEATURES = [
   {id: "module.calendar", label: "Calendar", defaultOn: false, kind: "nav"},
   {id: "module.scenarios", label: "Scenarios", defaultOn: true, kind: "nav"},
   {id: "module.analytics", label: "Analytics", defaultOn: false, kind: "nav"},
+  {id: "module.bench", label: "Bench (STT/TTS benchmark)", defaultOn: false, kind: "nav"},
   {id: "module.billing", label: "Billing", defaultOn: true, kind: "nav"},
   {id: "module.settings", label: "Settings", defaultOn: true, kind: "nav"},
   // Capability-level (non-nav)
