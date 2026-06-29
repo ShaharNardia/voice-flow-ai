@@ -111,6 +111,25 @@ export const assistantVoiceReplay = (data: {
 export const assistantsDelete = (data: { id: string }) =>
   httpPost<{ status: string }>("/assistantsDelete", data);
 
+// ── Follow-ups & Escalations ──────────────────────────────────────────
+export interface FollowupItem {
+  id: string; leadId: string; phone: string; assistantId: string;
+  campaignId?: string | null; reason?: string;
+  attemptCount: number; maxAttempts: number;
+  status: "pending" | "calling" | "done" | "exhausted";
+  nextAttemptAt?: { _seconds?: number } | string | number; timezone?: string;
+}
+export interface EscalationItem {
+  id: string; leadId: string; phone?: string | null; assistantId?: string | null;
+  campaignId?: string | null; reason: string; attempts: number;
+  status: "open" | "resolved" | "escalated"; notes?: string | null;
+  createdAt?: { _seconds?: number } | string | number;
+}
+export const followupsList   = () => httpGet<FollowupItem[]>("/followupsList");
+export const escalationsList = () => httpGet<EscalationItem[]>("/escalationsList");
+export const escalationResolve = (data: { leadId: string; notes?: string }) =>
+  httpPost<{ status: string; id: string }>("/escalationResolve", data);
+
 export const assistantsDuplicate = (data: { id: string; name?: string }) =>
   httpPost<{ id: string; name: string }>("/assistantsDuplicate", data);
 

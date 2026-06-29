@@ -245,6 +245,12 @@ exports.dispatchReminders = remindersService.dispatchReminders;
 const followupsService = require("./followups_service.js");
 exports.dispatchFollowups = followupsService.dispatchFollowups;
 
+// Follow-ups / Escalations dashboard — read the queue + open escalations, resolve.
+const escalationsService = require("./escalations_service.js");
+exports.followupsList     = escalationsService.followupsList;
+exports.escalationsList   = escalationsService.escalationsList;
+exports.escalationResolve = escalationsService.escalationResolve;
+
 // Assistant Wizard — chat-based assistant builder
 const assistantWizardService = require("./assistant_wizard_service.js");
 exports.wizardChat = assistantWizardService.wizardChat;

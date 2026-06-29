@@ -26,6 +26,7 @@ export const FEATURES: readonly FeatureDef[] = [
   // logic). Setting these to defaultOn:false hides them entirely and the
   // upgrade affordance never fires — that was the #52 inconsistency.
   { id: "module.campaigns", label: "Campaigns", defaultOn: true, kind: "nav" },
+  { id: "module.followups", label: "Follow-ups & Escalations", defaultOn: true, kind: "nav" },
   { id: "module.calendar", label: "Calendar", defaultOn: true, kind: "nav" },
   { id: "module.scenarios", label: "Scenarios", defaultOn: true, kind: "nav" },
   { id: "module.analytics", label: "Analytics", defaultOn: true, kind: "nav" },

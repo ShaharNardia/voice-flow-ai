@@ -32,6 +32,7 @@ import {
   FileText,
   Network,
   Headphones,
+  RefreshCw,
 } from "lucide-react";
 
 interface NavItem {
@@ -49,6 +50,7 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/calls", label: "Calls", icon: PhoneCall, featureId: "module.calls" },
   { href: "/leads", label: "Leads", icon: Users, featureId: "module.leads" },
   { href: "/campaigns", label: "Campaigns", icon: Megaphone, lockedFor: "campaigns", featureId: "module.campaigns" },
+  { href: "/followups", label: "Follow-ups", icon: RefreshCw, featureId: "module.followups" },
   // NLPearl removed — all NLPearl assistants now run on Gemini Live.
   { href: "/bench", label: "Bench", icon: BarChart3, featureId: "module.bench" },
   { href: "/calendar", label: "Calendar", icon: Calendar, lockedFor: "calendar", featureId: "module.calendar" },
