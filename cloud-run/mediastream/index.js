@@ -2983,6 +2983,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
            SPANISH_GOODBYE.test(tail);
   }
 
+  let scenarioRunner = null;   // set after the bridge is created if the call has a scenarioId
   const flushTranscript = (role) => {
     // Collapse runs of whitespace introduced by chunk concatenation, then trim.
     // Per-chunk whitespace must NOT be stripped (it carries inter-word spaces)
@@ -2992,6 +2993,10 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     if (!text) return;
     if (role === "user") _accumUser = ""; else _accumAsst = "";
     console.log(`[${callSessionId}] [GL] ${role} turn: "${text.slice(0, 160)}"`);
+    // Scenario branching: a complete caller turn drives gather/condition nodes.
+    if (role === "user" && scenarioRunner && !scenarioRunner.done) {
+      try { scenarioRunner.onUserTranscript(text); } catch (e) { console.warn(`[${callSessionId}] [SCN] onUserTranscript: ${e.message}`); }
+    }
     sessionRef.update({
       conversationHistory: FieldValue.arrayUnion({ role, content: text, timestamp: new Date().toISOString() }),
     }).catch(() => {});
@@ -3179,6 +3184,40 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     } : {}),
   });
   const copilotUnsub = attachCopilotInjectionWatcher(sessionRef, bridge, callSessionId);   // Co-Pilot live operator injection
+
+  // ── Scenario runner (parity with the Realtime path) ──────────────────────
+  // Gemini has no addConversationItem/triggerResponse-with-text, so wrap the
+  // bridge in a thin adapter the runner can drive: "say"/"ask"/"end" inject
+  // text the model speaks via promptModel; transfer/end emit _scenario_tool
+  // which we route to executeGeminiTool. Awaited here so scenarioRunner is set
+  // before the greeting can fire (which waits on streamStarted, set later).
+  if (data.scenarioId) {
+    try {
+      const scenDoc = await db.collection("scenarios").doc(String(data.scenarioId)).get();
+      if (scenDoc.exists) {
+        let _pendingSay = null;
+        const scnAdapter = {
+          addConversationItem(item) {
+            _pendingSay = (item?.content || []).map((c) => c.text).filter(Boolean).join(" ");
+          },
+          triggerResponse() {
+            const t = _pendingSay; _pendingSay = null;
+            if (t) bridge.promptModel(`Say the following to the caller now — verbatim and naturally, in the caller's language, then stop: "${t}"`);
+          },
+          emit: (...a) => bridge.emit(...a),
+          on: (...a) => bridge.on(...a),
+        };
+        scenarioRunner = new RealtimeScenarioRunner({
+          scenario: scenDoc.data(), bridge: scnAdapter, sessionRef, callSessionId,
+          initialContext: data.scenarioContext || {},
+        });
+        bridge.on("_scenario_tool", async ({ name, args }) => { try { await executeGeminiTool(name, args); } catch (_) {} });
+        console.log(`[${callSessionId}] [GL] Scenario loaded: ${scenDoc.data().name || data.scenarioId} (${(scenDoc.data().nodes || []).length} nodes)`);
+      }
+    } catch (e) {
+      console.error(`[${callSessionId}] [GL] Failed to load scenario ${data.scenarioId}: ${e.message}`);
+    }
+  }
 
   // Start the Gemini WS handshake now — the rest of the setup (tool
   // executors, Twilio handlers, etc.) runs synchronously while TCP+TLS+WS
@@ -3769,6 +3808,13 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     if (greetingTriggered || !bridgeReady || !streamStarted) return;
     greetingTriggered = true;
     const elapsed = Date.now() - callStartTime;
+    // If a scenario is attached, IT drives the first turn instead of the model's greeting.
+    if (scenarioRunner) {
+      console.log(`[${callSessionId}] [GL] Starting scenario (+${elapsed}ms)`);
+      if (hybridSTT) armBusy();
+      try { scenarioRunner.start(); } catch (e) { console.error(`[${callSessionId}] [SCN] start failed: ${e.message}`); }
+      return;
+    }
     console.log(`[${callSessionId}] [GL] Triggering greeting (+${elapsed}ms)`);
     bridge.triggerResponse();
     // HYBRID: the greeting is a model turn — mark busy so caller speech during
