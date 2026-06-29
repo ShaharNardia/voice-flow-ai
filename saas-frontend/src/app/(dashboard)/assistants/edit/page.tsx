@@ -2318,7 +2318,7 @@ function AssistantEdit() {
                     </div>
                     <p className="text-[11px] text-neutral-400 mb-3">
                       {isRealtime
-                        ? "Guide the voice session through a structured flow — the assistant follows nodes while still responding naturally."
+                        ? "Guide the live voice call through a structured flow — works on both OpenAI Realtime and Gemini Live. The assistant follows your nodes (say / ask / branch / API call) while still sounding natural. Use “Test” to try it, or attach a saved scenario below."
                         : "Execute a TwiML scenario flow — guides the call through predefined steps and branches."}
                     </p>
 
