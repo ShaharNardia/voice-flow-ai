@@ -208,6 +208,11 @@ exports.campaignsCreate  = leadsService.campaignsCreate;
 exports.campaignsList    = leadsService.campaignsList;
 exports.campaignStart    = leadsService.campaignStart;
 exports.campaignPause    = leadsService.campaignPause;
+exports.campaignsUpdate  = leadsService.campaignsUpdate;
+
+// Scheduled outbound campaign dialer (Phase B) — auto-dials running+autoDial campaigns in their window.
+const campaignScheduler = require("./campaign_scheduler.js");
+exports.dispatchCampaigns = campaignScheduler.dispatchCampaigns;
 exports.appointmentsList = leadsService.appointmentsList;
 
 // Admin Service
@@ -236,10 +241,21 @@ const appointmentsService = require("./appointments_service.js");
 exports.bookingsCreate = appointmentsService.bookingsCreate;
 exports.bookingsList   = appointmentsService.bookingsList;
 exports.bookingsCancel = appointmentsService.bookingsCancel;
+exports.bookingsUpdate = appointmentsService.bookingsUpdate;
 
 // Reminders Service — scheduled cron firing invite + reminder emails
 const remindersService = require("./reminders_service.js");
 exports.dispatchReminders = remindersService.dispatchReminders;
+
+// Automatic follow-up calls — re-dials unresolved campaign leads (business hours, capped).
+const followupsService = require("./followups_service.js");
+exports.dispatchFollowups = followupsService.dispatchFollowups;
+
+// Follow-ups / Escalations dashboard — read the queue + open escalations, resolve.
+const escalationsService = require("./escalations_service.js");
+exports.followupsList     = escalationsService.followupsList;
+exports.escalationsList   = escalationsService.escalationsList;
+exports.escalationResolve = escalationsService.escalationResolve;
 
 // Assistant Wizard — chat-based assistant builder
 const assistantWizardService = require("./assistant_wizard_service.js");

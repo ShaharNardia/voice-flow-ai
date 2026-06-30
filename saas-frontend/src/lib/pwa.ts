@@ -61,12 +61,12 @@ export function registerServiceWorker() {
     // scope fix alone doesn't help them. Tear down every root-scope
     // registration once (guarded), then register cleanly below.
     try {
-      if (!localStorage.getItem("vf_sw_cleanup_v5")) {
+      if (!localStorage.getItem("vf_sw_cleanup_v6")) {
         const regs = await navigator.serviceWorker.getRegistrations().catch(() => [] as ServiceWorkerRegistration[]);
         await Promise.all(
           regs.filter((r) => r.scope === location.origin + "/").map((r) => r.unregister().catch(() => false)),
         );
-        localStorage.setItem("vf_sw_cleanup_v5", "1");
+        localStorage.setItem("vf_sw_cleanup_v6", "1");
       }
     } catch { /* non-fatal */ }
 

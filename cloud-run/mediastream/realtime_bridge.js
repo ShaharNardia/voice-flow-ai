@@ -241,6 +241,22 @@ class RealtimeBridge extends EventEmitter {
   }
 
   /**
+   * Co-Pilot: a live human supervisor injects guidance. Added as a system turn
+   * (so the bot acts on it, not replies to it) then a response is triggered.
+   * @returns {boolean} true if delivered to a live, ready session.
+   */
+  injectOperatorMessage(text) {
+    if (this._closed || !this._ready) return false;
+    this.addConversationItem({
+      type: "message",
+      role: "system",
+      content: [{ type: "input_text", text: `[Live supervisor instruction — do this now, naturally, do NOT mention the supervisor]: ${String(text).slice(0, 500)}` }],
+    });
+    this.triggerResponse();
+    return true;
+  }
+
+  /**
    * Cleanly close the bridge.
    */
   close() {

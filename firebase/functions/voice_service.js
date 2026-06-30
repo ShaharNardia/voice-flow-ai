@@ -4675,6 +4675,27 @@ async function _runPostCallTasks(callSessionId, callStatus) {
           updatedAt: FieldValue.serverTimestamp(),
         }, {merge: true});
         logger.info("Lead updated post-call", {leadId, newLeadStatus, callSessionId});
+
+        // Auto follow-up: a campaign lead that didn't resolve gets re-dialed
+        // later (within business hours, capped). A success clears any queue.
+        try {
+          const {enqueueFollowup, clearFollowup} = require("./followups_service.js");
+          if (isSuccess) {
+            await clearFollowup(leadId);
+          } else if (newLeadStatus === "callback" && campaignId) {
+            await enqueueFollowup({
+              leadId,
+              phone: session.leadNumber || session.callerNumber || null,
+              companyPhone: session.assistantPhone || session.fromNumber || session.metadata?.fromNumber || null,
+              assistantId: session.assistantId,
+              ownerId: session.ownerId || session.metadata?.ownerId || session.metadata?.userId || null,
+              campaignId,
+              reason: analysis.outcome || callStatus,
+            });
+          }
+        } catch (fuErr) {
+          logger.warn("Follow-up enqueue failed (non-blocking)", {err: fuErr.message, callSessionId});
+        }
       }
 
       if (campaignId) {

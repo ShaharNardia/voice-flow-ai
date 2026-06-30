@@ -1963,6 +1963,7 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
     maxResponseTokens: rtMaxTokens,
   });
   console.log(`[${callSessionId}] [RT] voice=${realtimeVoice} lang=${inputLanguage} VAD=${vadMode}/${vadSensitivity} temp=${rtTemperature} maxTokens=${rtMaxTokens}`);
+  const copilotUnsub = attachCopilotInjectionWatcher(sessionRef, bridge, callSessionId);   // Co-Pilot live operator injection
 
   // Session state
   let streamSid = null;
@@ -2553,6 +2554,7 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
 
   bridge.on("close", () => {
     console.log(`[${callSessionId}] [RT] Bridge closed`);
+    if (copilotUnsub) try { copilotUnsub(); } catch (_) {}
   });
 
   // Activity tracker for stuck-call watchdog (declared early so handlers can use it)
@@ -2981,6 +2983,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
            SPANISH_GOODBYE.test(tail);
   }
 
+  let scenarioRunner = null;   // set after the bridge is created if the call has a scenarioId
   const flushTranscript = (role) => {
     // Collapse runs of whitespace introduced by chunk concatenation, then trim.
     // Per-chunk whitespace must NOT be stripped (it carries inter-word spaces)
@@ -2990,6 +2993,10 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     if (!text) return;
     if (role === "user") _accumUser = ""; else _accumAsst = "";
     console.log(`[${callSessionId}] [GL] ${role} turn: "${text.slice(0, 160)}"`);
+    // Scenario branching: a complete caller turn drives gather/condition nodes.
+    if (role === "user" && scenarioRunner && !scenarioRunner.done) {
+      try { scenarioRunner.onUserTranscript(text); } catch (e) { console.warn(`[${callSessionId}] [SCN] onUserTranscript: ${e.message}`); }
+    }
     sessionRef.update({
       conversationHistory: FieldValue.arrayUnion({ role, content: text, timestamp: new Date().toISOString() }),
     }).catch(() => {});
@@ -3176,6 +3183,41 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       disableThinking: true,
     } : {}),
   });
+  const copilotUnsub = attachCopilotInjectionWatcher(sessionRef, bridge, callSessionId);   // Co-Pilot live operator injection
+
+  // ── Scenario runner (parity with the Realtime path) ──────────────────────
+  // Gemini has no addConversationItem/triggerResponse-with-text, so wrap the
+  // bridge in a thin adapter the runner can drive: "say"/"ask"/"end" inject
+  // text the model speaks via promptModel; transfer/end emit _scenario_tool
+  // which we route to executeGeminiTool. Awaited here so scenarioRunner is set
+  // before the greeting can fire (which waits on streamStarted, set later).
+  if (data.scenarioId) {
+    try {
+      const scenDoc = await db.collection("scenarios").doc(String(data.scenarioId)).get();
+      if (scenDoc.exists) {
+        let _pendingSay = null;
+        const scnAdapter = {
+          addConversationItem(item) {
+            _pendingSay = (item?.content || []).map((c) => c.text).filter(Boolean).join(" ");
+          },
+          triggerResponse() {
+            const t = _pendingSay; _pendingSay = null;
+            if (t) bridge.promptModel(`Say the following to the caller now — verbatim and naturally, in the caller's language, then stop: "${t}"`);
+          },
+          emit: (...a) => bridge.emit(...a),
+          on: (...a) => bridge.on(...a),
+        };
+        scenarioRunner = new RealtimeScenarioRunner({
+          scenario: scenDoc.data(), bridge: scnAdapter, sessionRef, callSessionId,
+          initialContext: data.scenarioContext || {},
+        });
+        bridge.on("_scenario_tool", async ({ name, args }) => { try { await executeGeminiTool(name, args); } catch (_) {} });
+        console.log(`[${callSessionId}] [GL] Scenario loaded: ${scenDoc.data().name || data.scenarioId} (${(scenDoc.data().nodes || []).length} nodes)`);
+      }
+    } catch (e) {
+      console.error(`[${callSessionId}] [GL] Failed to load scenario ${data.scenarioId}: ${e.message}`);
+    }
+  }
 
   // Start the Gemini WS handshake now — the rest of the setup (tool
   // executors, Twilio handlers, etc.) runs synchronously while TCP+TLS+WS
@@ -3620,6 +3662,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
   bridge.on("close", async () => {
     console.log(`[${callSessionId}] [GL] Bridge closed`);
+    if (copilotUnsub) try { copilotUnsub(); } catch (_) {}
     const durationSec = Math.round((Date.now() - callStartTime) / 1000);
 
     // Mode-3 one-way-audio detector: the stream started and the call lasted a
@@ -3765,6 +3808,13 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     if (greetingTriggered || !bridgeReady || !streamStarted) return;
     greetingTriggered = true;
     const elapsed = Date.now() - callStartTime;
+    // If a scenario is attached, IT drives the first turn instead of the model's greeting.
+    if (scenarioRunner) {
+      console.log(`[${callSessionId}] [GL] Starting scenario (+${elapsed}ms)`);
+      if (hybridSTT) armBusy();
+      try { scenarioRunner.start(); } catch (e) { console.error(`[${callSessionId}] [SCN] start failed: ${e.message}`); }
+      return;
+    }
     console.log(`[${callSessionId}] [GL] Triggering greeting (+${elapsed}ms)`);
     bridge.triggerResponse();
     // HYBRID: the greeting is a model turn — mark busy so caller speech during
@@ -5649,8 +5699,64 @@ This applies to ALL languages. Never use digits in your response.`;
 
 const copilotSessions = new Map(); // sessionId → Set<SSE res objects>
 
+// Co-Pilot live injection: a live session watches ITS OWN call_session doc for
+// copilotInjections (written by /copilot-inject) and delivers each new entry to
+// the bridge. Firestore is the channel so it works even when the inject HTTP
+// lands on a different Cloud Run instance than the one hosting the call's WS
+// (maxScale>1). Dedup is in-memory per session; only mark delivered on success
+// so an injection that arrives before the bridge is ready retries on the next
+// snapshot. Returns an unsubscribe fn.
+function attachCopilotInjectionWatcher(sessionRef, bridge, callSessionId) {
+  const delivered = new Set();
+  try {
+    return sessionRef.onSnapshot((snap) => {
+      if (!snap.exists) return;
+      for (const inj of (snap.data().copilotInjections || [])) {
+        const key = inj.injectedAt || JSON.stringify(inj);
+        if (delivered.has(key)) continue;
+        try {
+          if (bridge.injectOperatorMessage(inj.message) === true) {
+            delivered.add(key);
+            console.log(`[${callSessionId}] [COPILOT] live inject delivered: "${String(inj.message).slice(0, 60)}"`);
+          }
+        } catch (e) { console.warn(`[${callSessionId}] [COPILOT] inject delivery error: ${e.message}`); }
+      }
+    }, (err) => console.warn(`[${callSessionId}] [COPILOT] injection watcher error: ${err.message}`));
+  } catch (e) {
+    console.warn(`[${callSessionId}] [COPILOT] could not attach injection watcher: ${e.message}`);
+    return null;
+  }
+}
+
+// Authorize a Co-Pilot request: the caller must own the call session (or be a
+// super_admin). EventSource can't send headers, so the stream takes the Firebase
+// ID token as ?token=; the inject endpoint also accepts an Authorization Bearer.
+const { getAuth } = require("firebase-admin/auth");
+async function verifyCopilotAccess(token, sessionId) {
+  if (!token || !sessionId) return { ok: false, code: 401, reason: "auth required" };
+  let uid;
+  try { uid = (await getAuth().verifyIdToken(String(token))).uid; }
+  catch (_) { return { ok: false, code: 401, reason: "invalid token" }; }
+  try {
+    const db = getFirestore();
+    const snap = await db.collection("call_sessions").doc(String(sessionId)).get();
+    if (!snap.exists) return { ok: false, code: 404, reason: "session not found" };
+    if ((snap.data().ownerId || null) === uid) return { ok: true, uid };
+    const u = await db.collection("users").doc(uid).get();
+    if (u.exists && u.data().role === "super_admin") return { ok: true, uid };
+    return { ok: false, code: 403, reason: "forbidden" };
+  } catch (e) { return { ok: false, code: 500, reason: e.message }; }
+}
+
 // Register a new Co-Pilot listener
 app.get("/copilot-stream", async (req, res) => {
+  // Authorize BEFORE writing SSE headers (so we can still return a 4xx).
+  const sessionId = req.query.sessionId;
+  const access = await verifyCopilotAccess(req.query.token, sessionId);
+  if (!access.ok) {
+    res.set("Access-Control-Allow-Origin", req.headers.origin || "*");
+    return res.status(access.code).json({ error: access.reason });
+  }
   res.set({
     "Content-Type":  "text/event-stream",
     "Cache-Control": "no-cache",
@@ -5659,13 +5765,6 @@ app.get("/copilot-stream", async (req, res) => {
     "X-Accel-Buffering": "no",       // Disable nginx buffering
   });
   res.flushHeaders();
-
-  const sessionId = req.query.sessionId;
-  if (!sessionId) {
-    res.write(`data: ${JSON.stringify({type:"error", message:"sessionId required"})}\n\n`);
-    res.end();
-    return;
-  }
 
   // Register this SSE connection
   if (!copilotSessions.has(sessionId)) copilotSessions.set(sessionId, new Set());
@@ -5809,6 +5908,10 @@ app.post("/copilot-inject", express.json(), async (req, res) => {
   if (!sessionId || !message) {
     return res.status(400).json({status: "error", message: "sessionId and message required"});
   }
+  // Authorize: Bearer header or body.token, must own the session (or super_admin).
+  const bearer = (req.get("authorization") || "").replace(/^Bearer\s+/i, "");
+  const access = await verifyCopilotAccess(bearer || req.body.token, sessionId);
+  if (!access.ok) return res.status(access.code).json({ status: "error", message: access.reason });
 
   try {
     const db = getFirestore();
@@ -5821,9 +5924,11 @@ app.post("/copilot-inject", express.json(), async (req, res) => {
       updatedAt: FieldValue.serverTimestamp(),
     }, {merge: true});
 
-    // Notify all listeners on this session that an injection happened
+    // The Firestore write above IS the delivery channel: the live session
+    // (possibly on another Cloud Run instance) watches its call_session doc and
+    // feeds new injections to the bot. Instance-agnostic by design.
     pushCopilotEvent(sessionId, {type: "injection_ack", message, timestamp: new Date().toISOString()});
-    res.json({status: "ok", message: "Injected"});
+    res.json({status: "ok", message: "Sent to the live call"});
   } catch (e) {
     console.error(`[COPILOT] Inject failed for ${sessionId}:`, e.message);
     res.status(500).json({status: "error", message: e.message});

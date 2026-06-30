@@ -189,7 +189,7 @@ exports.campaignsCreate = onRequest(corsOptions, async (req, res) => {
   if (!uid) return;
 
   const db = getFirestore();
-  const {name, assistantId, fromNumber, description} = req.body || {};
+  const {name, assistantId, fromNumber, description, autoDial, callWindowStart, callWindowEnd, timezone, batchSize} = req.body || {};
   if (!name || !assistantId || !fromNumber) {
     return res.status(400).json({status: "error", message: "name, assistantId, fromNumber required"});
   }
@@ -220,6 +220,14 @@ exports.campaignsCreate = onRequest(corsOptions, async (req, res) => {
     calledCount: 0,
     successCount: 0,
     failedCount: 0,
+    // Scheduled auto-dialer (Phase B): when autoDial is on and status is
+    // "running", dispatchCampaigns dials the next batch every 5 min, but ONLY
+    // inside [callWindowStart, callWindowEnd) in the campaign's timezone.
+    autoDial: autoDial === true,
+    callWindowStart: Number.isFinite(callWindowStart) ? Math.max(0, Math.min(23, callWindowStart)) : 9,
+    callWindowEnd: Number.isFinite(callWindowEnd) ? Math.max(1, Math.min(24, callWindowEnd)) : 20,
+    timezone: (typeof timezone === "string" && timezone) ? timezone : "Asia/Jerusalem",
+    batchSize: Number.isFinite(batchSize) ? Math.max(1, Math.min(20, batchSize)) : 5,
     ownerId: uid,
     createdAt: now,
     updatedAt: now,
@@ -377,6 +385,43 @@ exports.campaignPause = onRequest(corsOptions, async (req, res) => {
     {merge: true},
   );
   res.json({status: "paused"});
+});
+
+/**
+ * POST /campaignsUpdate
+ * Body: { campaignId, ...fields }  — edit scheduling/auto-dial settings.
+ * Whitelisted fields only; ownership enforced.
+ */
+exports.campaignsUpdate = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({status: "error", message: "Method not allowed"}); return; }
+  const uid = await requireAuth(req, res);
+  if (!uid) return;
+
+  const db = getFirestore();
+  const {campaignId} = req.body || {};
+  if (!campaignId) return res.status(400).json({status: "error", message: "campaignId required"});
+  const ref = db.collection("campaigns").doc(campaignId);
+  const snap = await ref.get();
+  if (!snap.exists || snap.data().ownerId !== uid) {
+    return res.status(404).json({status: "error", message: "Campaign not found"});
+  }
+
+  const b = req.body || {};
+  const upd = {updatedAt: FieldValue.serverTimestamp()};
+  if (typeof b.name === "string") upd.name = b.name.trim();
+  if (typeof b.description === "string") upd.description = b.description.trim();
+  if (typeof b.assistantId === "string") upd.assistantId = b.assistantId;
+  if (typeof b.fromNumber === "string") upd.fromNumber = b.fromNumber;
+  if (typeof b.autoDial === "boolean") upd.autoDial = b.autoDial;
+  if (Number.isFinite(b.callWindowStart)) upd.callWindowStart = Math.max(0, Math.min(23, b.callWindowStart));
+  if (Number.isFinite(b.callWindowEnd)) upd.callWindowEnd = Math.max(1, Math.min(24, b.callWindowEnd));
+  if (typeof b.timezone === "string" && b.timezone) upd.timezone = b.timezone;
+  if (Number.isFinite(b.batchSize)) upd.batchSize = Math.max(1, Math.min(20, b.batchSize));
+
+  await ref.set(upd, {merge: true});
+  res.json({status: "success", id: campaignId});
+  logActivity({userId: uid, action: "campaign.update", category: "campaign", resourceType: "campaign", resourceId: campaignId}).catch(() => {});
 });
 
 // â”€â”€ Appointments â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€

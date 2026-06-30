@@ -111,6 +111,25 @@ export const assistantVoiceReplay = (data: {
 export const assistantsDelete = (data: { id: string }) =>
   httpPost<{ status: string }>("/assistantsDelete", data);
 
+// ── Follow-ups & Escalations ──────────────────────────────────────────
+export interface FollowupItem {
+  id: string; leadId: string; phone: string; assistantId: string;
+  campaignId?: string | null; reason?: string;
+  attemptCount: number; maxAttempts: number;
+  status: "pending" | "calling" | "done" | "exhausted";
+  nextAttemptAt?: { _seconds?: number } | string | number; timezone?: string;
+}
+export interface EscalationItem {
+  id: string; leadId: string; phone?: string | null; assistantId?: string | null;
+  campaignId?: string | null; reason: string; attempts: number;
+  status: "open" | "resolved" | "escalated"; notes?: string | null;
+  createdAt?: { _seconds?: number } | string | number;
+}
+export const followupsList   = () => httpGet<FollowupItem[]>("/followupsList");
+export const escalationsList = () => httpGet<EscalationItem[]>("/escalationsList");
+export const escalationResolve = (data: { leadId: string; notes?: string }) =>
+  httpPost<{ status: string; id: string }>("/escalationResolve", data);
+
 export const assistantsDuplicate = (data: { id: string; name?: string }) =>
   httpPost<{ id: string; name: string }>("/assistantsDuplicate", data);
 
@@ -263,6 +282,8 @@ export const bookingsCreate = (data: { title: string; startAt: string; endAt: st
   httpPost<{ id: string; startAt: string; endAt: string }>("/bookingsCreate", data);
 export const bookingsCancel = (id: string) =>
   httpPost<{ ok: boolean }>("/bookingsCancel", { id });
+export const bookingsUpdate = (data: { id: string; title?: string; startAt?: string; endAt?: string; attendeeName?: string; attendeeEmail?: string; attendeePhone?: string; location?: string; notes?: string; timezone?: string; status?: string }) =>
+  httpPost<{ ok: boolean; id: string }>("/bookingsUpdate", data);
 
 // AI Assistant Wizard
 export interface WizardState {
@@ -699,8 +720,16 @@ export const leadsUpdate = (data: { id: string } & Partial<Lead>) =>
 export const leadsDelete = (data: { id: string }) =>
   httpPost<{ status: string }>("/leadsDelete", data);
 
-export const campaignsCreate = (data: { name: string; assistantId: string; fromNumber: string; description?: string }) =>
-  httpPost<Campaign>("/campaignsCreate", data);
+export const campaignsCreate = (data: {
+  name: string; assistantId: string; fromNumber: string; description?: string;
+  autoDial?: boolean; callWindowStart?: number; callWindowEnd?: number; timezone?: string; batchSize?: number;
+}) => httpPost<Campaign>("/campaignsCreate", data);
+
+export const campaignsUpdate = (data: {
+  campaignId: string;
+  autoDial?: boolean; callWindowStart?: number; callWindowEnd?: number; timezone?: string; batchSize?: number;
+  name?: string; description?: string; assistantId?: string; fromNumber?: string;
+}) => httpPost<{ status: string; id: string }>("/campaignsUpdate", data);
 
 export const campaignsList = () =>
   httpGet<Campaign[]>("/campaignsList");
@@ -1453,6 +1482,11 @@ export interface Campaign {
   calledCount: number;
   successCount: number;
   failedCount: number;
+  autoDial?: boolean;
+  callWindowStart?: number;
+  callWindowEnd?: number;
+  timezone?: string;
+  batchSize?: number;
   ownerId?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
