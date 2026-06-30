@@ -206,4 +206,49 @@ exports.bookingsCancel = onRequest(corsOptions, async (req, res) => {
   }
 });
 
+/**
+ * POST /bookingsUpdate  { id, ...fields }  — edit a manually-managed appointment.
+ * Whitelisted fields; ownership enforced; validates time ordering if both given.
+ */
+exports.bookingsUpdate = onRequest(corsOptions, async (req, res) => {
+  if (req.method === "OPTIONS") { res.status(204).send(""); return; }
+  if (req.method !== "POST") { res.status(405).json({error: "Method not allowed"}); return; }
+  const uid = await extractUidFromRequest(req);
+  if (!uid) { res.status(401).json({error: "Unauthorized"}); return; }
+  if (!(await requireFeature(req, res, uid, "cap.appointments"))) return;
+
+  try {
+    const body = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
+    const id = body.id;
+    if (!id) { res.status(400).json({error: "id required"}); return; }
+    const db = getFirestore();
+    const ref = db.collection("appointments").doc(String(id));
+    const snap = await ref.get();
+    if (!snap.exists) { res.status(404).json({error: "Not found"}); return; }
+    if (snap.data().ownerId !== uid) { res.status(403).json({error: "Forbidden"}); return; }
+
+    const cur = snap.data();
+    const upd = {updatedAt: FieldValue.serverTimestamp()};
+    if (typeof body.title === "string" && body.title.trim()) upd.title = body.title.trim();
+    if (body.startAt != null) { const s = new Date(body.startAt); if (isNaN(+s)) { res.status(400).json({error: "startAt invalid"}); return; } upd.startAt = s; }
+    if (body.endAt != null) { const e = new Date(body.endAt); if (isNaN(+e)) { res.status(400).json({error: "endAt invalid"}); return; } upd.endAt = e; }
+    for (const f of ["attendeeName", "attendeeEmail", "attendeePhone", "location", "notes", "timezone"]) {
+      if (typeof body[f] === "string") upd[f] = body[f];
+    }
+    if (typeof body.status === "string" && ["scheduled", "cancelled", "completed"].includes(body.status)) upd.status = body.status;
+
+    const finalStart = upd.startAt || cur.startAt?.toDate?.() || cur.startAt;
+    const finalEnd = upd.endAt || cur.endAt?.toDate?.() || cur.endAt;
+    if (finalStart && finalEnd && +new Date(finalEnd) <= +new Date(finalStart)) {
+      res.status(400).json({error: "endAt must be after startAt"}); return;
+    }
+
+    await ref.set(upd, {merge: true});
+    res.status(200).json({ok: true, id: String(id)});
+  } catch (e) {
+    logger.error("bookingsUpdate failed", e);
+    res.status(500).json({error: "Failed"});
+  }
+});
+
 exports.createAppointmentInternal = createAppointmentInternal;

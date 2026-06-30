@@ -282,6 +282,8 @@ export const bookingsCreate = (data: { title: string; startAt: string; endAt: st
   httpPost<{ id: string; startAt: string; endAt: string }>("/bookingsCreate", data);
 export const bookingsCancel = (id: string) =>
   httpPost<{ ok: boolean }>("/bookingsCancel", { id });
+export const bookingsUpdate = (data: { id: string; title?: string; startAt?: string; endAt?: string; attendeeName?: string; attendeeEmail?: string; attendeePhone?: string; location?: string; notes?: string; timezone?: string; status?: string }) =>
+  httpPost<{ ok: boolean; id: string }>("/bookingsUpdate", data);
 
 // AI Assistant Wizard
 export interface WizardState {

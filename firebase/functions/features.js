@@ -22,7 +22,7 @@ const FEATURES = [
   {id: "cap.customApiTools", label: "Custom API Tools (assistant)", defaultOn: false, kind: "cap"},
   {id: "cap.knowledgeBase", label: "Knowledge Base upload", defaultOn: true, kind: "cap"},
   {id: "cap.assistantWizard", label: "AI assistant wizard", defaultOn: true, kind: "cap"},
-  {id: "cap.appointments", label: "Assistant booking tool", defaultOn: false, kind: "cap"},
+  {id: "cap.appointments", label: "Assistant booking tool", defaultOn: true, kind: "cap"},
   {id: "cap.calendarInvites", label: "Send ICS/calendar invites", defaultOn: true, kind: "cap"},
   {id: "cap.scheduleReminders", label: "Lesson/appointment reminders", defaultOn: true, kind: "cap"},
   {id: "cap.pwaPush", label: "PWA install + push notifications", defaultOn: false, kind: "cap"},

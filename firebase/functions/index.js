@@ -241,6 +241,7 @@ const appointmentsService = require("./appointments_service.js");
 exports.bookingsCreate = appointmentsService.bookingsCreate;
 exports.bookingsList   = appointmentsService.bookingsList;
 exports.bookingsCancel = appointmentsService.bookingsCancel;
+exports.bookingsUpdate = appointmentsService.bookingsUpdate;
 
 // Reminders Service — scheduled cron firing invite + reminder emails
 const remindersService = require("./reminders_service.js");

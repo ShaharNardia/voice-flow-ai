@@ -4,9 +4,15 @@ import { useState, useEffect, useCallback } from "react";
 import {
   appointmentsList,
   assistantsList,
+  bookingsList,
+  bookingsCreate,
+  bookingsUpdate,
+  bookingsCancel,
   type Appointment,
   type Assistant,
+  type BookingAppointment,
 } from "@/lib/firebase-functions";
+import { useFeatures } from "@/lib/features";
 import { formatPhone } from "@/lib/utils";
 import {
   ChevronLeft,
@@ -18,6 +24,12 @@ import {
   Bot,
   ExternalLink,
   X,
+  Plus,
+  Pencil,
+  Trash2,
+  Loader2,
+  MapPin,
+  Mail,
 } from "lucide-react";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -246,6 +258,237 @@ function DetailPopover({ appt, assistants, onClose }: DetailPopoverProps) {
   );
 }
 
+// ── Manual bookings (appointments collection) ─────────────────────────────────
+
+// ISO string → value for <input type="datetime-local"> (local wall-clock time).
+function toLocalInput(iso?: string): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
+function bookingTimeLabel(b: BookingAppointment): string {
+  const s = new Date(b.startAt);
+  if (isNaN(s.getTime())) return "";
+  return s.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
+function BookingChip({ booking, onClick }: { booking: BookingAppointment; onClick: (b: BookingAppointment) => void }) {
+  const cancelled = booking.status === "cancelled";
+  return (
+    <button
+      onClick={() => onClick(booking)}
+      title={booking.title}
+      className={`w-full text-left px-1.5 py-0.5 rounded text-xs font-medium truncate leading-5 border transition-opacity hover:opacity-80 ${
+        cancelled
+          ? "bg-neutral-100 text-neutral-400 border-neutral-200 line-through"
+          : "bg-[#F22F46]/10 text-[#B91C2C] border-[#F22F46]/30"
+      }`}
+    >
+      <span>{booking.title || "Appointment"}</span>
+      <span className="opacity-70 ml-1">{bookingTimeLabel(booking)}</span>
+    </button>
+  );
+}
+
+function BookingDetail({
+  booking, assistants, onClose, onEdit, onCancelled,
+}: {
+  booking: BookingAppointment;
+  assistants: Assistant[];
+  onClose: () => void;
+  onEdit: (b: BookingAppointment) => void;
+  onCancelled: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const assistant = assistants.find((a) => a.id === booking.assistantId);
+  const start = new Date(booking.startAt);
+  const end = new Date(booking.endAt);
+  const when = !isNaN(start.getTime())
+    ? `${start.toLocaleDateString()} · ${start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` +
+      (!isNaN(end.getTime()) ? `–${end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}` : "")
+    : "";
+
+  async function cancel() {
+    if (!confirm("Cancel this appointment? The attendee will keep any prior invite — this only marks it cancelled here.")) return;
+    setBusy(true);
+    try { await bookingsCancel(booking.id); onCancelled(); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={onClose}>
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-md mx-4 p-6" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600" aria-label="Close"><X className="w-4 h-4" /></button>
+        <h3 className="text-base font-semibold text-neutral-900 pr-6">{booking.title || "Appointment"}</h3>
+        {booking.status === "cancelled" && <span className="inline-block mt-1 text-xs font-medium text-neutral-500 bg-neutral-100 rounded-full px-2 py-0.5">Cancelled</span>}
+
+        <div className="mt-4 space-y-3 text-sm text-neutral-700">
+          {when && <div className="flex items-center gap-2"><Clock className="w-4 h-4 text-neutral-400" /><span>{when}</span></div>}
+          {booking.attendeeName && <div className="flex items-center gap-2"><User className="w-4 h-4 text-neutral-400" /><span>{booking.attendeeName}</span></div>}
+          {booking.attendeePhone && <div className="flex items-center gap-2"><Phone className="w-4 h-4 text-neutral-400" /><span>{formatPhone(booking.attendeePhone)}</span></div>}
+          {booking.attendeeEmail && <div className="flex items-center gap-2"><Mail className="w-4 h-4 text-neutral-400" /><span>{booking.attendeeEmail}</span></div>}
+          {booking.location && <div className="flex items-center gap-2"><MapPin className="w-4 h-4 text-neutral-400" /><span>{booking.location}</span></div>}
+          {assistant && <div className="flex items-center gap-2"><Bot className="w-4 h-4 text-neutral-400" /><span>{assistant.name || assistant.assistantName || assistant.id}</span></div>}
+          {booking.notes && (
+            <div>
+              <p className="text-xs font-medium text-neutral-500 uppercase tracking-wide mb-1">Notes</p>
+              <div className="bg-neutral-100 rounded-lg px-3 py-2 text-xs text-neutral-600 leading-relaxed whitespace-pre-wrap">{booking.notes}</div>
+            </div>
+          )}
+        </div>
+
+        {booking.status !== "cancelled" && (
+          <div className="mt-5 pt-4 border-t border-neutral-100 flex items-center gap-2">
+            <button onClick={() => onEdit(booking)} className="inline-flex items-center gap-1.5 text-sm font-medium text-neutral-700 bg-neutral-100 hover:bg-neutral-200 rounded-lg px-3 py-1.5">
+              <Pencil className="w-3.5 h-3.5" /> Edit
+            </button>
+            <button onClick={cancel} disabled={busy} className="inline-flex items-center gap-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg px-3 py-1.5 disabled:opacity-60">
+              {busy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />} Cancel appointment
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function BookingModal({
+  editing, assistants, defaultDate, onClose, onSaved,
+}: {
+  editing: BookingAppointment | null;
+  assistants: Assistant[];
+  defaultDate: Date;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const seedStart = editing
+    ? toLocalInput(editing.startAt)
+    : toLocalInput(new Date(defaultDate.getFullYear(), defaultDate.getMonth(), defaultDate.getDate(), 10, 0).toISOString());
+  const seedEnd = editing
+    ? toLocalInput(editing.endAt)
+    : toLocalInput(new Date(defaultDate.getFullYear(), defaultDate.getMonth(), defaultDate.getDate(), 10, 30).toISOString());
+
+  const [title, setTitle] = useState(editing?.title || "");
+  const [startAt, setStartAt] = useState(seedStart);
+  const [endAt, setEndAt] = useState(seedEnd);
+  const [attendeeName, setAttendeeName] = useState(editing?.attendeeName || "");
+  const [attendeePhone, setAttendeePhone] = useState(editing?.attendeePhone || "");
+  const [attendeeEmail, setAttendeeEmail] = useState(editing?.attendeeEmail || "");
+  const [location, setLocation] = useState(editing?.location || "");
+  const [notes, setNotes] = useState(editing?.notes || "");
+  const [assistantId, setAssistantId] = useState(editing?.assistantId || "");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  // Keep end ≥ start: when start moves past end, push end to start + 30 min.
+  function onStartChange(v: string) {
+    setStartAt(v);
+    if (v && (!endAt || endAt <= v)) {
+      const d = new Date(v);
+      if (!isNaN(d.getTime())) setEndAt(toLocalInput(new Date(d.getTime() + 30 * 60000).toISOString()));
+    }
+  }
+
+  async function submit() {
+    setError("");
+    if (!title.trim()) return setError("Title is required.");
+    if (!startAt || !endAt) return setError("Start and end time are required.");
+    const s = new Date(startAt), e = new Date(endAt);
+    if (isNaN(+s) || isNaN(+e)) return setError("Invalid date/time.");
+    if (+e <= +s) return setError("End must be after start.");
+    setSaving(true);
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    try {
+      if (editing) {
+        await bookingsUpdate({
+          id: editing.id, title: title.trim(), startAt: s.toISOString(), endAt: e.toISOString(),
+          attendeeName, attendeePhone, attendeeEmail, location, notes, timezone: tz,
+        });
+      } else {
+        await bookingsCreate({
+          title: title.trim(), startAt: s.toISOString(), endAt: e.toISOString(),
+          attendeeName, attendeePhone, attendeeEmail, location, notes, timezone: tz,
+          assistantId: assistantId || undefined,
+        });
+      }
+      onSaved();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to save.");
+      setSaving(false);
+    }
+  }
+
+  const inputCls = "w-full border border-neutral-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#F22F46]/30 focus:border-[#F22F46]";
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={onClose}>
+      <div className="relative bg-white rounded-2xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-y-auto p-6" onClick={(e) => e.stopPropagation()}>
+        <button onClick={onClose} className="absolute top-4 right-4 text-neutral-400 hover:text-neutral-600" aria-label="Close"><X className="w-4 h-4" /></button>
+        <h3 className="text-base font-semibold text-neutral-900">{editing ? "Edit appointment" : "New appointment"}</h3>
+
+        <div className="mt-4 space-y-3">
+          <div>
+            <label className="block text-xs font-medium text-neutral-500 mb-1">Title *</label>
+            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="e.g. Eye exam — Mr. Cohen" className={inputCls} />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-neutral-500 mb-1">Start *</label>
+              <input type="datetime-local" value={startAt} onChange={(e) => onStartChange(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-neutral-500 mb-1">End *</label>
+              <input type="datetime-local" value={endAt} onChange={(e) => setEndAt(e.target.value)} className={inputCls} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-neutral-500 mb-1">Attendee name</label>
+              <input value={attendeeName} onChange={(e) => setAttendeeName(e.target.value)} className={inputCls} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-neutral-500 mb-1">Phone</label>
+              <input value={attendeePhone} onChange={(e) => setAttendeePhone(e.target.value)} className={inputCls} />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-neutral-500 mb-1">Email (sends a calendar invite)</label>
+            <input type="email" value={attendeeEmail} onChange={(e) => setAttendeeEmail(e.target.value)} className={inputCls} />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-neutral-500 mb-1">Location</label>
+            <input value={location} onChange={(e) => setLocation(e.target.value)} className={inputCls} />
+          </div>
+          {!editing && assistants.length > 0 && (
+            <div>
+              <label className="block text-xs font-medium text-neutral-500 mb-1">Assistant (optional)</label>
+              <select value={assistantId} onChange={(e) => setAssistantId(e.target.value)} className={inputCls}>
+                <option value="">— None —</option>
+                {assistants.map((a) => <option key={a.id} value={a.id}>{a.name || a.assistantName || a.id}</option>)}
+              </select>
+            </div>
+          )}
+          <div>
+            <label className="block text-xs font-medium text-neutral-500 mb-1">Notes</label>
+            <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className={inputCls} />
+          </div>
+        </div>
+
+        {error && <p className="mt-3 text-sm text-red-600">{error}</p>}
+
+        <div className="mt-5 flex items-center justify-end gap-2">
+          <button onClick={onClose} className="text-sm font-medium text-neutral-600 px-4 py-2 rounded-lg hover:bg-neutral-100">Cancel</button>
+          <button onClick={submit} disabled={saving} className="inline-flex items-center gap-1.5 text-sm font-medium text-white px-4 py-2 rounded-lg disabled:opacity-60" style={{ backgroundColor: "#F22F46" }}>
+            {saving && <Loader2 className="w-3.5 h-3.5 animate-spin" />}{editing ? "Save changes" : "Create appointment"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 
 export default function CalendarPage() {
@@ -264,8 +507,30 @@ export default function CalendarPage() {
   // Popover
   const [selected, setSelected] = useState<Appointment | null>(null);
 
+  // Manual bookings (appointments collection) + modals
+  const { has } = useFeatures();
+  const canBook = has("cap.appointments");
+  const [bookings, setBookings] = useState<BookingAppointment[]>([]);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [editing, setEditing] = useState<BookingAppointment | null>(null);
+  const [selectedBooking, setSelectedBooking] = useState<BookingAppointment | null>(null);
+
   // Today key for highlighting
   const todayKey = new Date().toISOString().slice(0, 10);
+
+  // ── Load manual bookings (refetched after create/edit/cancel) ─────────
+  const loadBookings = useCallback(async () => {
+    try {
+      const { items } = await bookingsList();
+      setBookings(items || []);
+    } catch {
+      setBookings([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadBookings();
+  }, [loadBookings]);
 
   // ── Load assistants once ──────────────────────────────────────────────
   useEffect(() => {
@@ -317,15 +582,38 @@ export default function CalendarPage() {
     {}
   );
 
+  // Manual bookings keyed by their scheduled start date, honoring the
+  // assistant filter so the calendar stays consistent with the dropdown.
+  const bookingsByDate = bookings.reduce<Record<string, BookingAppointment[]>>(
+    (acc, b) => {
+      if (filterAssistantId && b.assistantId !== filterAssistantId) return acc;
+      const key = toDateKey(b.startAt);
+      if (key) acc[key] = acc[key] ? [...acc[key], b] : [b];
+      return acc;
+    },
+    {}
+  );
+
   // ── Render ────────────────────────────────────────────────────────────
   return (
     <div>
       {/* Header */}
-      <div className="mb-6">
-        <h2 className="text-lg font-semibold text-neutral-900">Calendar</h2>
-        <p className="text-sm text-neutral-500 mt-0.5">
-          Appointments and scheduled follow-ups
-        </p>
+      <div className="mb-6 flex items-start justify-between gap-4">
+        <div>
+          <h2 className="text-lg font-semibold text-neutral-900">Calendar</h2>
+          <p className="text-sm text-neutral-500 mt-0.5">
+            Appointments and scheduled follow-ups
+          </p>
+        </div>
+        {canBook && (
+          <button
+            onClick={() => { setEditing(null); setModalOpen(true); }}
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-white px-3.5 py-2 rounded-lg shadow-sm"
+            style={{ backgroundColor: "#F22F46" }}
+          >
+            <Plus className="w-4 h-4" /> New appointment
+          </button>
+        )}
       </div>
 
       {/* Filter bar */}
@@ -389,6 +677,7 @@ export default function CalendarPage() {
           <div className="grid grid-cols-7">
             {cells.map((cell, idx) => {
               const dayAppts = appointmentsByDate[cell.dateKey] ?? [];
+              const dayBookings = bookingsByDate[cell.dateKey] ?? [];
               const isToday = cell.dateKey === todayKey;
               const visible = dayAppts.slice(0, 3);
               const overflow = dayAppts.length - 3;
@@ -419,6 +708,9 @@ export default function CalendarPage() {
 
                   {/* Appointment cards */}
                   <div className="space-y-0.5">
+                    {dayBookings.map((b) => (
+                      <BookingChip key={b.id} booking={b} onClick={setSelectedBooking} />
+                    ))}
                     {visible.map((appt) => (
                       <AppointmentCard
                         key={appt.id}
@@ -440,19 +732,49 @@ export default function CalendarPage() {
       </div>
 
       {/* Empty state */}
-      {!loading && appointments.length === 0 && (
+      {!loading && appointments.length === 0 && bookings.length === 0 && (
         <div className="mt-8 text-center">
           <Calendar className="w-8 h-8 text-neutral-200 mx-auto mb-2" />
           <p className="text-neutral-400 text-sm">No appointments this month</p>
+          {canBook && (
+            <button
+              onClick={() => { setEditing(null); setModalOpen(true); }}
+              className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-[#F22F46] hover:underline"
+            >
+              <Plus className="w-4 h-4" /> Add one
+            </button>
+          )}
         </div>
       )}
 
-      {/* Detail popover */}
+      {/* Detail popover (call-derived) */}
       {selected && (
         <DetailPopover
           appt={selected}
           assistants={assistants}
           onClose={() => setSelected(null)}
+        />
+      )}
+
+      {/* Booking detail (manual / tool-booked) */}
+      {selectedBooking && (
+        <BookingDetail
+          booking={selectedBooking}
+          assistants={assistants}
+          onClose={() => setSelectedBooking(null)}
+          onEdit={(b) => { setSelectedBooking(null); setEditing(b); setModalOpen(true); }}
+          onCancelled={() => { setSelectedBooking(null); loadBookings(); }}
+        />
+      )}
+
+      {/* Create / edit modal */}
+      {modalOpen && (
+        <BookingModal
+          editing={editing}
+          assistants={assistants}
+          defaultDate={currentDate}
+          onClose={() => { setModalOpen(false); setEditing(null); }}
+          onSaved={() => { setModalOpen(false); setEditing(null); loadBookings(); }}
         />
       )}
     </div>
