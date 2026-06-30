@@ -11,6 +11,7 @@ import { formatDate } from "@/lib/utils";
 import {
   campaignsList,
   campaignsCreate,
+  campaignsUpdate,
   campaignStart,
   campaignPause,
   leadsBatchCreate,
@@ -35,6 +36,7 @@ import {
   Phone,
   Loader2,
   FileSpreadsheet,
+  Zap,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -105,6 +107,21 @@ function CampaignCard({
   const failed = campaign.failedCount ?? 0;
   const remaining = total - called;
   const isLoading = loadingId === campaign.id;
+  const [autoDial, setAutoDialState] = useState(campaign.autoDial === true);
+  const [savingAutoDial, setSavingAutoDial] = useState(false);
+
+  async function toggleAutoDial() {
+    const next = !autoDial;
+    setAutoDialState(next);          // optimistic; onSnapshot reconciles
+    setSavingAutoDial(true);
+    try {
+      await campaignsUpdate({ campaignId: campaign.id, autoDial: next });
+    } catch {
+      setAutoDialState(!next);       // revert on failure
+    } finally {
+      setSavingAutoDial(false);
+    }
+  }
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 shadow-sm p-5 flex flex-col gap-4 hover:shadow-md transition-shadow">
@@ -160,6 +177,16 @@ function CampaignCard({
             Pause
           </button>
         )}
+        <button
+          onClick={toggleAutoDial}
+          disabled={savingAutoDial}
+          title={autoDial ? "Auto-dialing on a schedule — click to turn off" : "Turn on scheduled auto-dialing"}
+          className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-60 ${
+            autoDial ? "bg-indigo-100 text-indigo-700 hover:bg-indigo-200" : "text-gray-500 bg-gray-100 hover:bg-gray-200"
+          }`}
+        >
+          <Zap className="w-3.5 h-3.5" /> Auto-dial {autoDial ? "on" : "off"}
+        </button>
         <Link
           href={`/campaigns/detail?id=${campaign.id}`}
           className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-sm font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors ml-auto"
