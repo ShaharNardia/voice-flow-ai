@@ -206,6 +206,10 @@ function NewCampaignModal({ onClose, onCreated }: { onClose: () => void; onCreat
   const [description, setDescription] = useState("");
   const [assistantId, setAssistantId] = useState("");
   const [fromNumber, setFromNumber] = useState("");
+  // Scheduled auto-dialer (Phase B)
+  const [autoDial, setAutoDial] = useState(false);
+  const [windowStart, setWindowStart] = useState(9);
+  const [windowEnd, setWindowEnd] = useState(20);
 
   // Step 2 fields
   const [leads, setLeads] = useState<LeadRow[]>([]);
@@ -279,7 +283,11 @@ function NewCampaignModal({ onClose, onCreated }: { onClose: () => void; onCreat
     setIsSubmitting(true);
     setError("");
     try {
-      const result = await campaignsCreate({ name: name.trim(), assistantId, fromNumber, description: description.trim() });
+      const result = await campaignsCreate({
+        name: name.trim(), assistantId, fromNumber, description: description.trim(),
+        autoDial, callWindowStart: windowStart, callWindowEnd: windowEnd,
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "Asia/Jerusalem",
+      });
       const campaignId = result?.id;
       if (!campaignId) throw new Error("Failed to create campaign");
       if (leads.length) {
@@ -409,6 +417,30 @@ function NewCampaignModal({ onClose, onCreated }: { onClose: () => void; onCreat
                     ))}
                     {!phoneNumbers.length && <option value="">No numbers available</option>}
                   </select>
+                )}
+              </div>
+
+              {/* Scheduled auto-dialer (Phase B) */}
+              <div className="border border-gray-200 rounded-lg p-3 bg-gray-50/60">
+                <label className="flex items-center gap-2 text-sm font-medium text-gray-800 cursor-pointer">
+                  <input type="checkbox" checked={autoDial} onChange={(e) => setAutoDial(e.target.checked)} />
+                  Auto-dial leads on a schedule
+                </label>
+                <p className="text-xs text-gray-500 mt-1">
+                  When on, the system dials the lead list automatically in small batches during the hours below — no need to press Start each time. Calls only happen inside the window.
+                </p>
+                {autoDial && (
+                  <div className="flex items-center gap-2 mt-2 text-sm">
+                    <span className="text-gray-600">Call between</span>
+                    <input type="number" min={0} max={23} value={windowStart}
+                      onChange={(e) => setWindowStart(Number(e.target.value))}
+                      className="w-16 border border-gray-200 rounded px-2 py-1" />
+                    <span className="text-gray-600">and</span>
+                    <input type="number" min={1} max={24} value={windowEnd}
+                      onChange={(e) => setWindowEnd(Number(e.target.value))}
+                      className="w-16 border border-gray-200 rounded px-2 py-1" />
+                    <span className="text-gray-400 text-xs">:00 ({Intl.DateTimeFormat().resolvedOptions().timeZone})</span>
+                  </div>
                 )}
               </div>
             </div>

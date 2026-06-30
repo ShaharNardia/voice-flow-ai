@@ -208,6 +208,11 @@ exports.campaignsCreate  = leadsService.campaignsCreate;
 exports.campaignsList    = leadsService.campaignsList;
 exports.campaignStart    = leadsService.campaignStart;
 exports.campaignPause    = leadsService.campaignPause;
+exports.campaignsUpdate  = leadsService.campaignsUpdate;
+
+// Scheduled outbound campaign dialer (Phase B) — auto-dials running+autoDial campaigns in their window.
+const campaignScheduler = require("./campaign_scheduler.js");
+exports.dispatchCampaigns = campaignScheduler.dispatchCampaigns;
 exports.appointmentsList = leadsService.appointmentsList;
 
 // Admin Service

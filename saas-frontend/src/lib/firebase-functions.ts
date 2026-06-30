@@ -718,8 +718,16 @@ export const leadsUpdate = (data: { id: string } & Partial<Lead>) =>
 export const leadsDelete = (data: { id: string }) =>
   httpPost<{ status: string }>("/leadsDelete", data);
 
-export const campaignsCreate = (data: { name: string; assistantId: string; fromNumber: string; description?: string }) =>
-  httpPost<Campaign>("/campaignsCreate", data);
+export const campaignsCreate = (data: {
+  name: string; assistantId: string; fromNumber: string; description?: string;
+  autoDial?: boolean; callWindowStart?: number; callWindowEnd?: number; timezone?: string; batchSize?: number;
+}) => httpPost<Campaign>("/campaignsCreate", data);
+
+export const campaignsUpdate = (data: {
+  campaignId: string;
+  autoDial?: boolean; callWindowStart?: number; callWindowEnd?: number; timezone?: string; batchSize?: number;
+  name?: string; description?: string; assistantId?: string; fromNumber?: string;
+}) => httpPost<{ status: string; id: string }>("/campaignsUpdate", data);
 
 export const campaignsList = () =>
   httpGet<Campaign[]>("/campaignsList");
@@ -1472,6 +1480,11 @@ export interface Campaign {
   calledCount: number;
   successCount: number;
   failedCount: number;
+  autoDial?: boolean;
+  callWindowStart?: number;
+  callWindowEnd?: number;
+  timezone?: string;
+  batchSize?: number;
   ownerId?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
