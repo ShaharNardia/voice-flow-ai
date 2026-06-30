@@ -35,18 +35,10 @@ export default function RootLayout({
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <link rel="apple-touch-icon" href="/icons/icon-192.png" />
-        <script
-          dangerouslySetInnerHTML={{
-            __html: `
-              if ('serviceWorker' in navigator) {
-                window.addEventListener('load', function() {
-                  navigator.serviceWorker.register('/sw.js').catch(function(){});
-                  navigator.serviceWorker.register('/firebase-messaging-sw.js').catch(function(){});
-                });
-              }
-            `,
-          }}
-        />
+        {/* Service workers are registered exclusively by registerServiceWorker()
+            in providers.tsx — registering firebase-messaging-sw.js at root scope
+            here clobbered sw.js and caused the perpetual "new version available"
+            banner, so the inline registration was removed. */}
       </head>
       <body className="font-sans antialiased bg-neutral-50 text-neutral-900">
         <SentryInit />
