@@ -41,6 +41,9 @@ interface NavItem {
   icon: React.ElementType;
   lockedFor?: "campaigns" | "calendar" | "analytics";
   featureId?: string;
+  // Hide from the sidebar for EVERYONE, including super_admin (who otherwise
+  // bypasses feature flags). The page stays reachable by direct URL.
+  hideFromNav?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -52,14 +55,14 @@ const NAV_ITEMS: NavItem[] = [
   { href: "/campaigns", label: "Campaigns", icon: Megaphone, lockedFor: "campaigns", featureId: "module.campaigns" },
   { href: "/followups", label: "Follow-ups", icon: RefreshCw, featureId: "module.followups" },
   // NLPearl removed — all NLPearl assistants now run on Gemini Live.
-  { href: "/bench", label: "Bench", icon: BarChart3, featureId: "module.bench" },
+  { href: "/bench", label: "Bench", icon: BarChart3, featureId: "module.bench", hideFromNav: true },
   { href: "/calendar", label: "Calendar", icon: Calendar, lockedFor: "calendar", featureId: "module.calendar" },
   { href: "/scenarios", label: "Scenarios", icon: GitBranch, featureId: "module.scenarios" },
   { href: "/analytics", label: "Analytics", icon: BarChart3, lockedFor: "analytics", featureId: "module.analytics" },
-  { href: "/compliance", label: "Compliance", icon: ShieldCheck, featureId: "module.compliance" },
-  { href: "/contracts", label: "Contracts", icon: FileText, featureId: "module.contracts" },
-  { href: "/voice-commerce", label: "Voice Commerce", icon: ShoppingCart, featureId: "module.voiceCommerce" },
-  { href: "/agent-directory", label: "Agent Network", icon: Network, featureId: "module.agentDirectory" },
+  { href: "/compliance", label: "Compliance", icon: ShieldCheck, featureId: "module.compliance", hideFromNav: true },
+  { href: "/contracts", label: "Contracts", icon: FileText, featureId: "module.contracts", hideFromNav: true },
+  { href: "/voice-commerce", label: "Voice Commerce", icon: ShoppingCart, featureId: "module.voiceCommerce", hideFromNav: true },
+  { href: "/agent-directory", label: "Agent Network", icon: Network, featureId: "module.agentDirectory", hideFromNav: true },
   { href: "/copilot", label: "AI Co-Pilot", icon: Headphones, featureId: "module.copilot" },
 ];
 
@@ -153,7 +156,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
         {/* Primary nav */}
         <nav className="flex-1 px-3 py-4 space-y-0.5 sidebar-scroll overflow-y-auto">
           {NAV_ITEMS
-            .filter((item) => featuresLoading || !item.featureId || hasFeature(item.featureId))
+            .filter((item) => !item.hideFromNav && (featuresLoading || !item.featureId || hasFeature(item.featureId)))
             .map(({ href, label, icon: Icon, lockedFor }) => {
             const locked = !planLoading && isBasic && Boolean(lockedFor);
             const active = isActive(href);
@@ -207,7 +210,7 @@ export default function Sidebar({ mobileOpen = false, onMobileClose }: SidebarPr
           )}
 
           {BOTTOM_ITEMS
-            .filter((item) => featuresLoading || !item.featureId || hasFeature(item.featureId))
+            .filter((item) => !item.hideFromNav && (featuresLoading || !item.featureId || hasFeature(item.featureId)))
             .map(({ href, label, icon: Icon }) => (
             <Link
               key={href}
