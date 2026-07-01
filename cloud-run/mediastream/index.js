@@ -3540,6 +3540,11 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     // turn we just finished. Order matters so history reads naturally.
     if (_accumUser.trim()) flushTranscript("user");
     if (_accumAsst.trim()) flushTranscript("assistant");
+    // The bot's turn ended → restart the "expected-caller-silence" clock from
+    // NOW. Audio turns already reset this on each chunk, but a TEXT-ONLY (0-audio)
+    // turn emits no chunks, so without this the silence watchdog kept counting
+    // from an older point and fired "אתה עדיין שם?" ~1s into an active exchange.
+    lastUserActivityAt = Date.now();
     // Silent-turn rescue: model produced TEXT but 0 audio, the turn wasn't
     // barge-suppressed, and the caller didn't already speak over it → voice the
     // text via TTS so the caller actually hears the answer. Fire-and-forget;
