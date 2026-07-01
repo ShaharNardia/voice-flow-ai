@@ -1192,110 +1192,11 @@ function substitutePlaceholders(template, values) {
     });
 }
 
-/**
- * Summarize a potentially-huge JSON response into something the model can
- * consume in a single turn. For arrays of objects (common case — product
- * lists, order lists), we extract key fields and truncate the list.
- */
-/**
- * Extract a compact, model-friendly version of one item from a JSON list.
- * Keeps the small, identifying fields (name/sku/price/stock) and drops bloat.
- */
-function compactItem(item) {
-  if (item == null || typeof item !== "object") return item;
-  const out = {};
-
-  // GENERIC scalar pass: keep EVERY non-null scalar field, not a hardcoded
-  // whitelist. The old whitelist was written for WooCommerce catalogs and
-  // silently dropped every field of any other API — the bus API's line number
-  // (Shilut), company, destination, and arrival times all vanished, leaving
-  // the model a ~92-char husk it then hallucinated "data" from (call
-  // Dk9zUotSvdZPk5uYhro2). Nulls/empties are dropped (they're noise), long
-  // strings truncated; the overall byte budget is enforced by the caller.
-  for (const [k, v] of Object.entries(item)) {
-    if (v == null || v === "") continue;
-    if (typeof v === "string") {
-      const s = v.trim();
-      if (!s) continue;
-      out[k] = s.length > 180 ? s.slice(0, 180) + "…" : s;
-    } else if (typeof v === "number" || typeof v === "boolean") {
-      out[k] = v;
-    } else if (Array.isArray(v) && v.length > 0 && v.length <= 24 &&
-               v.every((x) => x == null || typeof x !== "object")) {
-      // Small scalar arrays carry real data (e.g. MinutesToArrivalList:[0,5,10])
-      out[k] = v;
-    }
-    // Nested objects / object-arrays are handled by the special cases below.
-  }
-
-  // Clean HTML out of the name (WooCommerce escapes entities in names)
-  if (typeof out.name === "string") {
-    out.name = out.name
-      .replace(/&#?\w+;/g, " ")    // HTML entities → space
-      .replace(/<[^>]+>/g, "")
-      .replace(/\s+/g, " ")
-      .trim();
-  }
-
-  // WooCommerce-style: pull price + currency out of the nested `prices` object
-  if (item.prices && typeof item.prices === "object") {
-    const p = item.prices;
-    if (p.price != null) out.price = p.price;
-    if (p.regular_price != null) out.regular_price = p.regular_price;
-    if (p.sale_price != null && p.sale_price !== p.regular_price) out.sale_price = p.sale_price;
-    if (p.currency_code) out.currency = p.currency_code;
-  }
-
-  // Categories / brands (often an array of {id, name, slug})
-  for (const listKey of ["categories", "brands", "tags"]) {
-    if (Array.isArray(item[listKey]) && item[listKey].length > 0) {
-      out[listKey] = item[listKey].slice(0, 4).map((x) => (x?.name || x?.slug || x)).filter(Boolean);
-    }
-  }
-
-  return out;
-}
-
-/**
- * Summarize a potentially-huge JSON response into something the model can
- * consume in a single turn. For arrays we keep ALL items (not just first N)
- * up to the byte budget — so the model can find specific SKUs/brands the
- * caller asked about, even when they're deep in the list.
- */
-function summarizeApiResponse(data, maxChars = 20000) {
-  if (typeof data === "string") return data.slice(0, maxChars);
-
-  const arr = Array.isArray(data) ? data
-    : Array.isArray(data?.products) ? data.products
-    : Array.isArray(data?.items) ? data.items
-    : Array.isArray(data?.results) ? data.results
-    : Array.isArray(data?.data) ? data.data
-    : null;
-
-  if (arr) {
-    // Try to fit as many compacted items as possible under the byte budget.
-    // Build incrementally so a huge list doesn't balloon before we trim.
-    const compacted = [];
-    let running = 0;
-    for (const item of arr) {
-      const c = compactItem(item);
-      const s = JSON.stringify(c);
-      if (running + s.length + 2 > maxChars - 200 /* header */) break;
-      compacted.push(c);
-      running += s.length + 2;
-    }
-    const summary = {
-      totalCount: arr.length,
-      returned: compacted.length,
-      truncated: compacted.length < arr.length,
-      items: compacted,
-    };
-    return JSON.stringify(summary);
-  }
-
-  const s = JSON.stringify(data);
-  return s.length <= maxChars ? s : s.slice(0, maxChars) + "…[truncated]";
-}
+// Tool-response compaction (compactItem + summarizeApiResponse) lives in its
+// own module so it can be unit-tested. It also recognizes `messages`/
+// `announcements` list envelopes (e.g. Moran transit disruptions) so those
+// feeds get per-item compaction + a truncated flag instead of a blind slice.
+const { summarizeApiResponse } = require("./tool_response_summarizer.js");
 
 /**
  * Execute a user-defined custom API tool call.
