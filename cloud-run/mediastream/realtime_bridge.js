@@ -72,6 +72,23 @@ function buildTurnDetection(mode, sensitivity) {
   return {type: "semantic_vad", eagerness, ...common};
 }
 
+/**
+ * Minimum caller-speech duration (ms) below which an auto-triggered response is
+ * treated as a phantom (noise/echo/breath) and cancelled.
+ *
+ * This used to be a flat 350ms — but a short real answer like "כן" / "לא" /
+ * "נכון" is ~200–350ms, so callers' first one-word replies were being dropped
+ * as if they were noise (the bot appeared to "ignore" them). The fix is
+ * mode-aware:
+ *   - semantic_vad: the model already filters coughs/noise before it ever fires
+ *     `speech_started`, so any burst it DOES report is very likely real speech.
+ *     Use a low 150ms floor — kills only sub-150ms clicks/echo, keeps real words.
+ *   - server_vad: energy-based and noisier, so keep a stricter 300ms floor.
+ */
+function phantomThresholdMs(vadMode) {
+  return vadMode === "semantic" ? 150 : 300;
+}
+
 class RealtimeBridge extends EventEmitter {
   /**
    * @param {object} opts
@@ -89,6 +106,10 @@ class RealtimeBridge extends EventEmitter {
     super();
     this._callSessionId = callSessionId;
     this._log = (msg) => console.log(`[${callSessionId}] [RT] ${msg}`);
+    this._vadMode = vadMode;
+    // Mode-aware phantom-response floor (see phantomThresholdMs). Prevents short
+    // real answers ("כן"/"לא") from being cancelled as noise under semantic VAD.
+    this._phantomThresholdMs = phantomThresholdMs(vadMode);
     this._closed = false;
     this._ready = false;
     this._currentResponseId = null;
@@ -411,8 +432,8 @@ class RealtimeBridge extends EventEmitter {
         // The initial greeting bypasses this since it has no prior speech.
         if (this._allowEmptyResponse) {
           this._allowEmptyResponse = false; // only the first one
-        } else if (this._lastSpeechDurationMs > 0 && this._lastSpeechDurationMs < 350) {
-          this._log(`phantom response (speech ${this._lastSpeechDurationMs}ms < 350ms) - cancelling`);
+        } else if (this._lastSpeechDurationMs > 0 && this._lastSpeechDurationMs < this._phantomThresholdMs) {
+          this._log(`phantom response (speech ${this._lastSpeechDurationMs}ms < ${this._phantomThresholdMs}ms, vad=${this._vadMode}) - cancelling`);
           try { this._send("response.cancel", {}); } catch (_) {}
         }
         // Reset for next turn
@@ -445,4 +466,4 @@ class RealtimeBridge extends EventEmitter {
   }
 }
 
-module.exports = {RealtimeBridge};
+module.exports = {RealtimeBridge, buildTurnDetection, phantomThresholdMs};

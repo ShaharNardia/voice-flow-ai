@@ -13,13 +13,14 @@ import Link from "next/link";
 import {
   ArrowLeft, Bot, User, PhoneIncoming, PhoneOutgoing, Clock, Hash, Mic,
   Brain, TrendingUp, ThumbsUp, Lightbulb, RotateCcw, Zap, Loader2, GitBranch,
-  DollarSign, Activity, AlertTriangle, CheckCircle, XCircle, ChevronDown, ChevronRight,
+  Activity, AlertTriangle, CheckCircle, XCircle, ChevronDown, ChevronRight,
   Wrench, Radio, Timer, Copy, Check,
 } from "lucide-react";
 import { analyzeCall, CallAnalysis, adminGetCallTelemetry, CallTelemetryData } from "@/lib/firebase-functions";
 import ExecutionTrace from "../../scenarios/edit/_components/shared/ExecutionTrace";
 import ScenarioFlowReplay from "../../scenarios/edit/_components/shared/ScenarioFlowReplay";
 import { useAuth } from "@/hooks/useAuth";
+import { type CostBreakdown } from "@/components/CostBreakdownCard";
 
 interface Message {
   role: "user" | "assistant" | "tool";
@@ -40,32 +41,6 @@ interface Recording {
   url: string;
   transcription?: string;
   timestamp?: string;
-}
-
-interface CostBreakdown {
-  twilio?: { minutes?: number; cost?: number };
-  llm?: { promptTokens?: number; completionTokens?: number; turns?: number; cost?: number };
-  stt?: { minutes?: number; cost?: number };
-  tts?: { characters?: number; provider?: string; cost?: number };
-  realtime?: { inputMinutes?: number; outputMinutes?: number; cost?: number };
-  // Generic per-provider breakdown written by the Gemini Live close handler:
-  // [{ provider: "gemini-live", label: "Gemini (...)", cost, detail }, ...]
-  breakdown?: Array<{ provider?: string; label?: string; cost?: number; detail?: string }>;
-  // Gemini-specific top-level fields (mirror the OpenAI/realtime shape so the
-  // call detail page can show input/output split).
-  provider?: string;        // "gemini-live" | "openai-realtime" | "classic"
-  model?: string;
-  inputCost?: number;
-  outputCost?: number;
-  twilioCost?: number;
-  geminiCost?: number;
-  durationSec?: number;
-  totalCost?: number;
-  customerCharge?: number;
-  pricingModel?: string;
-  pricingValue?: number;
-  currency?: string;
-  mode?: string;
 }
 
 interface CallSession {
@@ -539,99 +514,14 @@ function TelemetryPanel({ tel }: { tel: CallTelemetryData }) {
   );
 }
 
-function CostBreakdownCard({ costs }: { costs: CostBreakdown }) {
-  const curr = costs.currency || "USD";
-  const fmt = (n: number | undefined) => {
-    if (n == null) return "—";
-    const s = n.toFixed(n < 0.01 ? 6 : n < 1 ? 4 : 2);
-    return curr === "USD" ? `$${s}` : `${s} ${curr}`;
-  };
-  const rows: Array<{ label: string; detail?: string; cost?: number }> = [];
-
-  // New: generic per-provider breakdown — written by handleGeminiSession.
-  // Each entry is already a {label, detail, cost} row so just spread it in.
-  if (Array.isArray(costs.breakdown) && costs.breakdown.length > 0) {
-    for (const b of costs.breakdown) {
-      rows.push({
-        label:  b.label || b.provider || "(unnamed)",
-        detail: b.detail,
-        cost:   typeof b.cost === "number" ? b.cost : undefined,
-      });
-    }
-  }
-
-  // Legacy/structured fields (OpenAI Realtime + Classic). Only include if NOT
-  // already covered by breakdown to avoid double-counting.
-  const hasBreakdown = rows.length > 0;
-  if (!hasBreakdown) {
-    if (costs.twilio?.cost != null) rows.push({ label: "Twilio (call minutes)", detail: `${costs.twilio.minutes?.toFixed(2) ?? "?"} min`, cost: costs.twilio.cost });
-    if (costs.realtime?.cost != null) rows.push({ label: "OpenAI Realtime (voice-to-voice)", detail: `in ${costs.realtime.inputMinutes?.toFixed(2) ?? 0}m / out ${costs.realtime.outputMinutes?.toFixed(2) ?? 0}m`, cost: costs.realtime.cost });
-    if (costs.llm?.cost) rows.push({ label: "LLM (OpenAI)", detail: `${(costs.llm.promptTokens ?? 0) + (costs.llm.completionTokens ?? 0)} tokens · ${costs.llm.turns ?? 0} turns`, cost: costs.llm.cost });
-    if (costs.stt?.cost) rows.push({ label: "STT (Deepgram)", detail: `${costs.stt.minutes?.toFixed(2) ?? "?"} min`, cost: costs.stt.cost });
-    if (costs.tts?.cost) rows.push({ label: `TTS (${costs.tts.provider || "?"})`, detail: `${costs.tts.characters ?? 0} chars`, cost: costs.tts.cost });
-  }
-
-  const total = costs.totalCost ?? 0;
-  const charge = costs.customerCharge ?? 0;
-  const profit = charge - total;
-  const markupText = costs.pricingModel === "markup"
-    ? `${costs.pricingValue ?? 0}% markup`
-    : costs.pricingModel === "fixed"
-      ? `$${costs.pricingValue ?? 0}/min flat`
-      : "";
-
-  return (
-    <div className="bg-white border border-neutral-200 rounded-xl mt-4">
-      <div className="px-5 py-4 border-b border-neutral-100 flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <DollarSign className="w-4 h-4 text-emerald-500" />
-          <h2 className="font-semibold text-neutral-800 text-sm">Cost Breakdown</h2>
-          {costs.mode === "realtime" && (
-            <span className="text-[10px] font-semibold text-violet-600 bg-violet-50 px-1.5 py-0.5 rounded-full">REALTIME</span>
-          )}
-        </div>
-        <div className="text-right">
-          <div className="text-xs text-neutral-400">Total cost</div>
-          <div className="text-lg font-bold text-neutral-900">{fmt(total)}</div>
-        </div>
-      </div>
-      <div className="p-5 space-y-2">
-        {rows.length === 0 ? (
-          <p className="text-neutral-400 text-sm text-center py-4">No cost data recorded for this call.</p>
-        ) : rows.map((r, i) => (
-          <div key={i} className="flex items-center justify-between text-sm">
-            <div className="flex-1">
-              <div className="text-neutral-700">{r.label}</div>
-              {r.detail && <div className="text-xs text-neutral-400">{r.detail}</div>}
-            </div>
-            <div className="font-mono text-neutral-800 tabular-nums">{fmt(r.cost)}</div>
-          </div>
-        ))}
-        {(charge > 0 || markupText) && (
-          <div className="mt-3 pt-3 border-t border-neutral-100 space-y-1">
-            <div className="flex items-center justify-between text-sm">
-              <div>
-                <div className="text-neutral-700 font-medium">Customer charge</div>
-                {markupText && <div className="text-xs text-neutral-400">{markupText}</div>}
-              </div>
-              <div className="font-mono text-emerald-600 font-semibold tabular-nums">{fmt(charge)}</div>
-            </div>
-            <div className="flex items-center justify-between text-sm">
-              <div className="text-neutral-500">Profit</div>
-              <div className={`font-mono tabular-nums ${profit >= 0 ? "text-emerald-600" : "text-red-500"}`}>{fmt(profit)}</div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function CallDetail() {
   const params = useSearchParams();
   const callId = params.get("id") || "";
   const { user } = useAuth();
   const isAdmin = user?.role === "admin" || user?.role === "super_admin";
+  // Real provider cost + profit is platform-operator-only — never shown to a
+  // tenant admin (a paying customer). It lives on the /admin/call-costs page.
+  const isSuperAdmin = user?.role === "super_admin";
   const [call, setCall] = useState<CallSession | null>(null);
   const [loading, setLoading] = useState(true);
   const [analysis, setAnalysis] = useState<CallAnalysis | null>(null);
@@ -1092,6 +982,10 @@ function CallDetail() {
                         </pre>
                       </div>
                     </details>
+                    {/* Rate the tool/API call itself — feeds the same coach loop */}
+                    {isAdmin && call.id && (
+                      <TurnFeedback callId={call.id} turnIndex={i} context="tool" />
+                    )}
                   </div>
                 );
               }
@@ -1145,7 +1039,18 @@ function CallDetail() {
       </div>
 
       {/* Cost Breakdown (admin + super admin) */}
-      {isAdmin && call?.costs && <CostBreakdownCard costs={call.costs} />}
+      {/* Cost is operator-only — moved off the customer view to /admin/call-costs.
+          super_admin gets a discreet link; tenant admins & customers see nothing. */}
+      {isSuperAdmin && call?.id && call?.costs && (
+        <div className="mt-4 flex justify-end">
+          <Link
+            href={`/admin/call-costs?id=${call.id}`}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-neutral-500 hover:text-emerald-600 border border-neutral-200 rounded-lg px-3 py-1.5 hover:border-emerald-300 transition-colors"
+          >
+            💲 View call costs (admin) →
+          </Link>
+        </div>
+      )}
 
       {/* Per-call technical diagnostics (timeline of Cloud Run events) */}
       {call?.id && (
@@ -1355,12 +1260,14 @@ export default function CallDetailPage() {
 // ── Per-turn feedback widget (shown below every assistant bubble) ─────────────
 const FN_BASE = "https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net";
 
-function TurnFeedback({ callId, turnIndex, initialRating, initialCorrection }: {
+function TurnFeedback({ callId, turnIndex, initialRating, initialCorrection, context = "turn" }: {
   callId: string;
   turnIndex: number;
   initialRating?: "good" | "bad" | null;
   initialCorrection?: string | null;
+  context?: "turn" | "tool";
 }) {
+  const isTool = context === "tool";
   const [rating, setRating] = useState<"good" | "bad" | null>(initialRating || null);
   const [correction, setCorrection] = useState(initialCorrection || "");
   const [open, setOpen] = useState(false);
@@ -1398,7 +1305,7 @@ function TurnFeedback({ callId, turnIndex, initialRating, initialCorrection }: {
         {/* Thumbs up */}
         <button
           onClick={() => handleRating("good")}
-          title="Good response"
+          title={isTool ? "Good tool/API call" : "Good response"}
           className={`w-5 h-5 rounded flex items-center justify-center text-sm transition-colors ${
             rating === "good" ? "bg-emerald-100 text-emerald-600" : "text-neutral-300 hover:text-neutral-500 hover:bg-neutral-100"
           }`}
@@ -1406,7 +1313,7 @@ function TurnFeedback({ callId, turnIndex, initialRating, initialCorrection }: {
         {/* Thumbs down */}
         <button
           onClick={() => handleRating("bad")}
-          title="Bad response — add correction"
+          title={isTool ? "Bad tool/API call — add correction" : "Bad response — add correction"}
           className={`w-5 h-5 rounded flex items-center justify-center text-sm transition-colors ${
             rating === "bad" ? "bg-red-100 text-red-600" : "text-neutral-300 hover:text-neutral-500 hover:bg-neutral-100"
           }`}
@@ -1432,7 +1339,7 @@ function TurnFeedback({ callId, turnIndex, initialRating, initialCorrection }: {
             value={correction}
             onChange={(e) => setCorrection(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") { save("bad", correction); setOpen(false); } if (e.key === "Escape") setOpen(false); }}
-            placeholder="What should the bot have said?"
+            placeholder={isTool ? "What should the tool/API call or its result have been?" : "What should the bot have said?"}
             autoFocus
             dir="auto"
             className="flex-1 text-xs border border-red-200 rounded-lg px-2 py-1.5 bg-red-50 placeholder:text-neutral-400 focus:outline-none focus:ring-1 focus:ring-red-300"

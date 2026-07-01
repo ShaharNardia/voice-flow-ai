@@ -55,7 +55,15 @@ class FakeWebSocket extends EventEmitter {
 const wsResolved = require.resolve("ws", { paths: [path.join(__dirname, "node_modules")] });
 require.cache[wsResolved] = { id: wsResolved, filename: wsResolved, loaded: true, exports: FakeWebSocket };
 
-const { RealtimeBridge } = require("./realtime_bridge.js");
+const { RealtimeBridge, phantomThresholdMs } = require("./realtime_bridge.js");
+
+// Emit a typed Realtime event envelope into the bridge.
+function evt(ws, type, extra = {}) {
+  ws.emit("message", Buffer.from(JSON.stringify({ type, ...extra })));
+}
+function cancelCount(ws) {
+  return ws.sent.filter((p) => { try { return JSON.parse(p).type === "response.cancel"; } catch { return false; } }).length;
+}
 
 // Track bridges so we can close() them — the constructor arms ping + hang-check
 // setIntervals that otherwise keep the event loop alive and hang the runner.
@@ -160,4 +168,61 @@ test("intentional close() never reconnects", (t) => {
   bridge.close();                 // host tears the call down on purpose
   t.mock.timers.tick(5000);
   assert.equal(instances.length, 1, "no reconnect after an intentional close()");
+});
+
+// ── Phantom-response guard: short real answers must survive (the "bot ignores
+//    my first 'כן'/'לא'" bug) while true sub-threshold noise bursts still die ──
+
+test("phantomThresholdMs is mode-aware (semantic=150ms, server/default=300ms)", () => {
+  assert.equal(phantomThresholdMs("semantic"), 150);
+  assert.equal(phantomThresholdMs("server"), 300);
+  assert.equal(phantomThresholdMs(undefined), 300, "unknown mode falls back to the strict server floor");
+});
+
+test("semantic VAD keeps a short real answer (~250ms) but cancels a sub-150ms noise blip", (t) => {
+  resetInstances();
+  const bridge = makeBridge({ vadMode: "semantic" });
+  assert.equal(bridge._phantomThresholdMs, 150, "semantic bridge uses the low floor");
+  lastWs().__open();
+  lastWs().__sessionUpdated();
+
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000000 });
+  const ws = lastWs();
+  // The one-time greeting response consumes the _allowEmptyResponse bypass.
+  evt(ws, "response.created", { response: { id: "resp_greet" } });
+
+  // A short but REAL one-word answer (~250ms) — must NOT be cancelled.
+  const base = cancelCount(ws);
+  evt(ws, "input_audio_buffer.speech_started");
+  t.mock.timers.tick(250);
+  evt(ws, "input_audio_buffer.speech_stopped");
+  evt(ws, "response.created", { response: { id: "resp_real" } });
+  assert.equal(cancelCount(ws), base, "250ms answer under semantic VAD is NOT cancelled");
+
+  // A sub-150ms burst (click/echo/breath) — must be cancelled as a phantom.
+  evt(ws, "input_audio_buffer.speech_started");
+  t.mock.timers.tick(90);
+  evt(ws, "input_audio_buffer.speech_stopped");
+  evt(ws, "response.created", { response: { id: "resp_noise" } });
+  assert.equal(cancelCount(ws), base + 1, "sub-150ms noise blip IS cancelled");
+});
+
+test("server VAD keeps the stricter 300ms floor (energy VAD is noisier)", (t) => {
+  resetInstances();
+  const bridge = makeBridge({ vadMode: "server" });
+  assert.equal(bridge._phantomThresholdMs, 300);
+  lastWs().__open();
+  lastWs().__sessionUpdated();
+
+  t.mock.timers.enable({ apis: ["Date", "setTimeout"], now: 1000000 });
+  const ws = lastWs();
+  evt(ws, "response.created", { response: { id: "resp_greet" } });
+
+  // A 250ms burst under server_vad is below the 300ms floor → cancelled.
+  const base = cancelCount(ws);
+  evt(ws, "input_audio_buffer.speech_started");
+  t.mock.timers.tick(250);
+  evt(ws, "input_audio_buffer.speech_stopped");
+  evt(ws, "response.created", { response: { id: "resp_x" } });
+  assert.equal(cancelCount(ws), base + 1, "250ms under server_vad is below the 300ms floor");
 });
