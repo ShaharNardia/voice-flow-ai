@@ -454,6 +454,28 @@ const REALTIME_VOICES = [
 
 const CLOUD_RUN = "https://voiceflow-mediastream-900818829902.me-west1.run.app";
 
+// ── Voice-call optimization ──────────────────────────────────────────────────
+// A brevity directive appended to the system prompt by the "Optimize for voice"
+// button. A 2-day log audit (109 calls) found ~49% of caller turns queued behind
+// long bot answers; short answers cut that pileup more than any code change.
+// Idempotent + removable via the sentinel markers (works in HE or EN).
+const VOICE_OPT_MARK = /=== (אופטימיזציה לשיחה קולית|VOICE OPTIMIZATION) ===/;
+const VOICE_OPT_STRIP = /\n*=== (אופטימיזציה לשיחה קולית|VOICE OPTIMIZATION) ===[\s\S]*?=== (סוף אופטימיזציה|END VOICE OPTIMIZATION) ===\n*/g;
+const VOICE_OPT_HE = `=== אופטימיזציה לשיחה קולית ===
+- ענה קצר: משפט אחד עד שניים לכל תשובה. זו שיחת טלפון, לא מסמך.
+- אל תקריא רשימות ארוכות בקול — תן סיכום קצר ושאל אם רוצים פרטים נוספים.
+- ענה בדיוק על מה שנשאל ואז עצור. אל תוסיף מידע שלא ביקשו.
+- אם יש הרבה לומר, חלק לחלקים ושאל "להמשיך?" בין חלק לחלק.
+- דבר בקטעים קצרים ואפשר למתקשר להגיב.
+=== סוף אופטימיזציה ===`;
+const VOICE_OPT_EN = `=== VOICE OPTIMIZATION ===
+- Keep answers SHORT: one or two sentences per reply. This is a phone call, not a document.
+- Never read long lists aloud — give a brief summary and ask if the caller wants details.
+- Answer exactly what was asked, then stop. Don't volunteer unrequested info.
+- If there's a lot to cover, chunk it and ask "want me to continue?" between chunks.
+- Speak in short bursts and let the caller respond.
+=== END VOICE OPTIMIZATION ===`;
+
 type Tab = "settings" | "tools" | "knowledge" | "test";
 
 // ── Helpers ───────────────────────────────────────────────────────────
@@ -2294,8 +2316,37 @@ function AssistantEdit() {
 
                   {/* System Prompt */}
                   <div>
-                    <label className="block text-xs font-medium text-neutral-500 mb-1.5 uppercase tracking-wide">Custom Instructions (System Prompt)</label>
-                    <p className="text-xs text-neutral-400 mb-1.5">Define the assistant's goal and constraints. Vibe and address mode are injected automatically.</p>
+                    <div className="flex items-center justify-between gap-2 mb-1.5">
+                      <label className="text-xs font-medium text-neutral-500 uppercase tracking-wide">Custom Instructions (System Prompt)</label>
+                      {(() => {
+                        const sp = (assistant as AssistantExtended).systemPrompt || "";
+                        const on = VOICE_OPT_MARK.test(sp);
+                        const he = currentLang.startsWith("he");
+                        return (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (on) {
+                                set("systemPrompt", sp.replace(VOICE_OPT_STRIP, "\n").trim());
+                              } else {
+                                const block = he ? VOICE_OPT_HE : VOICE_OPT_EN;
+                                set("systemPrompt", sp.trim() ? `${sp.trim()}\n\n${block}` : block);
+                              }
+                            }}
+                            title={he
+                              ? "מוסיף הנחיית תמצות לשיחות קול — תשובות קצרות, בלי הקראת רשימות ארוכות. מוריד את עומס התור בשיחה."
+                              : "Adds a brevity directive for voice calls — short answers, no long lists read aloud. Cuts the caller-turn queue pileup."}
+                            className={`inline-flex items-center gap-1 text-[11px] font-medium rounded-lg px-2.5 py-1 whitespace-nowrap transition-colors ${
+                              on ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : "bg-[#F22F46]/10 text-[#F22F46] hover:bg-[#F22F46]/20"
+                            }`}
+                          >
+                            <Zap className="w-3 h-3" />
+                            {on ? (he ? "מותאם לקול ✓" : "Voice-optimized ✓") : (he ? "אופטימיזציה לקול" : "Optimize for voice")}
+                          </button>
+                        );
+                      })()}
+                    </div>
+                    <p className="text-xs text-neutral-400 mb-1.5">Define the assistant's goal and constraints. Vibe and address mode are injected automatically. “Optimize for voice” appends a brevity directive (click again to remove).</p>
                     <textarea
                       value={(assistant as AssistantExtended).systemPrompt || ""}
                       onChange={(e) => set("systemPrompt", e.target.value)}
