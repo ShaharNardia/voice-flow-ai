@@ -3219,6 +3219,47 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     }
   };
 
+  // ── Silent-turn TTS rescue ────────────────────────────────────────────────
+  // Gemini native-audio sometimes ends a turn with real TEXT but ZERO audio
+  // (turnComplete, turnAudioBytes=0) — the caller hears dead air for a whole
+  // answer (18 real occurrences across 10 recent calls). When that happens on a
+  // turn that was NOT barge-suppressed, synthesize the text with Google TTS and
+  // play it to the caller so the answer is actually heard. Cancellable: a caller
+  // barge-in clears _ttsRescueActive so we stop immediately.
+  let _ttsRescueActive = false;
+  const speakTextToTwilio = async (text) => {
+    const say = (text || "").replace(/\s+/g, " ").trim();
+    if (!say || say.length < 6 || !streamSid || ws.readyState !== ws.OPEN || callEnding) return;
+    _ttsRescueActive = true;
+    botTurnStartedAt = Date.now();  // echo-guard this rescue audio like a real turn
+    bargedThisTurn = false;         // allow a real interrupt to cut it
+    try {
+      const lk = /^he/i.test(language) ? "he" : /^ar/i.test(language) ? "ar" : /^el/i.test(language) ? "el" : "en";
+      const vc = GOOGLE_TTS_VOICES[lk] || GOOGLE_TTS_VOICES.en;
+      const [resp] = await googleTtsClient.synthesizeSpeech({
+        input: { text: say },
+        voice: { name: vc.name, languageCode: vc.languageCode },
+        audioConfig: { audioEncoding: "LINEAR16", sampleRateHertz: 8000, speakingRate: 1.0, effectsProfileId: ["telephony-class-application"] },
+      });
+      if (!_ttsRescueActive || ws.readyState !== ws.OPEN) return;  // cancelled during synth
+      const pcm = replayDriver.wavToPcm8kMono(resp.audioContent); // handles Google's rate quirk
+      const frames = replayDriver.pcm16ToMulawFrames(pcm);        // base64 µ-law, 20ms each
+      console.log(`[${callSessionId}] [HYBRID] TTS rescue: voicing silent turn — ${frames.length} frames ("${say.slice(0, 40)}…")`);
+      for (const frame of frames) {
+        if (!_ttsRescueActive || ws.readyState !== ws.OPEN || callEnding) break;
+        ws.send(JSON.stringify({ event: "media", streamSid, media: { payload: frame } }));
+        lastBotAudioAt = Date.now();
+        lastUserActivityAt = Date.now();
+        try { recorder.pushOutbound(frame); } catch (_) {}
+        await new Promise((r) => setTimeout(r, 20));
+      }
+    } catch (e) {
+      console.error(`[${callSessionId}] [HYBRID] TTS rescue failed: ${e.message}`);
+    } finally {
+      _ttsRescueActive = false;
+    }
+  };
+
   // ── DTMF (keypad) capture ────────────────────────────────────────────────
   // Twilio (and Voximplant via the scenario) deliver caller key presses as a
   // "dtmf" media-stream event. Buffer the digits and feed them to Gemini as one
@@ -3481,9 +3522,14 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     console.log(`[${callSessionId}] [GL] Barge-in — user started speaking`);
   });
 
-  bridge.on("response_done", () => {
+  bridge.on("response_done", (info = {}) => {
     costs.outputTokens += 100; // approximate; Gemini doesn't give exact token counts per-turn
     _toolResultCache.clear(); // reset per-turn dedup cache (new turn = fresh tool calls)
+    // Capture BEFORE onModelIdle (which may flush a queued caller turn) so the
+    // silent-turn rescue below sees this turn's true state.
+    const spokenText = _accumAsst.trim();
+    const hadQueuedCaller = !!pendingUserText.trim();
+    const wasBarged = bargedThisTurn;
     // HYBRID: the model's turn truly ended (turnComplete). Release the busy
     // lock and flush any caller speech that was queued while it generated.
     // Sending the next turn now is safe — the model is idle, so no barge-in.
@@ -3494,6 +3540,15 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     // turn we just finished. Order matters so history reads naturally.
     if (_accumUser.trim()) flushTranscript("user");
     if (_accumAsst.trim()) flushTranscript("assistant");
+    // Silent-turn rescue: model produced TEXT but 0 audio, the turn wasn't
+    // barge-suppressed, and the caller didn't already speak over it → voice the
+    // text via TTS so the caller actually hears the answer. Fire-and-forget;
+    // a caller barge-in cancels it via _ttsRescueActive.
+    if (hybridSTT && info.audioBytes === 0 && !info.suppressed && !wasBarged
+        && !hadQueuedCaller && !callEnding && spokenText) {
+      console.warn(`[${callSessionId}] [HYBRID] silent turn detected (0 audio) — rescuing via TTS`);
+      speakTextToTwilio(spokenText);
+    }
     if (callEnding) {
       bridge.close();
     }
@@ -3774,6 +3829,7 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     const MAX_HYBRID_DG_RECONNECT = 3;
     const doBargeIn = (why) => {
       bargedThisTurn = true;
+      _ttsRescueActive = false;   // stop any in-flight silent-turn TTS rescue
       console.log(`[${callSessionId}] [HYBRID] barge-in (${why}) — cutting bot playback`);
       if (streamSid && ws.readyState === ws.OPEN) {
         try { ws.send(JSON.stringify({ event: "clear", streamSid })); } catch (_) {}

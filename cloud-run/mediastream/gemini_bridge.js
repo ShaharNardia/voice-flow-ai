@@ -815,6 +815,9 @@ class GeminiBridge extends EventEmitter {
 
     // Turn complete — reset per-turn meta tracking.
     if (sc.turnComplete) {
+      // Capture BEFORE the resets below so listeners can rescue a silent turn.
+      const _audioBytes = this._turnAudioBytes || 0;
+      const _wasSuppressed = this._dropTurnAudio;   // caller barged in → 0 audio is intentional
       this._currentlyResponding = false;
       this._suppressAudio = false;
       this._dropTurnAudio = false;  // barge-in cut ends with the turn
@@ -822,11 +825,11 @@ class GeminiBridge extends EventEmitter {
       this._turnText = "";
       this._emittedToolCallIds.clear();  // reset dedup set for next turn
       // Diagnostic: did this turn actually produce audio? A turnComplete with
-      // turnAudioBytes=0 means Gemini ended the turn WITHOUT speaking — the
-      // root signature of the hybrid "no response" symptom.
-      this._log(`turn complete (turnAudioBytes=${this._turnAudioBytes || 0})`);
+      // turnAudioBytes=0 (and NOT barge-suppressed) means Gemini ended the turn
+      // WITHOUT speaking — the root signature of the hybrid "no response" symptom.
+      this._log(`turn complete (turnAudioBytes=${_audioBytes})`);
       this._turnAudioBytes = 0;
-      this.emit("response_done");
+      this.emit("response_done", { audioBytes: _audioBytes, suppressed: _wasSuppressed });
     }
 
     // Input transcription (user speech)
