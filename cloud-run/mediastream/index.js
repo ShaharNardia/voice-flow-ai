@@ -3173,19 +3173,27 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     // still streaming — long tool-result answers exceed 15s, and releasing
     // the lock mid-speech re-opens the mid-turn-injection hole (observed in
     // call zIAapppwQPuiz6YFQHVM: 41s answer, watchdog fired at 15s).
+    // POLL fast (not a single 15s timeout). A barged-in / suppressed turn gets
+    // a generationComplete but NO turnComplete, so response_done never fires and
+    // this lock would otherwise wedge for the full timeout — delaying the
+    // caller's queued next turn by up to 15s (observed on call dFSu3AEat…: the
+    // "line 64" question waited 13s). The guards below make fast polling SAFE:
+    // we NEVER force-idle while a tool is in flight or while bot audio is still
+    // streaming (<2s since the last chunk) — real turns end via response_done
+    // first, so this only rescues genuinely-stuck turns, now in ~2.5s.
     const check = () => {
       if (_activeToolCalls > 0) {
-        busyWatchdog = setTimeout(check, 5000);  // tool call in flight — extend
+        busyWatchdog = setTimeout(check, 2500);  // tool call in flight — wait
         return;
       }
       if (Date.now() - lastBotAudioAt < 2000) {
-        busyWatchdog = setTimeout(check, 5000);  // audibly mid-turn — extend
+        busyWatchdog = setTimeout(check, 2500);  // audibly mid-turn — wait
         return;
       }
-      console.warn(`[${callSessionId}] [HYBRID] busy watchdog fired — forcing model idle`);
+      console.warn(`[${callSessionId}] [HYBRID] idle detector fired (no turnComplete) — releasing busy lock`);
       onModelIdle();
     };
-    busyWatchdog = setTimeout(check, 15000);
+    busyWatchdog = setTimeout(check, 2500);
   };
   const sendToModel = (txt) => {
     if (!txt || !txt.trim()) return;
