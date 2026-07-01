@@ -1646,7 +1646,15 @@ exports.assistantTestChat = onRequest({...corsOptions, secrets: [_OPENAI_API_KEY
       return;
     }
     const data = docSnap.data();
-    if (uid && data.ownerId && data.ownerId !== uid) {
+    // super_admin (platform operator) may test any tenant's assistant. Without
+    // this bypass, testing a tenant-owned assistant 403s (same bug fixed for
+    // assistantVoiceReplay).
+    let callerIsSuperAdmin = false;
+    if (uid) {
+      const userDoc = await getUserDoc(db, uid);
+      callerIsSuperAdmin = userDoc.exists && userDoc.data().role === "super_admin";
+    }
+    if (uid && data.ownerId && data.ownerId !== uid && !callerIsSuperAdmin) {
       res.status(403).json({ status: "error", message: "Forbidden." });
       return;
     }
