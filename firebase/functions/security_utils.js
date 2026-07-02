@@ -22,8 +22,12 @@ function stripHtml(value) {
   return value
     // Remove <script> blocks entirely
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, "")
-    // Remove event-handler attributes (onclick, onerror, onload …)
-    .replace(/\s*on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    // Remove event-handler attributes (onclick, onerror, onload …). Require a
+    // whitespace boundary BEFORE "on" — real HTML attributes always have one —
+    // so this can't false-match "on<word>=" INSIDE a data value and truncate it
+    // (e.g. a URL param "...&phoneBotUse=true" contains "…ph‹oneBotUse=›…" which
+    // the old `\s*on\w+=` matched, silently cutting the saved URL at "&ph").
+    .replace(/(?<=\s)on\w+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, "")
     // Remove <style> blocks
     .replace(/<style\b[^<]*(?:(?!<\/style>)<[^<]*)*<\/style>/gi, "")
     // Remove remaining HTML tags
