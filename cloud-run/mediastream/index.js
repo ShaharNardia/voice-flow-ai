@@ -2735,7 +2735,7 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
  * so the bot repeated the same mistakes every call. Single-field query
  * (assistantId) — filter/sort/cap in code, no composite index.
  */
-async function fetchAssistantCorrections(db, assistantId, limit = 8) {
+async function fetchAssistantCorrections(db, assistantId, limit = 15) {
   if (!db || !assistantId) return "";
   try {
     const snap = await db.collection("call_turn_feedback")
@@ -2756,8 +2756,9 @@ async function fetchAssistantCorrections(db, assistantId, limit = 8) {
       if (out.length >= limit) break;
     }
     if (!out.length) return "";
-    return "\n\nCORRECTIONS FROM PREVIOUS CALLS — these are operator instructions you MUST obey; do NOT repeat these mistakes:\n" +
-      out.map((c) => `- ${c}`).join("\n");
+    return "\n\nABSOLUTE RULES FROM THE OPERATOR, based on real reviewed calls. These OVERRIDE every other instruction above, including any tendency to be helpful or to offer options. Breaking any of these is a critical failure. Follow them literally on EVERY turn:\n" +
+      out.map((c) => `- ${c}`).join("\n") +
+      "\nWhen you have no information to give: say so plainly in one short sentence and STOP. Do NOT offer to check other lines or topics, do NOT ask what else they want, do NOT volunteer anything the tool did not return.";
   } catch (_) { return ""; }
 }
 
@@ -3077,15 +3078,13 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     console.log(`[${callSessionId}] [GL] Registered ${_customApiTools.length} custom API tool(s): ${_customApiTools.map((t) => t.function.name).join(", ")}`);
   }
 
-  // Feed back operator thumbs-down CORRECTIONS so the bot stops repeating the
-  // same mistakes. Appended to the system prompt BEFORE the speech sanitize
-  // (it's tenant free-text). Non-blocking on failure.
+  // Feed back operator thumbs-down CORRECTIONS. Fetched here but appended LAST
+  // (after the tool note, below) so they're the final, highest-recency thing the
+  // model reads — a native-audio model follows the END of the prompt most. Non-
+  // blocking on failure.
+  let operatorCorrections = "";
   try {
-    const corrections = await fetchAssistantCorrections(db, assistantId);
-    if (corrections) {
-      instructions += corrections;
-      console.log(`[${callSessionId}] [GL] injected operator corrections from feedback (${corrections.split("\n- ").length - 1} item(s))`);
-    }
+    operatorCorrections = await fetchAssistantCorrections(db, assistantId);
   } catch (_) { /* non-fatal */ }
 
   // SAFETY NET sanitize: the native-audio model is literal and will SPEAK any
@@ -3129,6 +3128,15 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
 
   // (Full-instruction sanitize happens ABOVE, before the tools block — do NOT
   // re-sanitize here or tool names/descriptions get mangled again.)
+
+  // Operator corrections go DEAD LAST — highest recency + framed as absolute,
+  // overriding any "be helpful / offer options" nudge above (that's exactly what
+  // the operator is correcting). Sanitized here since it's tenant free-text
+  // appended after the main sanitize.
+  if (operatorCorrections) {
+    instructions += sanitizeForSpeech(operatorCorrections);
+    console.log(`[${callSessionId}] [GL] injected operator corrections from feedback (${operatorCorrections.split("\n- ").length - 1} item(s))`);
+  }
 
   const bridge = new GeminiBridge({
     apiKey: GEMINI_API_KEY,
