@@ -11,7 +11,27 @@ const {logger} = require("firebase-functions");
 const {getFirestore, FieldValue} = require("firebase-admin/firestore");
 const admin = require("firebase-admin");
 const axios = require("axios");
-const {extractUidFromRequest} = require("./security_utils");
+const {extractUidFromRequest, getUserDoc} = require("./security_utils");
+
+/**
+ * KB management (list/delete/clear) must be scoped by ASSISTANT ownership, NOT
+ * by the chunk's ownerId. Chunks can carry a stale ownerId (assistant imported/
+ * transferred, or created under another account), and the live call injects KB
+ * by assistantId ONLY — so if management filtered by chunk.ownerId it would show
+ * "empty"/"deleted 0" while the call kept injecting the chunks (orphaned KB that
+ * couldn't be deleted). Returns true if the caller owns the assistant or is
+ * super_admin.
+ */
+async function canManageAssistantKb(db, uid, assistantId) {
+  try {
+    const [aSnap, uSnap] = await Promise.all([
+      db.collection("assistants").doc(String(assistantId)).get(),
+      getUserDoc(db, uid),
+    ]);
+    if (uSnap.exists && uSnap.data().role === "super_admin") return true;
+    return aSnap.exists && aSnap.data().ownerId === uid;
+  } catch (_) { return false; }
+}
 
 const OPENAI_API_KEY = defineSecret("OPENAI_API_KEY");
 
@@ -257,13 +277,17 @@ exports.knowledgeListFiles = onRequest({...corsOptions, memory: "512MiB", secret
     if (!assistantId) { res.status(400).json({status: "error", message: "assistantId required"}); return; }
 
     const db = getFirestore();
+    if (!(await canManageAssistantKb(db, uid, assistantId))) {
+      res.status(403).json({status: "error", message: "Forbidden"}); return;
+    }
+    // Scope by assistantId only (NOT chunk.ownerId) so orphaned/stale-owner
+    // chunks are shown — matching what the live call actually injects.
     // Project to metadata only — never pull `content`/`embedding` (the 1536-float
     // array is ~14KB/doc and was OOM-ing this endpoint to a 500, which left the
     // whole Knowledge Sources list — and the coverage UI rendered inside it —
     // blank).
     const snap = await db.collection("knowledge_chunks")
       .where("assistantId", "==", assistantId)
-      .where("ownerId", "==", uid)
       .select("sourceFile", "sourceRoot", "storagePath", "sourceType", "syncedAt")
       .get();
 
@@ -397,19 +421,21 @@ exports.knowledgeDeleteFile = onRequest({...corsOptions, secrets: [OPENAI_API_KE
     }
 
     const db = getFirestore();
+    if (!(await canManageAssistantKb(db, uid, assistantId))) {
+      res.status(403).json({status: "error", message: "Forbidden"}); return;
+    }
     // The UI sends the group key back as `sourceFile`. For URL-crawled
     // entries that's the sourceRoot (site root); fetch chunks matching
-    // either the per-page sourceFile OR the sourceRoot.
+    // either the per-page sourceFile OR the sourceRoot. Scoped by assistantId
+    // only (NOT chunk.ownerId) so stale-owner chunks are still deletable.
     const [bySource, byRoot] = await Promise.all([
       db.collection("knowledge_chunks")
         .where("assistantId", "==", assistantId)
         .where("sourceFile", "==", sourceFile)
-        .where("ownerId", "==", uid)
         .get(),
       db.collection("knowledge_chunks")
         .where("assistantId", "==", assistantId)
         .where("sourceRoot", "==", sourceFile)
-        .where("ownerId", "==", uid)
         .get(),
     ]);
     const seen = new Set();
@@ -474,11 +500,16 @@ exports.knowledgeClearAll = onRequest({...corsOptions, memory: "512MiB", secrets
     if (!assistantId) { res.status(400).json({status: "error", message: "assistantId required"}); return; }
 
     const db = getFirestore();
+    if (!(await canManageAssistantKb(db, uid, assistantId))) {
+      res.status(403).json({status: "error", message: "Forbidden"}); return;
+    }
+    // Scope by assistantId ONLY (not chunk.ownerId) so a "cleared" KB really is
+    // gone — orphaned/stale-owner chunks were the bug where delete reported
+    // deleted:0 but the call kept injecting them.
     // Projection (storagePath only) — never pull the embedding field, or large
     // KBs OOM the function.
     const snap = await db.collection("knowledge_chunks")
       .where("assistantId", "==", assistantId)
-      .where("ownerId", "==", uid)
       .select("storagePath")
       .get();
 
