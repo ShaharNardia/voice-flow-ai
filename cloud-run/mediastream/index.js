@@ -3123,7 +3123,8 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
       "and you have a tool that can fetch it — CALL THAT TOOL FIRST. Never guess or make up numbers. " +
       "NEVER claim something is 'not found' or 'not in the system' without having CALLED the tool for that exact value in THIS turn. " +
       "When you state data (names, numbers, times, lines), it must come VERBATIM from the latest tool response — if the response lacks it, say you don't have that detail. Inventing data is the worst possible failure. " +
-      "If no tool can answer and you genuinely don't know, say so honestly and offer what you CAN help with.";
+      "If no tool can answer and you genuinely don't know, say so honestly and offer what you CAN help with. " +
+      "SPOKEN NUMBERS — say identifier numbers DIGIT BY DIGIT, never as one big number: station numbers, bus line numbers, phone numbers, order/reference codes. Example: station 21715 must be spoken 'שתיים, אחת, שבע, אחת, חמש' (two, one, seven, one, five), NOT 'עשרים ואחד אלף...'. Only real quantities/prices are said normally (50 שקל → 'חמישים שקל').";
   }
 
   // (Full-instruction sanitize happens ABOVE, before the tools block — do NOT
