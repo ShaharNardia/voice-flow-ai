@@ -1565,6 +1565,17 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
   const voiceCommerceConfig   = customTools.find((ct) => ct?.type === "voice_commerce") || {};
   const agentNetworkConfig    = customTools.find((ct) => ct?.type === "agent_network") || {};
 
+  // SMS/email are OPT-IN (the "Send Link via SMS" tool). If the assistant didn't
+  // enable it, drop them — otherwise the model is told it can text/email the
+  // caller a capability it doesn't have, offers it, then fails + hallucinates a
+  // fallback. (Same gate applied to the Gemini path's send_sms.)
+  if (!hasSendLinkTool) {
+    for (let i = REALTIME_TOOLS.length - 1; i >= 0; i--) {
+      const n = REALTIME_TOOLS[i].function?.name;
+      if (n === "send_sms" || n === "send_email") REALTIME_TOOLS.splice(i, 1);
+    }
+  }
+
   if (hasKbSearchTool) {
     REALTIME_TOOLS.push({
       type: "function",
@@ -2928,6 +2939,12 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   // enabled OR if there are knowledge_chunks for this assistant.
   const customToolsConfig = Array.isArray(assistant.customTools) ? assistant.customTools : [];
   const hasKbSearch = customToolsConfig.some((t) => t?.type === "knowledge_search") || !!kbText;
+  // SMS is an OPT-IN capability (the "Send Link via SMS" tool). Only expose
+  // send_sms when the assistant actually enabled it — otherwise the model was
+  // told it can text the caller, offered to, and (with no valid SMS sender)
+  // failed then hallucinated an alternative ("I'll email you"). Matches the RT
+  // path's `hasSendLinkTool` gate.
+  const hasSendLink = customToolsConfig.some((t) => t?.type === "send_link");
 
   // Each assistant can define HTTP API tools (e.g. "lookup_flight", "check_inventory")
   // with a URL + parameter schema. We register those with Gemini and execute them
@@ -2968,14 +2985,14 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
         parameters: { type: "object", properties: {}, required: [] },
       },
     },
-    {
+    ...(hasSendLink ? [{
       type: "function",
       function: {
         name: "send_sms",
         description: "Send an SMS text message to the caller's phone number.",
         parameters: { type: "object", properties: { message: { type: "string", description: "The SMS text body" } }, required: ["message"] },
       },
-    },
+    }] : []),
     {
       type: "function",
       function: {
@@ -3045,7 +3062,9 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
     const builtinLines = [
       "  • search_knowledge_base(query) — when caller asks a fact that should be in the KB.",
       "  • save_lead(name, phone, email, interest, notes, status) — when caller shows interest or shares contact details.",
-      "  • send_sms(message) — to text the caller a link, code, summary, or confirmation.",
+      // send_sms only advertised when the assistant enabled the SMS tool — otherwise
+      // the model offers to text the caller a capability it doesn't actually have.
+      ...(hasSendLink ? ["  • send_sms(message) — to text the caller a link, code, summary, or confirmation."] : []),
       "  • tag_call(tags) — categorize this call for the admin (e.g. 'pricing-question', 'support-issue').",
       "  • transfer_call(to, reason) — when the caller asks for a human or you cannot help.",
       "  • end_call() — only after the caller has said goodbye AND you have nothing left to help with.",
