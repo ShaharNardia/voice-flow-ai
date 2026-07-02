@@ -2728,6 +2728,39 @@ async function handleRealtimeSession(ws, {callSessionId, data, assistant, assist
 // ── GEMINI LIVE SESSION ────────────────────────────────────────────────────
 // Bridges Twilio Media Stream ↔ Google Gemini Live API.
 // Same high-level structure as handleRealtimeSession but uses GeminiBridge.
+/**
+ * Load the assistant's recent thumbs-down CORRECTIONS (call_turn_feedback) and
+ * turn them into a prompt block, so operator feedback actually changes future
+ * calls. Without this, corrections were stored but never fed back to the model,
+ * so the bot repeated the same mistakes every call. Single-field query
+ * (assistantId) — filter/sort/cap in code, no composite index.
+ */
+async function fetchAssistantCorrections(db, assistantId, limit = 8) {
+  if (!db || !assistantId) return "";
+  try {
+    const snap = await db.collection("call_turn_feedback")
+      .where("assistantId", "==", assistantId).limit(250).get();
+    if (snap.empty) return "";
+    const millis = (t) => (t && typeof t.toMillis === "function") ? t.toMillis() : (t && t._seconds ? t._seconds * 1000 : 0);
+    const corrections = snap.docs.map((d) => d.data())
+      .filter((f) => f && f.correction && String(f.correction).trim() && f.rating !== "good")
+      .sort((a, b) => millis(b.updatedAt) - millis(a.updatedAt));
+    const seen = new Set();
+    const out = [];
+    for (const f of corrections) {
+      const c = String(f.correction).trim();
+      const k = c.toLowerCase();
+      if (seen.has(k)) continue;
+      seen.add(k);
+      out.push(c);
+      if (out.length >= limit) break;
+    }
+    if (!out.length) return "";
+    return "\n\nCORRECTIONS FROM PREVIOUS CALLS — these are operator instructions you MUST obey; do NOT repeat these mistakes:\n" +
+      out.map((c) => `- ${c}`).join("\n");
+  } catch (_) { return ""; }
+}
+
 async function handleGeminiSession(ws, {callSessionId, data, assistant, assistantId, db, sessionRef, messageBuffer = [], markSetupComplete = null, hybridSTT = false}) {
   const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
   if (!GEMINI_API_KEY) {
@@ -3043,6 +3076,17 @@ async function handleGeminiSession(ws, {callSessionId, data, assistant, assistan
   if (_customApiTools.length > 0) {
     console.log(`[${callSessionId}] [GL] Registered ${_customApiTools.length} custom API tool(s): ${_customApiTools.map((t) => t.function.name).join(", ")}`);
   }
+
+  // Feed back operator thumbs-down CORRECTIONS so the bot stops repeating the
+  // same mistakes. Appended to the system prompt BEFORE the speech sanitize
+  // (it's tenant free-text). Non-blocking on failure.
+  try {
+    const corrections = await fetchAssistantCorrections(db, assistantId);
+    if (corrections) {
+      instructions += corrections;
+      console.log(`[${callSessionId}] [GL] injected operator corrections from feedback (${corrections.split("\n- ").length - 1} item(s))`);
+    }
+  } catch (_) { /* non-fatal */ }
 
   // SAFETY NET sanitize: the native-audio model is literal and will SPEAK any
   // stray formatting/special chars (<, >, #, *, _) that survive into the

@@ -177,7 +177,7 @@ exports.saveTurnFeedback = onRequest(
     if (req.method === "OPTIONS") { res.status(204).send(""); return; }
     if (req.method !== "POST") { res.status(405).json({error: "POST required"}); return; }
     try {
-      const {callId, turnIndex, rating, correction, callSessionId} = req.body || {};
+      const {callId, turnIndex, rating, correction, callSessionId, assistantId} = req.body || {};
       if (!callId || turnIndex === undefined) {
         res.status(400).json({error: "callId + turnIndex required"}); return;
       }
@@ -185,9 +185,20 @@ exports.saveTurnFeedback = onRequest(
       // correction: free-text "what the bot should have said"
       const db = getFirestore();
       const docId = `${callId}_t${turnIndex}`;
+      // assistantId lets the live call fetch this assistant's recent corrections
+      // and inject them into the prompt (so feedback actually changes behavior).
+      // Backfill it from the call_session if the client didn't send it.
+      let astId = assistantId || null;
+      if (!astId) {
+        try {
+          const cs = await db.collection("call_sessions").doc(String(callId)).get();
+          if (cs.exists) astId = cs.data().assistantId || null;
+        } catch (_) { /* best-effort */ }
+      }
       await db.collection("call_turn_feedback").doc(docId).set({
         callId,
         callSessionId: callSessionId || callId,
+        assistantId: astId,
         turnIndex: Number(turnIndex),
         rating: rating || null,
         correction: correction || null,

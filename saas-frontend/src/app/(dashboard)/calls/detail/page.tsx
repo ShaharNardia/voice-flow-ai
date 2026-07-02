@@ -984,7 +984,7 @@ function CallDetail() {
                     </details>
                     {/* Rate the tool/API call itself — feeds the same coach loop */}
                     {isAdmin && call.id && (
-                      <TurnFeedback callId={call.id} turnIndex={i} context="tool" />
+                      <TurnFeedback callId={call.id} turnIndex={i} assistantId={call.assistantId} context="tool" />
                     )}
                   </div>
                 );
@@ -1029,6 +1029,7 @@ function CallDetail() {
                   <TurnFeedback
                     callId={call.id}
                     turnIndex={i}
+                    assistantId={call.assistantId}
                   />
                 )}
               </div>
@@ -1260,9 +1261,10 @@ export default function CallDetailPage() {
 // ── Per-turn feedback widget (shown below every assistant bubble) ─────────────
 const FN_BASE = "https://us-central1-voiceflow-ai-202509231639.cloudfunctions.net";
 
-function TurnFeedback({ callId, turnIndex, initialRating, initialCorrection, context = "turn" }: {
+function TurnFeedback({ callId, turnIndex, assistantId, initialRating, initialCorrection, context = "turn" }: {
   callId: string;
   turnIndex: number;
+  assistantId?: string;
   initialRating?: "good" | "bad" | null;
   initialCorrection?: string | null;
   context?: "turn" | "tool";
@@ -1283,6 +1285,7 @@ function TurnFeedback({ callId, turnIndex, initialRating, initialCorrection, con
         body: JSON.stringify({
           callId,
           turnIndex,
+          assistantId,
           rating: newRating,
           correction: newCorrection !== undefined ? newCorrection : correction,
         }),
